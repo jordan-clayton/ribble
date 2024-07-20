@@ -1,0 +1,21 @@
+[package]
+name = "whisper_GUI"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bson = "2.11.0"
+directories = "5.0.1"
+egui = "0.28.1"
+serde = { version = "1.0.204", features = ["derive"] }
+
+# Bring these in once the submodule is added
+#[target.aarch64-apple-darwin]
+#rustflags = "-lc++ -l framework=Accelerate"
+#
+#
+#[features]
+#default = []
+#cuda = ["whisper-rs/cuda"]
+#coreml = ["whisper-rs/coreml"]
+#opencl = ["whisper-rs/opencl"]
