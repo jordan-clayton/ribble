@@ -1,21 +1,23 @@
 [package]
-name = "whisper_GUI"
+name = "whisper_gui"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 bson = "2.11.0"
 directories = "5.0.1"
-egui = "0.28.1"
+eframe = { version = "0.28.1", features = ["persistence"]}
+egui = { version = "0.28.1", features = ["persistence"] }
+egui_dock = "0.13.0"
+egui_file = "0.18.0"
 serde = { version = "1.0.204", features = ["derive"] }
+whisper_realtime = { git = "https://github.com/jordan-clayton/whisper-realtime.git", version = "0.1.0", features = ["serde"]}
 
-# Bring these in once the submodule is added
-#[target.aarch64-apple-darwin]
-#rustflags = "-lc++ -l framework=Accelerate"
-#
-#
-#[features]
-#default = []
-#cuda = ["whisper-rs/cuda"]
-#coreml = ["whisper-rs/coreml"]
-#opencl = ["whisper-rs/opencl"]
+[features]
+default = []
+cuda = ["whisper_realtime/cuda"]
+coreml = ["whisper_realtime/coreml"]
+metal = ["whisper_realtime/metal"]
+openblas = ["whisper_realtime/openblas"]
+opencl = ["whisper_realtime/opencl"]
+hipblas = ["whisper_realtime/hipblas"]
