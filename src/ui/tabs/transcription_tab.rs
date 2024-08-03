@@ -15,7 +15,7 @@ pub struct TranscriptionTab {
 // TODO: function to clear the buffer.
 // TODO: function to save the buffer to file.
 impl TranscriptionTab {
-    fn new(channel: mpsc::Receiver<String> ) -> Self{
+    pub fn new(channel: mpsc::Receiver<String> ) -> Self{
         Self{title: String::from("Transcription"), text_buffer: vec![], data_channel: channel}
     }
 

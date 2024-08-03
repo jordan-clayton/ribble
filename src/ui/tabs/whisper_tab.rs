@@ -2,21 +2,29 @@
 
 use egui::{Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
-use super::{tab_view::TabView,realtime_configs_tab};
+use super::{tab_view::TabView, realtime_configs_tab, transcription_tab, static_configs_tab};
 
 
 // This is a concession made to keep the implementation as decoupled as possible.
 // Generics are not possible due to the sized type bound required for egui_dock::TabViewer
 // Each member of WhisperTab must implement TabView, a port of the egui_dock::TabViewer interface
 pub enum WhisperTab{
-    RealtimeConfigs(realtime_configs_tab::RealtimeTab)
+    RealtimeConfigs(realtime_configs_tab::RealtimeTab),
+    StaticConfigs(static_configs_tab::StaticTab),
+    // TranscriptionConfigs
+    Transcription(transcription_tab::TranscriptionTab)
+    // Recording
+    // Progress
+    // Errors
 }
 
 impl WhisperTab {
     // TODO: remove if unused
     fn as_tab_view(&mut self) -> &mut dyn TabView{
        match self{
-           WhisperTab::RealtimeConfigs(rt) => rt
+           WhisperTab::RealtimeConfigs(rt) => rt,
+           WhisperTab::StaticConfigs(st) => st
+           WhisperTab::Transcription(tt) => tt,
        }
     }
 }
