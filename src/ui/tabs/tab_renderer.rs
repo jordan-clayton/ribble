@@ -1,11 +1,16 @@
 use egui::{Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
+
+use crate::whisper_app_context::WhisperActor;
+
 use super::{tab_view::TabView, whisper_tab::WhisperTab};
 
-pub struct WhisperTabViewer{}
+pub struct WhisperTabViewer {
+    app_ctx: WhisperActor,
+}
 
 
-impl egui_dock::TabViewer for WhisperTabViewer{
+impl egui_dock::TabViewer for WhisperTabViewer {
     type Tab = WhisperTab;
 
     fn title(&mut self, tab: &mut Self::Tab) -> WidgetText {
@@ -24,8 +29,7 @@ impl egui_dock::TabViewer for WhisperTabViewer{
         tab.closeable()
     }
 
-    fn allowed_in_windows(&self, tab: &mut Self::Tab) -> bool{
+    fn allowed_in_windows(&self, tab: &mut Self::Tab) -> bool {
         tab.allowed_in_windows()
     }
-
 }

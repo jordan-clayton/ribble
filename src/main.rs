@@ -1,13 +1,15 @@
 use directories::ProjectDirs;
 use eframe;
 use egui::ViewportBuilder;
+
 use crate::ui::app::WhisperApp;
 use crate::utils::constants;
 
 mod ui;
 mod utils;
+mod whisper_app_context;
 
-fn main() -> eframe::Result<()>{
+fn main() -> eframe::Result<()> {
     let proj_dirs = ProjectDirs::from(constants::QUALIFIER, constants::ORGANIZATION, constants::APP_ID).expect("Failed to get proj dir");
     let data_dir = proj_dirs.data_dir();
     let mut native_options = eframe::NativeOptions::default();
@@ -19,11 +21,14 @@ fn main() -> eframe::Result<()>{
     native_options.viewport = viewport;
 
 
-    eframe::run_native(constants::APP_ID, native_options, Box::new(|cc|Ok(Box::<WhisperApp>::default())))
+    eframe::run_native(constants::APP_ID, native_options, Box::new(|cc| {
+        Ok(Box::new(WhisperApp::new(cc)))
+    }
+    ))
 }
 
 // TODO: MacOS might require different configs to look more "Apple-y".
-fn build_viewport() -> ViewportBuilder{
+fn build_viewport() -> ViewportBuilder {
     let mut viewport = ViewportBuilder::default();
     viewport.app_id = Some(String::from(constants::APP_ID));
     // TODO: change if using a different title.

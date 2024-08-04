@@ -2,30 +2,46 @@
 
 use egui::{Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
-use super::{tab_view::TabView, realtime_configs_tab, transcription_tab, static_configs_tab};
 
+use super::{
+    config_tabs::{
+        realtime_configs_tab,
+        recording_configs_tab,
+        static_configs_tab,
+    }, display_tabs::{
+        error_console_display_tab,
+        progress_display_tab,
+        recording_display_tab,
+        transcription_display_tab,
+    }
+    , tab_view::TabView, };
 
 // This is a concession made to keep the implementation as decoupled as possible.
 // Generics are not possible due to the sized type bound required for egui_dock::TabViewer
 // Each member of WhisperTab must implement TabView, a port of the egui_dock::TabViewer interface
-pub enum WhisperTab{
-    RealtimeConfigs(realtime_configs_tab::RealtimeTab),
-    StaticConfigs(static_configs_tab::StaticTab),
-    // TranscriptionConfigs
-    Transcription(transcription_tab::TranscriptionTab)
-    // Recording
-    // Progress
-    // Errors
+#[derive(serde::Serialize, serde::Deserialize)]
+pub enum WhisperTab {
+    RealtimeConfigs(realtime_configs_tab::RealtimeConfigsTab),
+    StaticConfigs(static_configs_tab::StaticConfigsTab),
+    RecordingConfigs(recording_configs_tab::RecordingConfigsTab),
+    TranscriptionDisplay(transcription_display_tab::TranscriptionTab),
+    RecordingDisplay(recording_display_tab::RecordingDisplayTab),
+    ProgressDisplay(progress_display_tab::ProgressDisplayTab),
+    ErrorDisplay(error_console_display_tab::ErrorConsoleDisplayTab),
 }
 
 impl WhisperTab {
     // TODO: remove if unused
-    fn as_tab_view(&mut self) -> &mut dyn TabView{
-       match self{
-           WhisperTab::RealtimeConfigs(rt) => rt,
-           WhisperTab::StaticConfigs(st) => st
-           WhisperTab::Transcription(tt) => tt,
-       }
+    fn as_tab_view(&mut self) -> &mut dyn TabView {
+        match self {
+            WhisperTab::RealtimeConfigs(rc) => rc,
+            WhisperTab::StaticConfigs(sc) => sc,
+            WhisperTab::RecordingConfigs(rec) => rec,
+            WhisperTab::TranscriptionDisplay(td) => td,
+            WhisperTab::RecordingDisplay(rd) => rd,
+            WhisperTab::ProgressDisplay(pd) => pd,
+            WhisperTab::ErrorDisplay(ed) => ed,
+        }
     }
 }
 
@@ -54,23 +70,23 @@ impl TabView for WhisperTab {
 
 // IMPL functions:
 // To enforce that all members of the struct implement tabview
-fn title(tab: &mut impl TabView) -> WidgetText{
+fn title(tab: &mut impl TabView) -> WidgetText {
     tab.title()
 }
 
-fn draw_ui(tab: &mut impl TabView, ui: &mut Ui){
-   tab.ui(ui)
+fn draw_ui(tab: &mut impl TabView, ui: &mut Ui) {
+    tab.ui(ui)
 }
 
-fn context_menu(tab: &mut impl TabView, ui: &mut Ui, surface: SurfaceIndex, node: NodeIndex){
+fn context_menu(tab: &mut impl TabView, ui: &mut Ui, surface: SurfaceIndex, node: NodeIndex) {
     tab.context_menu(ui, surface, node)
 }
 
-fn closeable(tab: &mut impl TabView) -> bool{
-   tab.closeable()
+fn closeable(tab: &mut impl TabView) -> bool {
+    tab.closeable()
 }
 
-fn allowed_in_windows(tab: &mut impl TabView) -> bool{
+fn allowed_in_windows(tab: &mut impl TabView) -> bool {
     tab.allowed_in_windows()
 }
 

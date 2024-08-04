@@ -1,42 +1,37 @@
 use egui::{Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
-use std::sync::Arc;
 use whisper_realtime::configs::Configs;
 
-use super::tab_view;
+use super::super::tab_view;
 
-#[derive(Clone)]
-pub struct StaticTab {
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct RealtimeConfigsTab {
     title: String,
-    configs: Arc<Configs>,
-    // Shared datacache (state flags and wot).
+    realtime_configs: Configs,
 }
 
-// TODO: Bindings for whisper_realtime static transcription.
-impl StaticTab {
-    fn new(configs: Arc<Configs>) -> Self{
-        Self{title: String::from("Static Configs"), configs}
+// TODO
+impl RealtimeConfigsTab {
+    fn new(configs: Configs) -> Self {
+        Self { title: String::from("Realtime Configs"), realtime_configs: configs }
     }
-
-
 }
 
-impl Default for StaticTab {
-    fn default() -> Self{
-        let configs= Arc::new(Configs::default());
+impl Default for RealtimeConfigsTab {
+    fn default() -> Self {
+        let configs = Configs::default();
         Self::new(configs)
     }
 }
 
 
-impl tab_view::TabView for StaticTab {
-
+impl tab_view::TabView for RealtimeConfigsTab {
     fn title(&mut self) -> WidgetText {
         WidgetText::from(&self.title)
     }
 
     // Main UI design.
-    fn ui(&mut self, _ui: &mut Ui ) {
+    fn ui(&mut self, _ui: &mut Ui) {
         todo!()
     }
 
@@ -52,6 +47,4 @@ impl tab_view::TabView for StaticTab {
     fn allowed_in_windows(&mut self) -> bool {
         true
     }
-
-
 }
