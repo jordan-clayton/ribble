@@ -13,7 +13,9 @@ egui_dock = { version = "0.13.0", features = ["serde"] }
 egui_file = "0.18.0"
 sdl2 = "0.37.0"
 serde = { version = "1.0.204", features = ["derive"] }
-whisper_realtime = { git = "https://github.com/jordan-clayton/whisper-realtime.git", version = "0.1.0", features = ["serde"] }
+whisper_realtime = { git = "https://github.com/jordan-clayton/whisper-realtime.git", version = "0.1.0", features = ["serde",
+    # "crossbeam",
+] }
 
 [features]
 default = []

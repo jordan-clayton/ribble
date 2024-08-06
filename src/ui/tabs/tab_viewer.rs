@@ -9,6 +9,14 @@ pub struct WhisperTabViewer {
     app_ctx: WhisperActor,
 }
 
+impl WhisperTabViewer {}
+
+impl Default for WhisperTabViewer {
+    fn default() -> Self {
+        Self { app_ctx: WhisperActor::default() }
+    }
+}
+
 
 impl egui_dock::TabViewer for WhisperTabViewer {
     type Tab = WhisperTab;

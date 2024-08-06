@@ -3,7 +3,6 @@ use egui_dock::{DockArea, DockState, NodeIndex, Style};
 
 use crate::ui::tabs::config_tabs::recording_configs_tab;
 use crate::ui::tabs::display_tabs::{error_console_display_tab, recording_display_tab};
-use crate::ui::tabs::tab_renderer::WhisperTabViewer;
 
 use super::tabs::{
     config_tabs::{
@@ -17,7 +16,7 @@ use super::tabs::{
         transcription_display_tab
         ,
     },
-    tab_renderer, whisper_tab};
+    tab_viewer, whisper_tab};
 
 // TODO: shared data cache containing:
 // Atomic state variables,
@@ -32,7 +31,7 @@ use super::tabs::{
 pub struct WhisperApp
 {
     tree: DockState<whisper_tab::WhisperTab>,
-    tab_viewer: WhisperTabViewer,
+    tab_viewer: tab_viewer::WhisperTabViewer,
 
 }
 
@@ -103,10 +102,10 @@ impl Default for WhisperApp
             ],
         );
 
-        // Could also add windows?
+        let tab_viewer = tab_viewer::WhisperTabViewer::default();
 
 
-        Self { tree }
+        Self { tree, tab_viewer }
     }
 }
 
@@ -120,7 +119,8 @@ impl WhisperApp {
                 match stored_tree {
                     None => Self::default(),
                     Some(tree) => {
-                        Self { tree }
+                        let tab_viewer = tab_viewer::WhisperTabViewer::default();
+                        Self { tree, tab_viewer }
                     }
                 }
             }
@@ -138,7 +138,7 @@ impl eframe::App for WhisperApp {
 
         DockArea::new(&mut self.tree)
             .style(Style::from_egui(ctx.style().as_ref()))
-            .show(ctx, &mut tab_renderer::WhisperTabViewer {});
+            .show(ctx, &mut self.tab_viewer);
     }
 
 
