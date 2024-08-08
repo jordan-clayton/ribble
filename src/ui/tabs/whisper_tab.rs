@@ -19,6 +19,7 @@ use super::{
 // This is a concession made to keep the implementation as decoupled as possible.
 // Generics are not possible due to the sized type bound required for egui_dock::TabViewer
 // Each member of WhisperTab must implement TabView, a port of the egui_dock::TabViewer interface
+// TODO: IMPLEMENT TABS & IMPLEMENT SERIALIZATION (DEFAULT VALUES)
 #[derive(serde::Serialize, serde::Deserialize)]
 pub enum WhisperTab {
     RealtimeConfigs(realtime_configs_tab::RealtimeConfigsTab),

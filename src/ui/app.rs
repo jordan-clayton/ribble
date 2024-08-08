@@ -3,6 +3,8 @@ use egui_dock::{DockArea, DockState, NodeIndex, Style};
 
 use crate::ui::tabs::config_tabs::recording_configs_tab;
 use crate::ui::tabs::display_tabs::{error_console_display_tab, recording_display_tab};
+use crate::utils::sdl_audio_wrapper::SdlAudioWrapper;
+use crate::whisper_app_context::WhisperAppController;
 
 use super::tabs::{
     config_tabs::{
@@ -32,6 +34,7 @@ pub struct WhisperApp
 {
     tree: DockState<whisper_tab::WhisperTab>,
     tab_viewer: tab_viewer::WhisperTabViewer,
+    controller: WhisperAppController,
 
 }
 
@@ -57,21 +60,32 @@ pub struct WhisperApp
 // Error console for detailed error messaging.
 
 // ** Also, add toasts -> on click should focus the error tab.
-impl Default for WhisperApp
-{
-    fn default() -> Self {
+impl WhisperApp {
+    pub fn new(cc: &eframe::CreationContext<'_>, audio_wrapper: std::sync::Arc<SdlAudioWrapper>) -> Self {
+        let storage = cc.storage;
+        match storage {
+            None => Self::default_layout(audio_wrapper),
+            Some(s) => {
+                let stored_tree = eframe::get_value(s, eframe::APP_KEY);
+                match stored_tree {
+                    None => Self::default_layout(audio_wrapper),
+                    Some(tree) => {
+                        let controller = WhisperAppController::new(audio_wrapper);
+                        let tab_viewer = tab_viewer::WhisperTabViewer::new(controller.clone());
+                        Self { tree, tab_viewer, controller }
+                    }
+                }
+            }
+        }
+    }
 
-        // Initialize ctx
+    fn default_layout(audio_wrapper: std::sync::Arc<SdlAudioWrapper>) -> Self {
+        let controller = WhisperAppController::new(audio_wrapper);
 
-        // Pass to tab viewer struct.
+        let tab_viewer = tab_viewer::WhisperTabViewer::new(controller.clone());
 
-        // Call tab viewer struct
-
-
-        // TODO: Implement this properly -> should construct the main shared data struct & handle serialization.
-        let (_, recv) = std::sync::mpsc::channel();
-
-        let td = whisper_tab::WhisperTab::TranscriptionDisplay(transcription_display_tab::TranscriptionTab::new(recv));
+        // TODO: cleanup where necessary
+        let td = whisper_tab::WhisperTab::TranscriptionDisplay(transcription_display_tab::TranscriptionTab::new());
         let rd = whisper_tab::WhisperTab::RecordingDisplay(recording_display_tab::RecordingDisplayTab::new());
         let pd = whisper_tab::WhisperTab::ProgressDisplay(progress_display_tab::ProgressDisplayTab::new());
         let ed = whisper_tab::WhisperTab::ErrorDisplay(error_console_display_tab::ErrorConsoleDisplayTab::new());
@@ -102,39 +116,17 @@ impl Default for WhisperApp
             ],
         );
 
-        let tab_viewer = tab_viewer::WhisperTabViewer::default();
-
-
-        Self { tree, tab_viewer }
-    }
-}
-
-impl WhisperApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let storage = cc.storage;
-        match storage {
-            None => Self::default(),
-            Some(s) => {
-                let stored_tree = eframe::get_value(s, eframe::APP_KEY);
-                match stored_tree {
-                    None => Self::default(),
-                    Some(tree) => {
-                        let tab_viewer = tab_viewer::WhisperTabViewer::default();
-                        Self { tree, tab_viewer }
-                    }
-                }
-            }
-        }
+        Self { tree, tab_viewer, controller }
     }
 }
 
 impl eframe::App for WhisperApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
 
-        // TODO: Once State Struct
-        // if self.struct.load_atomic_running_boolean{
-        //      ctx.request_repaint()
-        // }
+        // Repaint continuously when running a worker.
+        if self.controller.is_working() {
+            ctx.request_repaint();
+        }
 
         DockArea::new(&mut self.tree)
             .style(Style::from_egui(ctx.style().as_ref()))
@@ -142,10 +134,10 @@ impl eframe::App for WhisperApp {
     }
 
 
-    // TODO: Implement save.
     fn save(&mut self, storage: &mut dyn Storage) {
-        eframe::set_value(storage, eframe::APP_KEY, &self.tree)
+        eframe::set_value(storage, eframe::APP_KEY, &self.tree);
     }
 
+    // TODO: set to false when testing default layout.
     fn persist_egui_memory(&self) -> bool { true }
 }

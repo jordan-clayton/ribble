@@ -1,22 +1,19 @@
 use egui::{Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
-use crate::whisper_app_context::WhisperActor;
+use crate::whisper_app_context::WhisperAppController;
 
 use super::{tab_view::TabView, whisper_tab::WhisperTab};
 
 pub struct WhisperTabViewer {
-    app_ctx: WhisperActor,
+    controller: WhisperAppController,
 }
 
-impl WhisperTabViewer {}
-
-impl Default for WhisperTabViewer {
-    fn default() -> Self {
-        Self { app_ctx: WhisperActor::default() }
+impl WhisperTabViewer {
+    pub fn new(controller: WhisperAppController) -> Self {
+        Self { controller }
     }
 }
-
 
 impl egui_dock::TabViewer for WhisperTabViewer {
     type Tab = WhisperTab;

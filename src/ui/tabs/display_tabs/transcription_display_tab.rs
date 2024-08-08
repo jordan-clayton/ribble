@@ -1,5 +1,3 @@
-use std::sync::mpsc;
-
 use egui::{Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
@@ -8,7 +6,6 @@ use super::super::tab_view;
 pub struct TranscriptionTab {
     title: String,
     text_buffer: Vec<String>,
-    data_channel: mpsc::Receiver<String>,
     // Shared datacache.
 }
 
@@ -16,8 +13,8 @@ pub struct TranscriptionTab {
 // TODO: function to clear the buffer.
 // TODO: function to save the buffer to file.
 impl TranscriptionTab {
-    pub fn new(channel: mpsc::Receiver<String>) -> Self {
-        Self { title: String::from("Transcription"), text_buffer: vec![], data_channel: channel }
+    pub fn new() -> Self {
+        Self { title: String::from("Transcription"), text_buffer: vec![] }
     }
 }
 

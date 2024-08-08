@@ -4,6 +4,7 @@ use egui::ViewportBuilder;
 
 use crate::ui::app::WhisperApp;
 use crate::utils::constants;
+use crate::utils::sdl_audio_wrapper::SdlAudioWrapper;
 
 mod ui;
 mod utils;
@@ -20,9 +21,16 @@ fn main() -> eframe::Result<()> {
     native_options.persistence_path = Some(data_dir.to_path_buf());
     native_options.viewport = viewport;
 
+    // SDL.
+    let sdl = sdl2::init().expect("Failed to initialize SDL");
+    let audio_subsystem = sdl.audio().expect("Failed to initialize audio");
+
+    let audio_wrapper = SdlAudioWrapper { audio_subsystem };
+    let audio_wrapper = std::sync::Arc::new(audio_wrapper);
+
 
     eframe::run_native(constants::APP_ID, native_options, Box::new(|cc| {
-        Ok(Box::new(WhisperApp::new(cc)))
+        Ok(Box::new(WhisperApp::new(cc, audio_wrapper)))
     }
     ))
 }
