@@ -1,9 +1,17 @@
-// TODO: This can likely be removed.
-
-// #[derive(Serialize, Deserialize, Debug)]
-// pub struct GUIPreferences {}
-// impl Default for GUIPreferences {
-//     fn default() -> Self {
-//         GUIPreferences {}
-//     }
-// }
+pub fn get_app_theme(system_theme: Option<eframe::Theme>) -> catppuccin_egui::Theme {
+    match system_theme {
+        None => {
+            catppuccin_egui::MOCHA
+        }
+        Some(t) => {
+            match t {
+                eframe::Theme::Dark => {
+                    catppuccin_egui::MOCHA
+                }
+                eframe::Theme::Light => {
+                    catppuccin_egui::LATTE
+                }
+            }
+        }
+    }
+}

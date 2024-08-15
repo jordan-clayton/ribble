@@ -3,6 +3,8 @@
 use egui::{Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
+use crate::whisper_app_context::WhisperAppController;
+
 use super::{
     config_tabs::{
         realtime_configs_tab,
@@ -19,7 +21,6 @@ use super::{
 // This is a concession made to keep the implementation as decoupled as possible.
 // Generics are not possible due to the sized type bound required for egui_dock::TabViewer
 // Each member of WhisperTab must implement TabView, a port of the egui_dock::TabViewer interface
-// TODO: IMPLEMENT TABS & IMPLEMENT SERIALIZATION (DEFAULT VALUES)
 #[derive(serde::Serialize, serde::Deserialize)]
 pub enum WhisperTab {
     RealtimeConfigs(realtime_configs_tab::RealtimeConfigsTab),
@@ -52,12 +53,12 @@ impl TabView for WhisperTab {
         title(self)
     }
 
-    fn ui(&mut self, ui: &mut Ui) {
-        draw_ui(self, ui)
+    fn ui(&mut self, ui: &mut Ui, controller: &mut WhisperAppController) {
+        draw_ui(self, ui, controller)
     }
 
-    fn context_menu(&mut self, ui: &mut Ui, surface: SurfaceIndex, node: NodeIndex) {
-        context_menu(self, ui, surface, node);
+    fn context_menu(&mut self, ui: &mut Ui, controller: &mut WhisperAppController, surface: SurfaceIndex, node: NodeIndex) {
+        context_menu(self, ui, controller, surface, node);
     }
 
     fn closeable(&mut self) -> bool {
@@ -75,12 +76,12 @@ fn title(tab: &mut impl TabView) -> WidgetText {
     tab.title()
 }
 
-fn draw_ui(tab: &mut impl TabView, ui: &mut Ui) {
-    tab.ui(ui)
+fn draw_ui(tab: &mut impl TabView, ui: &mut Ui, controller: &mut WhisperAppController) {
+    tab.ui(ui, controller);
 }
 
-fn context_menu(tab: &mut impl TabView, ui: &mut Ui, surface: SurfaceIndex, node: NodeIndex) {
-    tab.context_menu(ui, surface, node)
+fn context_menu(tab: &mut impl TabView, ui: &mut Ui, controller: &mut WhisperAppController, surface: SurfaceIndex, node: NodeIndex) {
+    tab.context_menu(ui, controller, surface, node)
 }
 
 fn closeable(tab: &mut impl TabView) -> bool {

@@ -23,11 +23,11 @@ impl egui_dock::TabViewer for WhisperTabViewer {
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Self::Tab) {
-        tab.ui(ui)
+        tab.ui(ui, &mut self.controller)
     }
 
     fn context_menu(&mut self, ui: &mut Ui, tab: &mut Self::Tab, surface: SurfaceIndex, node: NodeIndex) {
-        tab.context_menu(ui, surface, node)
+        tab.context_menu(ui, &mut self.controller, surface, node)
     }
 
     fn closeable(&mut self, tab: &mut Self::Tab) -> bool {

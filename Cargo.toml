@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 bson = "2.11.0"
+catppuccin-egui = { version = "5.2.0", default-features = false, features = ["egui28"] }
 crossbeam = "0.8.4"
 directories = "5.0.1"
 eframe = { version = "0.28.1", features = ["persistence"] }

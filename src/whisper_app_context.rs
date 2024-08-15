@@ -30,19 +30,33 @@ impl std::fmt::Debug for WhisperAppController {
 }
 
 impl WhisperAppController {
-    pub fn new(audio_wrapper: Arc<SdlAudioWrapper>) -> Self {
-        let app_ctx = WhisperAppContext::new(audio_wrapper);
+    pub fn new(audio_wrapper: Arc<SdlAudioWrapper>, system_theme: Option<eframe::Theme>) -> Self {
+        let app_ctx = WhisperAppContext::new(audio_wrapper, system_theme);
         let app_ctx = Arc::new(app_ctx);
         Self(app_ctx)
     }
 
-    // STATE
-    pub fn is_working(&self) -> bool {
+    pub fn get_system_theme(&self) -> Option<eframe::Theme> {
+        self.0.system_theme.lock().expect("Failed to get mutex").clone()
+    }
+
+    pub fn set_system_theme(&mut self, theme: Option<eframe::Theme>) {
+        let mut guard = self.0.system_theme.lock().expect("Failed to get mutex");
+        *guard = theme;
+    }
+
+    pub fn audio_running(&self) -> bool {
         let realtime_running = self.realtime_running();
         let static_running = self.static_running();
         let recorder_running = self.static_running();
+        return realtime_running || static_running || recorder_running;
+    }
+
+    // STATE
+    pub fn is_working(&self) -> bool {
+        let audio_running = self.audio_running();
         let downloading = self.is_downloading();
-        realtime_running || static_running || recorder_running || downloading
+        audio_running || downloading
     }
 
     // READY
@@ -264,7 +278,7 @@ impl WhisperAppController {
                             match result {
                                 Ok(s) => {
                                     // Send a CLEAR message to the display thread, then the full transcription over.
-                                    self.0.transcription_text_sender.send(Ok((String::from("[CLEAR]"), true))).expect("Transcription channel closed");
+                                    self.0.transcription_text_sender.send(Ok((String::from(constants::CLEAR_MSG), true))).expect("Transcription channel closed");
                                     self.0.transcription_text_sender.send(Ok((s, true))).expect("Transcription channel closed");
                                 }
                                 Err(e) => {
@@ -297,7 +311,7 @@ impl WhisperAppController {
                             match result {
                                 Ok(s) => {
                                     // Send a CLEAR message to the display thread, then the full transcription over.
-                                    self.0.transcription_text_sender.send(Ok((String::from("[CLEAR]"), true))).expect("Transcription channel closed");
+                                    self.0.transcription_text_sender.send(Ok((String::from(constants::CLEAR_MSG), true))).expect("Transcription channel closed");
                                     self.0.transcription_text_sender.send(Ok((s, true))).expect("Transcription channel closed");
                                 }
                                 Err(e) => {
@@ -557,6 +571,8 @@ fn init_whisper_ctx(model: Arc<whisper_realtime::model::Model>, use_gpu: bool) -
 }
 
 struct WhisperAppContext {
+    // SYSTEM THEME
+    system_theme: Mutex<Option<eframe::Theme>>,
     // SDL AUDIO
     audio_wrapper: Arc<SdlAudioWrapper>,
     // STATE
@@ -624,7 +640,8 @@ impl WhisperAppContext {
 }
 
 impl WhisperAppContext {
-    fn new(audio_wrapper: Arc<SdlAudioWrapper>) -> Self {
+    fn new(audio_wrapper: Arc<SdlAudioWrapper>, system_theme: Option<eframe::Theme>) -> Self {
+        let system_theme = Mutex::new(system_theme);
         // Stuff
         let downloading = Arc::new(AtomicBool::new(false));
         let realtime_ready = Arc::new(AtomicBool::new(false));
@@ -657,6 +674,7 @@ impl WhisperAppContext {
         let active_threads = Mutex::new(active_threads);
 
         Self {
+            system_theme,
             audio_wrapper,
             realtime_ready,
             static_ready,

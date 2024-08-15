@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorkerType {
     DOWNLOADING,
     REALTIME,
@@ -17,7 +17,7 @@ impl WorkerType {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub enum AudioConfigs {
     Realtime(whisper_realtime::configs::Configs),
     Static(whisper_realtime::configs::Configs),
@@ -38,21 +38,21 @@ impl AudioConfigs {
     }
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum AudioConfigType {
     REALTIME,
     STATIC,
     RECORDING,
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum RecordingFormat {
     I16,
     I32,
     F32,
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Channel {
     DEFAULT,
     MONO,
@@ -69,7 +69,7 @@ impl Channel {
     }
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SampleRate {
     DEFAULT,
     LOW,
@@ -90,7 +90,7 @@ impl SampleRate {
     }
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum BufferSize {
     DEFAULT,
     SMALL,
@@ -111,7 +111,7 @@ impl BufferSize {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RecorderConfigs {
     sample_rate: SampleRate,
     buffer_size: BufferSize,
@@ -129,5 +129,11 @@ impl RecorderConfigs {
 
     pub fn buffer_size(&self) -> Option<u16> {
         self.buffer_size.size()
+    }
+}
+
+impl Default for RecorderConfigs {
+    fn default() -> Self {
+        todo!()
     }
 }

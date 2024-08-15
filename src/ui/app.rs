@@ -1,8 +1,9 @@
-use eframe::Storage;
+use eframe::{Storage, Theme};
 use egui_dock::{DockArea, DockState, NodeIndex, Style};
 
 use crate::ui::tabs::config_tabs::recording_configs_tab;
 use crate::ui::tabs::display_tabs::{error_console_display_tab, recording_display_tab};
+use crate::utils::preferences;
 use crate::utils::sdl_audio_wrapper::SdlAudioWrapper;
 use crate::whisper_app_context::WhisperAppController;
 
@@ -19,13 +20,6 @@ use super::tabs::{
         ,
     },
     tab_viewer, whisper_tab};
-
-// TODO: shared data cache containing:
-// Atomic state variables,
-// A Mutex-Guarded shared audio buffer
-
-// POSSIBLY: Arc<Channels> for inter-tab communication.
-// Might need to store & join thread-handles.
 
 // TODO: finish App implementation.
 // TODO: eframe::save & periodic configs serialization.
@@ -63,14 +57,15 @@ pub struct WhisperApp
 impl WhisperApp {
     pub fn new(cc: &eframe::CreationContext<'_>, audio_wrapper: std::sync::Arc<SdlAudioWrapper>) -> Self {
         let storage = cc.storage;
+        let system_theme = cc.integration_info.system_theme;
         match storage {
-            None => Self::default_layout(audio_wrapper),
+            None => Self::default_layout(audio_wrapper, system_theme),
             Some(s) => {
                 let stored_tree = eframe::get_value(s, eframe::APP_KEY);
                 match stored_tree {
-                    None => Self::default_layout(audio_wrapper),
+                    None => Self::default_layout(audio_wrapper, system_theme),
                     Some(tree) => {
-                        let controller = WhisperAppController::new(audio_wrapper);
+                        let controller = WhisperAppController::new(audio_wrapper, system_theme);
                         let tab_viewer = tab_viewer::WhisperTabViewer::new(controller.clone());
                         Self { tree, tab_viewer, controller }
                     }
@@ -79,19 +74,18 @@ impl WhisperApp {
         }
     }
 
-    fn default_layout(audio_wrapper: std::sync::Arc<SdlAudioWrapper>) -> Self {
-        let controller = WhisperAppController::new(audio_wrapper);
+    fn default_layout(audio_wrapper: std::sync::Arc<SdlAudioWrapper>, system_theme: Option<Theme>) -> Self {
+        let controller = WhisperAppController::new(audio_wrapper, system_theme);
 
         let tab_viewer = tab_viewer::WhisperTabViewer::new(controller.clone());
 
-        // TODO: cleanup where necessary
-        let td = whisper_tab::WhisperTab::TranscriptionDisplay(transcription_display_tab::TranscriptionTab::new());
-        let rd = whisper_tab::WhisperTab::RecordingDisplay(recording_display_tab::RecordingDisplayTab::new());
-        let pd = whisper_tab::WhisperTab::ProgressDisplay(progress_display_tab::ProgressDisplayTab::new());
-        let ed = whisper_tab::WhisperTab::ErrorDisplay(error_console_display_tab::ErrorConsoleDisplayTab::new());
+        let td = whisper_tab::WhisperTab::TranscriptionDisplay(transcription_display_tab::TranscriptionTab::default());
+        let rd = whisper_tab::WhisperTab::RecordingDisplay(recording_display_tab::RecordingDisplayTab::default());
+        let pd = whisper_tab::WhisperTab::ProgressDisplay(progress_display_tab::ProgressDisplayTab::default());
+        let ed = whisper_tab::WhisperTab::ErrorDisplay(error_console_display_tab::ErrorConsoleDisplayTab::default());
         let rc = whisper_tab::WhisperTab::RealtimeConfigs(realtime_configs_tab::RealtimeConfigsTab::default());
         let st = whisper_tab::WhisperTab::StaticConfigs(static_configs_tab::StaticConfigsTab::default());
-        let rec = whisper_tab::WhisperTab::RecordingConfigs(recording_configs_tab::RecordingConfigsTab::new());
+        let rec = whisper_tab::WhisperTab::RecordingConfigs(recording_configs_tab::RecordingConfigsTab::default());
         let mut tree: DockState<whisper_tab::WhisperTab> = DockState::new(vec![
             td, rd,
         ]);
@@ -121,7 +115,13 @@ impl WhisperApp {
 }
 
 impl eframe::App for WhisperApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        let system_theme = frame.info().system_theme;
+        self.controller.set_system_theme(system_theme.clone());
+
+        let theme = preferences::get_app_theme(system_theme);
+
+        catppuccin_egui::set_theme(ctx, theme);
 
         // Repaint continuously when running a worker.
         if self.controller.is_working() {
