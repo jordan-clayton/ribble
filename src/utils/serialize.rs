@@ -5,7 +5,6 @@ use whisper_realtime::configs::Configs;
 // TODO: Remove - egui has this built in
 // use crate::preferences::GUIPreferences;
 
-
 // TODO: Refactor to take a file-path to a configs file.
 pub fn load_configs(proj_dir: &ProjectDirs) -> Configs {
     let p_dir = proj_dir.clone();

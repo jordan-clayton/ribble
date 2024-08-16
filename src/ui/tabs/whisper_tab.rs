@@ -3,25 +3,20 @@
 use egui::{Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
-use crate::whisper_app_context::WhisperAppController;
-
-use super::{
-    config_tabs::{
-        realtime_configs_tab,
-        recording_configs_tab,
-        static_configs_tab,
-    }, display_tabs::{
-        error_console_display_tab,
-        progress_display_tab,
-        recording_display_tab,
+use crate::ui::tabs::{
+    config_tabs::{realtime_configs_tab, recording_configs_tab, static_configs_tab},
+    display_tabs::{
+        error_console_display_tab, progress_display_tab, recording_display_tab,
         transcription_display_tab,
-    }
-    , tab_view::TabView, };
+    },
+    tab_view::TabView,
+};
+use crate::whisper_app_context::WhisperAppController;
 
 // This is a concession made to keep the implementation as decoupled as possible.
 // Generics are not possible due to the sized type bound required for egui_dock::TabViewer
 // Each member of WhisperTab must implement TabView, a port of the egui_dock::TabViewer interface
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub enum WhisperTab {
     RealtimeConfigs(realtime_configs_tab::RealtimeConfigsTab),
     StaticConfigs(static_configs_tab::StaticConfigsTab),
@@ -47,8 +42,10 @@ impl WhisperTab {
     }
 }
 
-
 impl TabView for WhisperTab {
+    fn id(&mut self) -> String {
+        id(self)
+    }
     fn title(&mut self) -> WidgetText {
         title(self)
     }
@@ -57,7 +54,13 @@ impl TabView for WhisperTab {
         draw_ui(self, ui, controller)
     }
 
-    fn context_menu(&mut self, ui: &mut Ui, controller: &mut WhisperAppController, surface: SurfaceIndex, node: NodeIndex) {
+    fn context_menu(
+        &mut self,
+        ui: &mut Ui,
+        controller: &mut WhisperAppController,
+        surface: SurfaceIndex,
+        node: NodeIndex,
+    ) {
         context_menu(self, ui, controller, surface, node);
     }
 
@@ -72,6 +75,9 @@ impl TabView for WhisperTab {
 
 // IMPL functions:
 // To enforce that all members of the struct implement tabview
+fn id(tab: &mut impl TabView) -> String {
+    tab.id()
+}
 fn title(tab: &mut impl TabView) -> WidgetText {
     tab.title()
 }
@@ -80,7 +86,13 @@ fn draw_ui(tab: &mut impl TabView, ui: &mut Ui, controller: &mut WhisperAppContr
     tab.ui(ui, controller);
 }
 
-fn context_menu(tab: &mut impl TabView, ui: &mut Ui, controller: &mut WhisperAppController, surface: SurfaceIndex, node: NodeIndex) {
+fn context_menu(
+    tab: &mut impl TabView,
+    ui: &mut Ui,
+    controller: &mut WhisperAppController,
+    surface: SurfaceIndex,
+    node: NodeIndex,
+) {
     tab.context_menu(ui, controller, surface, node)
 }
 
@@ -91,4 +103,3 @@ fn closeable(tab: &mut impl TabView) -> bool {
 fn allowed_in_windows(tab: &mut impl TabView) -> bool {
     tab.allowed_in_windows()
 }
-

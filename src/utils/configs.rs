@@ -17,7 +17,7 @@ impl WorkerType {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum AudioConfigs {
     Realtime(whisper_realtime::configs::Configs),
     Static(whisper_realtime::configs::Configs),
@@ -38,21 +38,21 @@ impl AudioConfigs {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum AudioConfigType {
     REALTIME,
     STATIC,
     RECORDING,
 }
 
-#[derive(Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum RecordingFormat {
     I16,
     I32,
     F32,
 }
 
-#[derive(Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Channel {
     DEFAULT,
     MONO,
@@ -64,12 +64,12 @@ impl Channel {
         match self {
             Channel::DEFAULT => None,
             Channel::MONO => Some(1),
-            Channel::STEREO => Some(2)
+            Channel::STEREO => Some(2),
         }
     }
 }
 
-#[derive(Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SampleRate {
     DEFAULT,
     LOW,
@@ -85,12 +85,12 @@ impl SampleRate {
             SampleRate::LOW => Some(8000),
             SampleRate::MEDIUM => Some(16000),
             SampleRate::HIGH => Some(22050),
-            SampleRate::HIGHEST => Some(44100)
+            SampleRate::HIGHEST => Some(44100),
         }
     }
 }
 
-#[derive(Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum BufferSize {
     DEFAULT,
     SMALL,
@@ -106,12 +106,12 @@ impl BufferSize {
             BufferSize::SMALL => Some(256),
             BufferSize::MEDIUM => Some(512),
             BufferSize::LARGE => Some(1024),
-            BufferSize::HUGE => Some(2048)
+            BufferSize::HUGE => Some(2048),
         }
     }
 }
 
-#[derive(Copy, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Copy, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RecorderConfigs {
     sample_rate: SampleRate,
     buffer_size: BufferSize,

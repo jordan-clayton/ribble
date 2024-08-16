@@ -8,10 +8,17 @@ use crate::whisper_app_context::WhisperAppController;
 
 //TODO: port the remainder of the impl.
 pub trait TabView {
+    fn id(&mut self) -> String;
     fn title(&mut self) -> WidgetText;
     fn ui(&mut self, ui: &mut Ui, controller: &mut WhisperAppController);
 
-    fn context_menu(&mut self, ui: &mut Ui, controller: &mut WhisperAppController, surface: SurfaceIndex, node: NodeIndex);
+    fn context_menu(
+        &mut self,
+        ui: &mut Ui,
+        controller: &mut WhisperAppController,
+        surface: SurfaceIndex,
+        node: NodeIndex,
+    );
 
     fn closeable(&mut self) -> bool {
         true

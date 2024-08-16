@@ -1,5 +1,5 @@
-use egui::{Color32, lerp, Response, Rgba, Sense, Stroke, Ui, vec2, Widget};
 use egui::emath::easing::quadratic_out;
+use egui::{lerp, vec2, Color32, Response, Rgba, Sense, Stroke, Ui, Widget};
 
 use crate::utils::constants;
 
@@ -25,7 +25,8 @@ fn draw_recording_icon(ui: &mut Ui, color: Rgba, animate: bool) -> Response {
 
         let col_32 = Color32::from(color);
         let radius = 0.5 * rect.height();
-        ui.painter().circle(rect.center(), radius, col_32, Stroke::NONE);
+        ui.painter()
+            .circle(rect.center(), radius, col_32, Stroke::NONE);
     }
     response
 }

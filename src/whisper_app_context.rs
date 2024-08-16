@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
 
@@ -12,7 +12,7 @@ use whisper_realtime::recorder::Recorder;
 use whisper_realtime::transcriber::realtime_transcriber::RealtimeTranscriber;
 use whisper_realtime::transcriber::transcriber::Transcriber;
 
-use crate::utils::configs::{AudioConfigs, AudioConfigType, RecorderConfigs, WorkerType};
+use crate::utils::configs::{AudioConfigType, AudioConfigs, RecorderConfigs, WorkerType};
 use crate::utils::constants;
 use crate::utils::progress::Progress;
 use crate::utils::sdl_audio_wrapper::SdlAudioWrapper;
@@ -37,7 +37,11 @@ impl WhisperAppController {
     }
 
     pub fn get_system_theme(&self) -> Option<eframe::Theme> {
-        self.0.system_theme.lock().expect("Failed to get mutex").clone()
+        self.0
+            .system_theme
+            .lock()
+            .expect("Failed to get mutex")
+            .clone()
     }
 
     pub fn set_system_theme(&mut self, theme: Option<eframe::Theme>) {
@@ -64,6 +68,10 @@ impl WhisperAppController {
         self.0.realtime_ready.load(Ordering::Acquire)
     }
 
+    pub fn update_realtime_ready(&self, ready: bool) {
+        self.0.realtime_ready.store(ready, Ordering::Relaxed);
+    }
+
     pub fn static_ready(&self) -> bool {
         self.0.static_ready.load(Ordering::Acquire)
     }
@@ -72,14 +80,13 @@ impl WhisperAppController {
         self.0.recorder_ready.load(Ordering::Acquire)
     }
 
-
     // RUNNING
     pub fn is_downloading(&self) -> bool {
         self.0.downloading.load(Ordering::Acquire)
     }
 
     pub fn recorder_running(&self) -> bool {
-        self.0.realtime_ready.load(Ordering::Acquire)
+        self.0.recorder_running.load(Ordering::Acquire)
     }
 
     pub fn realtime_running(&self) -> bool {
@@ -90,14 +97,19 @@ impl WhisperAppController {
     }
     // CONFIGS
 
-    pub fn send_configs(&self, configs: AudioConfigs) -> Result<(), crossbeam::channel::SendError<AudioConfigs>> {
+    pub fn send_configs(
+        &self,
+        configs: AudioConfigs,
+    ) -> Result<(), crossbeam::channel::SendError<AudioConfigs>> {
         self.0.configs_sender.send(configs)
     }
 
-
     // MSG HANDLING
 
-    pub fn send_progress(&self, progress: Progress) -> Result<(), crossbeam::channel::SendError<Progress>> {
+    pub fn send_progress(
+        &self,
+        progress: Progress,
+    ) -> Result<(), crossbeam::channel::SendError<Progress>> {
         self.0.progress_sender.send(progress)
     }
 
@@ -132,7 +144,6 @@ impl WhisperAppController {
         self.0.record_audio_i32_receiver.try_recv()
     }
 
-
     pub fn record_audio_f32_sender(&self) -> crossbeam::channel::Sender<Vec<f32>> {
         self.0.record_audio_f32_sender.clone()
     }
@@ -143,22 +154,29 @@ impl WhisperAppController {
 
     // This needs to be copied and a copy given to the RealtimeTranscriber struct.
     // TODO: possibly handle this internally.
-    pub fn transcription_text_sender(&self) -> crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>> {
+    pub fn transcription_text_sender(
+        &self,
+    ) -> crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>> {
         self.0.transcription_text_sender.clone()
     }
 
-    pub fn receive_transcription_text(&self) -> Result<Result<(String, bool), WhisperRealtimeError>, crossbeam::channel::TryRecvError> {
+    pub fn receive_transcription_text(
+        &self,
+    ) -> Result<Result<(String, bool), WhisperRealtimeError>, crossbeam::channel::TryRecvError>
+    {
         self.0.transcription_text_receiver.try_recv()
     }
 
-    pub fn send_error(&self, error: WhisperRealtimeError) -> Result<(), crossbeam::channel::SendError<WhisperRealtimeError>> {
+    pub fn send_error(
+        &self,
+        error: WhisperRealtimeError,
+    ) -> Result<(), crossbeam::channel::SendError<WhisperRealtimeError>> {
         self.0.error_sender.send(error)
     }
 
     pub fn receive_error(&self) -> Result<WhisperRealtimeError, crossbeam::channel::TryRecvError> {
         self.0.error_receiver.try_recv()
     }
-
 
     // TODO: Figure out how to implement a "Setup Progress message"
     // TODO: These can't be scoped threads or the gui will block.
@@ -171,7 +189,10 @@ impl WhisperAppController {
         // TODO: This should probably send a progress job - Figure out how to determine and interpolate progress.
 
         // Get the realtime configs.
-        self.0.realtime_configs_request_sender.send(()).expect("Realtime configs request channel already closed");
+        self.0
+            .realtime_configs_request_sender
+            .send(())
+            .expect("Realtime configs request channel already closed");
         let actor = self.clone();
         let c_actor = actor.clone();
 
@@ -179,7 +200,11 @@ impl WhisperAppController {
             // This spawns a scoped thread to poll the msg queue and get the correct configurations.
             let configs = get_requested_configs(c_actor.clone(), AudioConfigType::REALTIME, ctx);
             if let Err(e) = &configs {
-                c_actor.0.error_sender.send(e.clone()).expect("Error Channel closed");
+                c_actor
+                    .0
+                    .error_sender
+                    .send(e.clone())
+                    .expect("Error Channel closed");
                 c_actor.0.realtime_running.store(false, Ordering::Release);
                 panic!();
             }
@@ -191,28 +216,44 @@ impl WhisperAppController {
                     WhisperRealtimeErrorType::ParameterError,
                     String::from("Invalid configs provided for realtime stream"),
                 );
-                c_actor.0.error_sender.send(err).expect("Error Channel closed");
+                c_actor
+                    .0
+                    .error_sender
+                    .send(err)
+                    .expect("Error Channel closed");
                 c_actor.0.realtime_running.store(false, Ordering::Release);
                 panic!();
             }
 
-            let AudioConfigs::Realtime(configs) = configs else { panic!() };
+            let AudioConfigs::Realtime(configs) = configs else {
+                panic!()
+            };
 
             let configs = Arc::new(configs);
             // TODO: figure out what the borrow checker is fussing over.
             // The setup functions might need to be refactored.
-            run_realtime_audio_transcription(c_actor.clone(), &c_actor.0.audio_wrapper.audio_subsystem, configs)
+            run_realtime_audio_transcription(
+                c_actor.clone(),
+                &c_actor.0.audio_wrapper.audio_subsystem,
+                configs,
+            )
         });
 
-        let mut guard = actor.0.active_threads.lock().expect("Failed to get thread mutex");
+        let mut guard = actor
+            .0
+            .active_threads
+            .lock()
+            .expect("Failed to get thread mutex");
         let old_thread = guard.insert(WorkerType::REALTIME.to_key(), rt_thread);
 
         assert!(old_thread.is_none(), "Recording already in progress");
     }
 
-
     // TODO: see rt fn for ideas on how to structure.
-    pub fn start_static_transcription(&self, _file_path: &std::path::Path) -> Result<(), WhisperRealtimeError> {
+    pub fn start_static_transcription(
+        &self,
+        _file_path: &std::path::Path,
+    ) -> Result<(), WhisperRealtimeError> {
         todo!()
         // Setup
         // Progress = setup progress.
@@ -238,7 +279,10 @@ impl WhisperAppController {
     // TODO: Possibly do this on a thread.
     // TODO: factor out error function
     pub fn close_worker(&mut self, worker_type: WorkerType) {
-        assert!(!self.is_working(), "Improper close-worker call, not properly validated");
+        assert!(
+            !self.is_working(),
+            "Improper close-worker call, not properly validated"
+        );
         match worker_type {
             WorkerType::DOWNLOADING => {
                 self.0.downloading.store(false, Ordering::Relaxed);
@@ -278,8 +322,14 @@ impl WhisperAppController {
                             match result {
                                 Ok(s) => {
                                     // Send a CLEAR message to the display thread, then the full transcription over.
-                                    self.0.transcription_text_sender.send(Ok((String::from(constants::CLEAR_MSG), true))).expect("Transcription channel closed");
-                                    self.0.transcription_text_sender.send(Ok((s, true))).expect("Transcription channel closed");
+                                    self.0
+                                        .transcription_text_sender
+                                        .send(Ok((String::from(constants::CLEAR_MSG), true)))
+                                        .expect("Transcription channel closed");
+                                    self.0
+                                        .transcription_text_sender
+                                        .send(Ok((s, true)))
+                                        .expect("Transcription channel closed");
                                 }
                                 Err(e) => {
                                     let err = WhisperRealtimeError::new(
@@ -311,8 +361,14 @@ impl WhisperAppController {
                             match result {
                                 Ok(s) => {
                                     // Send a CLEAR message to the display thread, then the full transcription over.
-                                    self.0.transcription_text_sender.send(Ok((String::from(constants::CLEAR_MSG), true))).expect("Transcription channel closed");
-                                    self.0.transcription_text_sender.send(Ok((s, true))).expect("Transcription channel closed");
+                                    self.0
+                                        .transcription_text_sender
+                                        .send(Ok((String::from(constants::CLEAR_MSG), true)))
+                                        .expect("Transcription channel closed");
+                                    self.0
+                                        .transcription_text_sender
+                                        .send(Ok((s, true)))
+                                        .expect("Transcription channel closed");
                                 }
                                 Err(e) => {
                                     let err = WhisperRealtimeError::new(
@@ -367,7 +423,11 @@ impl WhisperAppController {
     // TODO: Factor this out into a function
 }
 
-fn get_requested_configs(actor: WhisperAppController, requested_config_type: AudioConfigType, ctx: egui::Context) -> Result<AudioConfigs, WhisperRealtimeError> {
+fn get_requested_configs(
+    actor: WhisperAppController,
+    requested_config_type: AudioConfigType,
+    ctx: egui::Context,
+) -> Result<AudioConfigs, WhisperRealtimeError> {
     let start_time = std::time::Instant::now();
     let configs = thread::scope(|s| {
         let c = s.spawn(|| {
@@ -431,7 +491,11 @@ fn get_requested_configs(actor: WhisperAppController, requested_config_type: Aud
     Ok(configs.unwrap())
 }
 
-fn run_realtime_audio_transcription(actor: WhisperAppController, audio_subsystem: &sdl2::AudioSubsystem, configs: Arc<whisper_realtime::configs::Configs>) -> Result<String, Box<dyn std::any::Any + Send>> {
+fn run_realtime_audio_transcription(
+    actor: WhisperAppController,
+    audio_subsystem: &sdl2::AudioSubsystem,
+    configs: Arc<whisper_realtime::configs::Configs>,
+) -> Result<String, Box<dyn std::any::Any + Send>> {
     // Clone the actor
     let c_actor_audio = actor.clone();
     let c_actor_write = actor.clone();
@@ -457,7 +521,8 @@ fn run_realtime_audio_transcription(actor: WhisperAppController, audio_subsystem
     let c_realtime_is_ready = actor.0.realtime_ready.clone();
     let c_realtime_is_running = actor.0.realtime_running.clone();
 
-    let mic_stream = init_realtime_microphone(audio_subsystem, actor.0.record_audio_f32_sender.clone());
+    let mic_stream =
+        init_realtime_microphone(audio_subsystem, actor.0.record_audio_f32_sender.clone());
     let c_mic_stream = mic_stream.clone();
 
     // Init Whisper.
@@ -484,33 +549,33 @@ fn run_realtime_audio_transcription(actor: WhisperAppController, audio_subsystem
             }
         });
 
-        let _audio_thread = s.spawn(move || {
-            loop {
-                if !c_realtime_is_running_audio.load(Ordering::Acquire) {
-                    break;
-                }
-
-                let output = c_actor_write.receive_realtime_audio();
-                assert!(output.is_ok(), "Realtime Audio Channel closed");
-
-                let mut audio_data = output.unwrap();
-                c_audio_reader.push_audio(&mut audio_data);
-                let write_propagation = c_recording_sender.send(audio_data.clone());
-                assert!(write_propagation.is_ok(), "F32 Audio Channel closed");
+        let _audio_thread = s.spawn(move || loop {
+            if !c_realtime_is_running_audio.load(Ordering::Acquire) {
+                break;
             }
+
+            let output = c_actor_write.receive_realtime_audio();
+            assert!(output.is_ok(), "Realtime Audio Channel closed");
+
+            let mut audio_data = output.unwrap();
+            c_audio_reader.push_audio(&mut audio_data);
+            let write_propagation = c_recording_sender.send(audio_data.clone());
+            assert!(write_propagation.is_ok(), "F32 Audio Channel closed");
         });
-        let transcription_thread = s.spawn(move || {
-            let mut transcriber = RealtimeTranscriber::new_with_configs(
-                c_audio_transcriber,
-                c_text_sender,
-                c_realtime_is_running.clone(),
-                c_realtime_is_ready.clone(),
-                c_configs.clone(),
-                None,
-            );
-            let output = transcriber.process_audio(&mut state, None::<fn(i32)>);
-            output
-        }).join();
+        let transcription_thread = s
+            .spawn(move || {
+                let mut transcriber = RealtimeTranscriber::new_with_configs(
+                    c_audio_transcriber,
+                    c_text_sender,
+                    c_realtime_is_running.clone(),
+                    c_realtime_is_ready.clone(),
+                    c_configs.clone(),
+                    None,
+                );
+                let output = transcriber.process_audio(&mut state, None::<fn(i32)>);
+                output
+            })
+            .join();
         transcription_thread
     });
 
@@ -522,18 +587,32 @@ fn run_realtime_audio_transcription(actor: WhisperAppController, audio_subsystem
 // TODO: UTILITY FUNCTIONS FILE
 // TODO: FN FOR INITIALIZING TEMP FILE PTR.
 
-fn init_audio_buffer<T: Default + Clone + Copy + sdl2::audio::AudioFormatNum + Sync + Send + 'static>(len_ms: Option<usize>) -> Arc<AudioRingBuffer<T>> {
+fn init_audio_buffer<
+    T: Default + Clone + Copy + sdl2::audio::AudioFormatNum + Sync + Send + 'static,
+>(
+    len_ms: Option<usize>,
+) -> Arc<AudioRingBuffer<T>> {
     let ms = len_ms.unwrap_or(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
     let audio: AudioRingBuffer<T> = AudioRingBuffer::new(ms);
     Arc::new(audio)
 }
 
-fn init_microphone<T: Default + Clone + Copy + sdl2::audio::AudioFormatNum + Sync + Send + 'static>(audio_subsystem: &sdl2::AudioSubsystem, desired_audio_spec: &sdl2::audio::AudioSpecDesired, audio_sender: crossbeam::channel::Sender<Vec<T>>) -> Arc<AudioDevice<Recorder<T>>> {
-    let mic_stream = microphone::build_audio_stream(audio_subsystem, desired_audio_spec, audio_sender);
+fn init_microphone<
+    T: Default + Clone + Copy + sdl2::audio::AudioFormatNum + Sync + Send + 'static,
+>(
+    audio_subsystem: &sdl2::AudioSubsystem,
+    desired_audio_spec: &sdl2::audio::AudioSpecDesired,
+    audio_sender: crossbeam::channel::Sender<Vec<T>>,
+) -> Arc<AudioDevice<Recorder<T>>> {
+    let mic_stream =
+        microphone::build_audio_stream(audio_subsystem, desired_audio_spec, audio_sender);
     Arc::new(mic_stream)
 }
 
-fn init_realtime_microphone(audio_subsystem: &sdl2::AudioSubsystem, audio_sender: crossbeam::channel::Sender<Vec<f32>>) -> Arc<AudioDevice<Recorder<f32>>> {
+fn init_realtime_microphone(
+    audio_subsystem: &sdl2::AudioSubsystem,
+    audio_sender: crossbeam::channel::Sender<Vec<f32>>,
+) -> Arc<AudioDevice<Recorder<f32>>> {
     let desired_audio_spec = microphone::get_desired_audio_spec(
         Some(whisper_realtime::constants::WHISPER_SAMPLE_RATE as i32),
         Some(1),
@@ -543,7 +622,13 @@ fn init_realtime_microphone(audio_subsystem: &sdl2::AudioSubsystem, audio_sender
     init_microphone(audio_subsystem, &desired_audio_spec, audio_sender)
 }
 
-fn init_recording_microphone<T: Default + Clone + Copy + sdl2::audio::AudioFormatNum + Sync + Send + 'static>(audio_subsystem: &sdl2::AudioSubsystem, recording_configs: Arc<RecorderConfigs>, audio_sender: crossbeam::channel::Sender<Vec<T>>) -> Arc<AudioDevice<Recorder<T>>> {
+fn init_recording_microphone<
+    T: Default + Clone + Copy + sdl2::audio::AudioFormatNum + Sync + Send + 'static,
+>(
+    audio_subsystem: &sdl2::AudioSubsystem,
+    recording_configs: Arc<RecorderConfigs>,
+    audio_sender: crossbeam::channel::Sender<Vec<T>>,
+) -> Arc<AudioDevice<Recorder<T>>> {
     let freq = recording_configs.sample_rate();
     let channels = recording_configs.num_channels();
     let buffer_size = recording_configs.buffer_size();
@@ -551,7 +636,9 @@ fn init_recording_microphone<T: Default + Clone + Copy + sdl2::audio::AudioForma
     init_microphone(audio_subsystem, &desired_audio_spec, audio_sender)
 }
 
-fn init_model(configs: Arc<whisper_realtime::configs::Configs>) -> Arc<whisper_realtime::model::Model> {
+fn init_model(
+    configs: Arc<whisper_realtime::configs::Configs>,
+) -> Arc<whisper_realtime::model::Model> {
     let model_type = configs.model;
     let data_dir = eframe::storage_dir(constants::APP_ID).expect("Failed to get Data dir");
     let model = whisper_realtime::model::Model::new_with_type_and_dir(model_type, data_dir);
@@ -559,7 +646,10 @@ fn init_model(configs: Arc<whisper_realtime::configs::Configs>) -> Arc<whisper_r
     Arc::new(model)
 }
 
-fn init_whisper_ctx(model: Arc<whisper_realtime::model::Model>, use_gpu: bool) -> whisper_realtime::whisper_rs::WhisperContext {
+fn init_whisper_ctx(
+    model: Arc<whisper_realtime::model::Model>,
+    use_gpu: bool,
+) -> whisper_realtime::whisper_rs::WhisperContext {
     let mut whisper_ctx_params = whisper_realtime::whisper_rs::WhisperContextParameters::default();
     whisper_ctx_params.use_gpu = use_gpu;
     let model_path = model.file_path();
@@ -567,7 +657,8 @@ fn init_whisper_ctx(model: Arc<whisper_realtime::model::Model>, use_gpu: bool) -
     whisper_realtime::whisper_rs::WhisperContext::new_with_params(
         model_path.to_str().expect("Failed to stringify path"),
         whisper_ctx_params,
-    ).expect("Failed to load model")
+    )
+    .expect("Failed to load model")
 }
 
 struct WhisperAppContext {
@@ -615,8 +706,10 @@ struct WhisperAppContext {
 
     // GUI CHANNELS (UNBOUNDED):
     // Transcription channel for passing text output
-    transcription_text_sender: crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>>,
-    transcription_text_receiver: crossbeam::channel::Receiver<Result<(String, bool), WhisperRealtimeError>>,
+    transcription_text_sender:
+        crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>>,
+    transcription_text_receiver:
+        crossbeam::channel::Receiver<Result<(String, bool), WhisperRealtimeError>>,
 
     progress_sender: crossbeam::channel::Sender<Progress>,
     progress_receiver: crossbeam::channel::Receiver<Progress>,
@@ -624,12 +717,17 @@ struct WhisperAppContext {
     error_sender: crossbeam::channel::Sender<WhisperRealtimeError>,
     error_receiver: crossbeam::channel::Receiver<WhisperRealtimeError>,
 
-    active_threads: Mutex<HashMap<&'static str, JoinHandle<Result<String, Box<dyn std::any::Any + Send>>>>>,
+    // TODO: refactor into msg queue.
+    active_threads:
+        Mutex<HashMap<&'static str, JoinHandle<Result<String, Box<dyn std::any::Any + Send>>>>>,
 }
 
 impl WhisperAppContext {
     fn cleanup(&self) {
-        let mut guard = self.active_threads.lock().expect("Failed to get thread mutex");
+        let mut guard = self
+            .active_threads
+            .lock()
+            .expect("Failed to get thread mutex");
 
         let keys: Vec<&str> = guard.keys().cloned().collect();
         for key in keys {
@@ -642,7 +740,8 @@ impl WhisperAppContext {
 impl WhisperAppContext {
     fn new(audio_wrapper: Arc<SdlAudioWrapper>, system_theme: Option<eframe::Theme>) -> Self {
         let system_theme = Mutex::new(system_theme);
-        // Stuff
+
+        // STATE
         let downloading = Arc::new(AtomicBool::new(false));
         let realtime_ready = Arc::new(AtomicBool::new(false));
         let static_ready = Arc::new(AtomicBool::new(false));
@@ -653,9 +752,12 @@ impl WhisperAppContext {
         let recorder_running = Arc::new(AtomicBool::new(false));
 
         // CONFIGS
-        let (realtime_configs_request_sender, realtime_configs_request_receiver) = crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
-        let (static_configs_request_sender, static_configs_request_receiver) = crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
-        let (recording_configs_request_sender, recording_configs_request_receiver) = crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
+        let (realtime_configs_request_sender, realtime_configs_request_receiver) =
+            crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
+        let (static_configs_request_sender, static_configs_request_receiver) =
+            crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
+        let (recording_configs_request_sender, recording_configs_request_receiver) =
+            crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
 
         let (configs_sender, configs_receiver) = crossbeam::channel::unbounded();
 
@@ -666,11 +768,15 @@ impl WhisperAppContext {
         let (record_audio_f32_sender, record_audio_f32_receiver) = crossbeam::channel::unbounded();
 
         // GUI
-        let (transcription_text_sender, transcription_text_receiver) = crossbeam::channel::unbounded();
+        let (transcription_text_sender, transcription_text_receiver) =
+            crossbeam::channel::unbounded();
         let (progress_sender, progress_receiver) = crossbeam::channel::unbounded();
         let (error_sender, error_receiver) = crossbeam::channel::unbounded();
 
-        let active_threads: HashMap<&'static str, JoinHandle<Result<String, Box<dyn std::any::Any + Send>>>> = HashMap::new();
+        let active_threads: HashMap<
+            &'static str,
+            JoinHandle<Result<String, Box<dyn std::any::Any + Send>>>,
+        > = HashMap::new();
         let active_threads = Mutex::new(active_threads);
 
         Self {

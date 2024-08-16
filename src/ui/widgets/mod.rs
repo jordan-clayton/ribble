@@ -1,2 +1,2 @@
-pub mod toggle_switch;
 pub mod recording_icon;
+pub mod toggle_switch;

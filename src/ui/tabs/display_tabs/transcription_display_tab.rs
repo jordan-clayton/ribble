@@ -7,7 +7,7 @@ use crate::ui::widgets::toggle_switch;
 use crate::utils::{constants, preferences};
 use crate::whisper_app_context::WhisperAppController;
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TranscriptionTab {
     title: String,
     #[serde(skip)]
@@ -17,17 +17,20 @@ pub struct TranscriptionTab {
     // Default to false
     #[serde(skip)]
     accepting_speech: bool,
-
     // Possibly just use a file path.
     // #[serde(skip)]
     // file_loaded: bool,
 }
 
-
 // TODO: function to save the buffer to file.
 impl TranscriptionTab {
     fn new(text_buffer: Vec<String>, realtime_mode: bool, accepting_speech: bool) -> Self {
-        Self { title: String::from("Transcription"), text_buffer, realtime_mode, accepting_speech }
+        Self {
+            title: String::from("Transcription"),
+            text_buffer,
+            realtime_mode,
+            accepting_speech,
+        }
     }
 
     // Static header
@@ -107,8 +110,10 @@ impl Default for TranscriptionTab {
     }
 }
 
-
 impl tab_view::TabView for TranscriptionTab {
+    fn id(&mut self) -> String {
+        self.title.clone()
+    }
     fn title(&mut self) -> WidgetText {
         WidgetText::from(&self.title)
     }
@@ -117,7 +122,10 @@ impl tab_view::TabView for TranscriptionTab {
     fn ui(&mut self, ui: &mut Ui, controller: &mut WhisperAppController) {
         // Destructure mut borrow
         let Self {
-            title: _, text_buffer, realtime_mode, accepting_speech,
+            title: _,
+            text_buffer,
+            realtime_mode,
+            accepting_speech,
         } = self;
 
         // UPDATE STATE
@@ -159,25 +167,19 @@ impl tab_view::TabView for TranscriptionTab {
                 // Toggle button.
                 ui.add(toggle_switch::toggle(realtime_mode));
                 // Label
-                let label = if *realtime_mode {
-                    "Realtime"
-                } else {
-                    "Static"
-                };
+                let label = if *realtime_mode { "Realtime" } else { "Static" };
 
                 ui.label(label);
             });
 
             // Scrollable panel section.
-            ScrollArea::vertical()
-                .auto_shrink(false)
-                .show(ui, |ui| {
-                    if *realtime_mode {
-                        Self::realtime_toolbar(ui, controller);
-                    } else {
-                        Self::static_toolbar(ui, controller);
-                    }
-                })
+            ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                if *realtime_mode {
+                    Self::realtime_toolbar(ui, controller);
+                } else {
+                    Self::static_toolbar(ui, controller);
+                }
+            })
         });
 
         CentralPanel::default().show_inside(ui, |ui| {
@@ -201,12 +203,18 @@ impl tab_view::TabView for TranscriptionTab {
     }
 
     // Right-click tab -> context actions for text operations
-    fn context_menu(&mut self, _ui: &mut Ui, controller: &mut WhisperAppController, _surface: SurfaceIndex, _node: NodeIndex) {
+    fn context_menu(
+        &mut self,
+        _ui: &mut Ui,
+        controller: &mut WhisperAppController,
+        _surface: SurfaceIndex,
+        _node: NodeIndex,
+    ) {
         todo!()
     }
 
     fn closeable(&mut self) -> bool {
-        false
+        true
     }
 
     fn allowed_in_windows(&mut self) -> bool {

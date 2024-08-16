@@ -11,7 +11,12 @@ mod utils;
 mod whisper_app_context;
 
 fn main() -> eframe::Result<()> {
-    let proj_dirs = ProjectDirs::from(constants::QUALIFIER, constants::ORGANIZATION, constants::APP_ID).expect("Failed to get proj dir");
+    let proj_dirs = ProjectDirs::from(
+        constants::QUALIFIER,
+        constants::ORGANIZATION,
+        constants::APP_ID,
+    )
+    .expect("Failed to get proj dir");
     let data_dir = proj_dirs.data_dir();
     let mut native_options = eframe::NativeOptions::default();
     let viewport = build_viewport();
@@ -28,11 +33,13 @@ fn main() -> eframe::Result<()> {
     let audio_wrapper = SdlAudioWrapper { audio_subsystem };
     let audio_wrapper = std::sync::Arc::new(audio_wrapper);
 
+    // TODO: spawn a background thread for the controller to spawn threads.
 
-    eframe::run_native(constants::APP_ID, native_options, Box::new(|cc| {
-        Ok(Box::new(WhisperApp::new(cc, audio_wrapper)))
-    }
-    ))
+    eframe::run_native(
+        constants::APP_ID,
+        native_options,
+        Box::new(|cc| Ok(Box::new(WhisperApp::new(cc, audio_wrapper)))),
+    )
 }
 
 // TODO: MacOS might require different configs to look more "Apple-y".

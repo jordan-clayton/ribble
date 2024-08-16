@@ -1,4 +1,4 @@
-use egui::{lerp, pos2, Response, Sense, Ui, vec2, Widget, WidgetInfo, WidgetType};
+use egui::{lerp, pos2, vec2, Response, Sense, Ui, Widget, WidgetInfo, WidgetType};
 
 // This is lifted directly from the egui demo lib: https://github.com/emilk/egui/blob/master/crates/egui_demo_lib/src/demo/toggle_switch.rs.
 fn draw_toggle(ui: &mut Ui, on: &mut bool) -> Response {
@@ -9,9 +9,7 @@ fn draw_toggle(ui: &mut Ui, on: &mut bool) -> Response {
         response.mark_changed();
     }
 
-    response.widget_info(|| {
-        WidgetInfo::selected(WidgetType::Checkbox, ui.is_enabled(), *on, "")
-    });
+    response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, ui.is_enabled(), *on, ""));
 
     if ui.is_rect_visible(rect) {
         let t = ui.ctx().animate_bool_responsive(response.id, *on);
@@ -19,11 +17,13 @@ fn draw_toggle(ui: &mut Ui, on: &mut bool) -> Response {
         let rect = rect.expand(visuals.expansion);
         let radius = 0.5 * rect.height();
 
-        ui.painter().rect(rect, radius, visuals.bg_fill, visuals.bg_stroke);
+        ui.painter()
+            .rect(rect, radius, visuals.bg_fill, visuals.bg_stroke);
 
         let circle_x = lerp((rect.left() + radius)..=(rect.right() - radius), t);
         let center = pos2(circle_x, rect.center().y);
-        ui.painter().circle(center, 0.75 * radius, visuals.bg_fill, visuals.fg_stroke);
+        ui.painter()
+            .circle(center, 0.75 * radius, visuals.bg_fill, visuals.fg_stroke);
     }
 
     response
