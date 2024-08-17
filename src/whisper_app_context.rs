@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::thread::JoinHandle;
 
@@ -12,7 +12,7 @@ use whisper_realtime::recorder::Recorder;
 use whisper_realtime::transcriber::realtime_transcriber::RealtimeTranscriber;
 use whisper_realtime::transcriber::transcriber::Transcriber;
 
-use crate::utils::configs::{AudioConfigType, AudioConfigs, RecorderConfigs, WorkerType};
+use crate::utils::configs::{AudioConfigs, AudioConfigType, RecorderConfigs, WorkerType};
 use crate::utils::constants;
 use crate::utils::progress::Progress;
 use crate::utils::sdl_audio_wrapper::SdlAudioWrapper;
@@ -629,9 +629,9 @@ fn init_recording_microphone<
     recording_configs: Arc<RecorderConfigs>,
     audio_sender: crossbeam::channel::Sender<Vec<T>>,
 ) -> Arc<AudioDevice<Recorder<T>>> {
-    let freq = recording_configs.sample_rate();
-    let channels = recording_configs.num_channels();
-    let buffer_size = recording_configs.buffer_size();
+    let freq = recording_configs.extract_sample_rate();
+    let channels = recording_configs.extract_num_channels();
+    let buffer_size = recording_configs.extract_buffer_size();
     let desired_audio_spec = microphone::get_desired_audio_spec(freq, channels, buffer_size);
     init_microphone(audio_subsystem, &desired_audio_spec, audio_sender)
 }

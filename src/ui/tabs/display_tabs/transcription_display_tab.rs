@@ -34,6 +34,7 @@ impl TranscriptionTab {
     }
 
     // Static header
+    // TODO: Re-implement -> Needs an extra flag to indicate file + loading.
     fn static_header(ui: &mut Ui, controller: &WhisperAppController) {
         let system_theme = controller.get_system_theme();
         let theme = preferences::get_app_theme(system_theme);
@@ -96,6 +97,7 @@ impl TranscriptionTab {
     }
 
     // Realtime toolbar
+    // ie. Buttons for starting/stopping/saving/etc
     fn realtime_toolbar(ui: &mut Ui, controller: &mut WhisperAppController) {
         todo!()
     }
@@ -203,6 +205,7 @@ impl tab_view::TabView for TranscriptionTab {
     }
 
     // Right-click tab -> context actions for text operations
+    // TODO: Determine if necessary.
     fn context_menu(
         &mut self,
         _ui: &mut Ui,
@@ -210,7 +213,6 @@ impl tab_view::TabView for TranscriptionTab {
         _surface: SurfaceIndex,
         _node: NodeIndex,
     ) {
-        todo!()
     }
 
     fn closeable(&mut self) -> bool {

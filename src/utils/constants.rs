@@ -1,5 +1,10 @@
 use std::time::Duration;
 
+// TODO: Implement user preferences pane.
+
+pub const BLANK_SEPARATOR: f32 = 12.0;
+pub const DEFAULT_ERROR_HISTORY_SIZE: usize = 35;
+
 // 2 hours, in ms.
 pub const MAX_REALTIME_TIMEOUT: u128 = Duration::new(7200, 0).as_millis();
 

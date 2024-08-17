@@ -54,7 +54,7 @@ impl tab_view::TabView for RecordingConfigsTab {
 
         let recorder_running = controller.recorder_running();
 
-        let recorder_ready = controller.ready();
+        let recorder_ready = controller.recorder_ready();
         todo!()
         // Grid of configs + button for default.
     }

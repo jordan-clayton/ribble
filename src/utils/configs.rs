@@ -113,21 +113,21 @@ impl BufferSize {
 
 #[derive(Copy, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RecorderConfigs {
-    sample_rate: SampleRate,
-    buffer_size: BufferSize,
-    channel: Channel,
-    format: RecordingFormat,
+    pub sample_rate: SampleRate,
+    pub buffer_size: BufferSize,
+    pub channel: Channel,
+    pub format: RecordingFormat,
 }
 
 impl RecorderConfigs {
-    pub fn sample_rate(&self) -> Option<i32> {
+    pub fn extract_sample_rate(&self) -> Option<i32> {
         self.sample_rate.sample_rate()
     }
-    pub fn num_channels(&self) -> Option<u8> {
+    pub fn extract_num_channels(&self) -> Option<u8> {
         self.channel.num_channels()
     }
 
-    pub fn buffer_size(&self) -> Option<u16> {
+    pub fn extract_buffer_size(&self) -> Option<u16> {
         self.buffer_size.size()
     }
 }
