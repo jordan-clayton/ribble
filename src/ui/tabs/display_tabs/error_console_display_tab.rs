@@ -45,7 +45,7 @@ impl tab_view::TabView for ErrorConsoleDisplayTab {
         let Self { title: _, errors } = self;
 
         // Get errors
-        let new_error = controller.receive_error();
+        let new_error = controller.recv_error();
         let mut len = errors.len();
         if let Ok(message) = new_error {
             errors.push_back(message);
@@ -79,8 +79,7 @@ impl tab_view::TabView for ErrorConsoleDisplayTab {
         controller: &mut WhisperAppController,
         surface: SurfaceIndex,
         node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

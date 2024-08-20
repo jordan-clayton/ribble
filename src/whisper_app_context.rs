@@ -76,10 +76,6 @@ impl WhisperAppController {
         self.0.static_ready.load(Ordering::Acquire)
     }
 
-    pub fn recorder_ready(&self) -> bool {
-        self.0.recorder_ready.load(Ordering::Acquire)
-    }
-
     // RUNNING
     pub fn is_downloading(&self) -> bool {
         self.0.downloading.load(Ordering::Acquire)
@@ -105,6 +101,16 @@ impl WhisperAppController {
     }
 
     // MSG HANDLING
+    // CONFIGS REQUESTS
+    pub fn recv_realtime_configs_req(&self) -> Result<(), crossbeam::channel::TryRecvError> {
+        self.0.realtime_configs_request_receiver.try_recv()
+    }
+    pub fn recv_static_configs_req(&self) -> Result<(), crossbeam::channel::TryRecvError> {
+        self.0.static_configs_request_receiver.try_recv()
+    }
+    pub fn recv_recording_configs_req(&self) -> Result<(), crossbeam::channel::TryRecvError> {
+        self.0.recording_configs_request_receiver.try_recv()
+    }
 
     pub fn send_progress(
         &self,
@@ -115,6 +121,16 @@ impl WhisperAppController {
 
     pub fn recv_progress(&self) -> Result<Progress, crossbeam::channel::TryRecvError> {
         self.0.progress_receiver.try_recv()
+    }
+    pub fn send_error(
+        &self,
+        error: WhisperRealtimeError,
+    ) -> Result<(), crossbeam::channel::SendError<WhisperRealtimeError>> {
+        self.0.error_sender.send(error)
+    }
+
+    pub fn recv_error(&self) -> Result<WhisperRealtimeError, crossbeam::channel::TryRecvError> {
+        self.0.error_receiver.try_recv()
     }
 
     fn realtime_audio_sender(&self) -> crossbeam::channel::Sender<Vec<f32>> {
@@ -160,23 +176,13 @@ impl WhisperAppController {
         self.0.transcription_text_sender.clone()
     }
 
-    pub fn receive_transcription_text(
+    pub fn recv_transcription_text(
         &self,
     ) -> Result<Result<(String, bool), WhisperRealtimeError>, crossbeam::channel::TryRecvError>
     {
         self.0.transcription_text_receiver.try_recv()
     }
 
-    pub fn send_error(
-        &self,
-        error: WhisperRealtimeError,
-    ) -> Result<(), crossbeam::channel::SendError<WhisperRealtimeError>> {
-        self.0.error_sender.send(error)
-    }
-
-    pub fn receive_error(&self) -> Result<WhisperRealtimeError, crossbeam::channel::TryRecvError> {
-        self.0.error_receiver.try_recv()
-    }
 
     // TODO: Figure out how to implement a "Setup Progress message"
     // TODO: These can't be scoped threads or the gui will block.
@@ -278,6 +284,7 @@ impl WhisperAppController {
     // TODO: These should probably panic if there is no thread-handle to join.
     // TODO: Possibly do this on a thread.
     // TODO: factor out error function
+    // TODO: See threading.rs
     pub fn close_worker(&mut self, worker_type: WorkerType) {
         assert!(
             !self.is_working(),
@@ -658,9 +665,10 @@ fn init_whisper_ctx(
         model_path.to_str().expect("Failed to stringify path"),
         whisper_ctx_params,
     )
-    .expect("Failed to load model")
+        .expect("Failed to load model")
 }
 
+// TODO: msg channel for FFT to display frequency graph.
 struct WhisperAppContext {
     // SYSTEM THEME
     system_theme: Mutex<Option<eframe::Theme>>,
@@ -669,7 +677,6 @@ struct WhisperAppContext {
     // STATE
     realtime_ready: Arc<AtomicBool>,
     static_ready: Arc<AtomicBool>,
-    recorder_ready: Arc<AtomicBool>,
 
     // WORKER FLAGS
     downloading: Arc<AtomicBool>,
@@ -707,9 +714,9 @@ struct WhisperAppContext {
     // GUI CHANNELS (UNBOUNDED):
     // Transcription channel for passing text output
     transcription_text_sender:
-        crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>>,
+    crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>>,
     transcription_text_receiver:
-        crossbeam::channel::Receiver<Result<(String, bool), WhisperRealtimeError>>,
+    crossbeam::channel::Receiver<Result<(String, bool), WhisperRealtimeError>>,
 
     progress_sender: crossbeam::channel::Sender<Progress>,
     progress_receiver: crossbeam::channel::Receiver<Progress>,
@@ -719,7 +726,7 @@ struct WhisperAppContext {
 
     // TODO: refactor into msg queue.
     active_threads:
-        Mutex<HashMap<&'static str, JoinHandle<Result<String, Box<dyn std::any::Any + Send>>>>>,
+    Mutex<HashMap<&'static str, JoinHandle<Result<String, Box<dyn std::any::Any + Send>>>>>,
 }
 
 impl WhisperAppContext {
@@ -745,7 +752,6 @@ impl WhisperAppContext {
         let downloading = Arc::new(AtomicBool::new(false));
         let realtime_ready = Arc::new(AtomicBool::new(false));
         let static_ready = Arc::new(AtomicBool::new(false));
-        let recorder_ready = Arc::new(AtomicBool::new(false));
 
         let realtime_running = Arc::new(AtomicBool::new(false));
         let static_running = Arc::new(AtomicBool::new(false));
@@ -784,7 +790,6 @@ impl WhisperAppContext {
             audio_wrapper,
             realtime_ready,
             static_ready,
-            recorder_ready,
             downloading,
             realtime_running,
             static_running,

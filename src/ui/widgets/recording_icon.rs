@@ -1,12 +1,12 @@
+use egui::{Color32, lerp, Response, Rgba, Sense, Stroke, Ui, vec2, Widget};
 use egui::emath::easing::quadratic_out;
-use egui::{lerp, vec2, Color32, Response, Rgba, Sense, Stroke, Ui, Widget};
 
 use crate::utils::constants;
 
 // TODO: possibly add speed for cosine
 fn draw_recording_icon(ui: &mut Ui, color: Rgba, animate: bool) -> Response {
     let desired_size = ui.spacing().interact_size.y * vec2(1.0, 1.0);
-    let (rect, mut response) = ui.allocate_exact_size(desired_size, Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(desired_size, Sense::hover());
 
     if ui.is_rect_visible(rect) {
         let mut color = color;

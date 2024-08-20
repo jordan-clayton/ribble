@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-// TODO: Implement user preferences pane.
-
 pub const BLANK_SEPARATOR: f32 = 12.0;
+
+// TODO: Consider implementing user preferences pane.
 pub const DEFAULT_ERROR_HISTORY_SIZE: usize = 35;
 
 // 2 hours, in ms.
@@ -16,11 +16,28 @@ pub const MAX_VAD_SAMPLE_MS: usize = 1000;
 pub const MIN_VAD_PROBABILITY: f32 = 0.5;
 pub const MAX_VAD_PROBABILITY: f32 = 0.9;
 
+// FFT CONSTANTS
+pub const DEFAULT_F_LOWER: f64 = 100f64;
+pub const DEFAULT_F_HIGHER: f64 = 4000f64;
+pub const NUM_BUCKETS: usize = 64;
+pub const SMOOTH_FACTOR: f32 = 8.0;
+
+// TODO: SETTLE ON PROPER VALUES
+pub const MIN_LOW_FREQUENCY: f32 = 25.0;
+pub const DEFAULT_LOW_FREQUENCY: f32 = 100.0;
+pub const MAX_LOW_FREQUENCY: f32 = 300.0;
+pub const MIN_HIGH_FREQUENCY: f32 = 330.0;
+pub const DEFAULT_HIGH_FREQUENCY: f32 = 1000.0;
+pub const MAX_HIGH_FREQUENCY: f32 = 10000.0;
+
+
 pub const APP_ID: &str = "WhisperGUI";
 pub const QUALIFIER: &str = "com";
 pub const ORGANIZATION: &str = "Jordan";
 
 pub const CLEAR_MSG: &str = "[CLEAR]";
+
+pub const TEMP_FILE: &str = "tmp.wav";
 
 // TODO: pick an appropriate livelock timeout.
 pub const CHANNEL_TIMEOUT: Duration = Duration::from_millis(10);

@@ -132,7 +132,7 @@ impl tab_view::TabView for TranscriptionTab {
 
         // UPDATE STATE
         // Handle new text.
-        let new_text_message = controller.receive_transcription_text();
+        let new_text_message = controller.recv_transcription_text();
         if let Ok(message) = new_text_message {
             match message {
                 Ok(t) => {
@@ -212,8 +212,7 @@ impl tab_view::TabView for TranscriptionTab {
         controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

@@ -1,3 +1,6 @@
+use strum::{Display, EnumIter};
+
+// TODO: Remove this if unused - Refactor impl to use a bg joiner thread.
 #[derive(Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorkerType {
     DOWNLOADING,
@@ -45,17 +48,34 @@ pub enum AudioConfigType {
     RECORDING,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter,
+)]
 pub enum RecordingFormat {
     I16,
     I32,
     F32,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+impl RecordingFormat {
+    pub fn tooltip(&self) -> &str {
+        match self {
+            RecordingFormat::I16 => { "16-bit signed integer format. Audio CD quality." }
+            RecordingFormat::I32 => { "32-bit signed integer format. Wider dynamic range, but slower to process." }
+            RecordingFormat::F32 => { "32-bit floating point format. Highest dynamic range, but large file size." }
+        }
+    }
+}
+
+#[derive(
+    Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter,
+)]
 pub enum Channel {
+    #[strum(to_string = "Default")]
     DEFAULT,
+    #[strum(to_string = "Mono")]
     MONO,
+    #[strum(to_string = "Stereo")]
     STEREO,
 }
 
@@ -69,17 +89,24 @@ impl Channel {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter,
+)]
 pub enum SampleRate {
+    #[strum(to_string = "Default")]
     DEFAULT,
+    #[strum(to_string = "Low")]
     LOW,
+    #[strum(to_string = "Medium")]
     MEDIUM,
+    #[strum(to_string = "High")]
     HIGH,
+    #[strum(to_string = "Highest")]
     HIGHEST,
 }
 
 impl SampleRate {
-    fn sample_rate(&self) -> Option<i32> {
+    pub fn sample_rate(&self) -> Option<i32> {
         match self {
             SampleRate::DEFAULT => None,
             SampleRate::LOW => Some(8000),
@@ -90,23 +117,30 @@ impl SampleRate {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter,
+)]
 pub enum BufferSize {
+    #[strum(to_string = "Default")]
     DEFAULT,
+    #[strum(to_string = "Small")]
     SMALL,
+    #[strum(to_string = "Medium")]
     MEDIUM,
+    #[strum(to_string = "Large")]
     LARGE,
+    #[strum(to_string = "Huge")]
     HUGE,
 }
 
 impl BufferSize {
-    fn size(&self) -> Option<u16> {
+    pub fn size(&self) -> Option<u16> {
         match self {
             BufferSize::DEFAULT => None,
-            BufferSize::SMALL => Some(256),
-            BufferSize::MEDIUM => Some(512),
-            BufferSize::LARGE => Some(1024),
-            BufferSize::HUGE => Some(2048),
+            BufferSize::SMALL => Some(512),
+            BufferSize::MEDIUM => Some(1024),
+            BufferSize::LARGE => Some(2048),
+            BufferSize::HUGE => Some(4096),
         }
     }
 }
@@ -117,6 +151,10 @@ pub struct RecorderConfigs {
     pub buffer_size: BufferSize,
     pub channel: Channel,
     pub format: RecordingFormat,
+    pub filter: bool,
+    pub f_lower: f32,
+    pub f_higher: f32,
+
 }
 
 impl RecorderConfigs {
