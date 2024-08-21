@@ -1,22 +1,20 @@
 use std::collections::HashMap;
 
-use eframe::{Storage, Theme};
+use eframe::Storage;
 use egui_dock::{DockArea, DockState, NodeIndex, Style};
 
-use crate::ui::tabs::config_tabs::recording_configs_tab;
-use crate::ui::tabs::display_tabs::{error_console_display_tab, recording_display_tab};
-use crate::utils::preferences;
-use crate::utils::sdl_audio_wrapper::SdlAudioWrapper;
-use crate::whisper_app_context::WhisperAppController;
-
-use super::tabs::{
-    config_tabs::{realtime_configs_tab, static_configs_tab},
-    display_tabs::{progress_display_tab, transcription_display_tab},
-    tab_viewer, whisper_tab,
+use crate::{
+    ui::tabs::{
+        config_tabs::{realtime_configs_tab, recording_configs_tab, static_configs_tab},
+        display_tabs::{
+            console_display_tab, progress_display_tab, recording_display_tab,
+            transcription_display_tab,
+        },
+        tab_viewer, whisper_tab,
+    },
+    utils::preferences,
+    whisper_app_context::WhisperAppController,
 };
-
-// TODO: finish App implementation.
-// TODO: eframe::save & periodic configs serialization.
 
 pub struct WhisperApp {
     // These need to be serialized
@@ -28,21 +26,18 @@ pub struct WhisperApp {
 // ** TODO, add toasts -> on click should focus the error tab.
 
 impl WhisperApp {
-    pub fn new(
-        cc: &eframe::CreationContext<'_>,
-        audio_wrapper: std::sync::Arc<SdlAudioWrapper>,
-    ) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, mut controller: WhisperAppController) -> Self {
         let storage = cc.storage;
         let system_theme = cc.integration_info.system_theme;
+        controller.set_system_theme(system_theme);
         match storage {
-            None => Self::default_layout(audio_wrapper, system_theme),
+            None => Self::default_layout(controller),
             Some(s) => {
                 let stored_state = eframe::get_value(s, eframe::APP_KEY);
                 match stored_state {
-                    None => Self::default_layout(audio_wrapper, system_theme),
+                    None => Self::default_layout(controller),
                     Some(state) => {
-                        let (tree, mut closed_tabs) = state;
-                        let controller = WhisperAppController::new(audio_wrapper, system_theme);
+                        let (tree, closed_tabs) = state;
                         Self {
                             tree,
                             closed_tabs,
@@ -54,13 +49,8 @@ impl WhisperApp {
         }
     }
 
-    fn default_layout(
-        audio_wrapper: std::sync::Arc<SdlAudioWrapper>,
-        system_theme: Option<Theme>,
-    ) -> Self {
-        let controller = WhisperAppController::new(audio_wrapper, system_theme);
-
-        let mut closed_tabs = HashMap::new();
+    fn default_layout(controller: WhisperAppController) -> Self {
+        let closed_tabs = HashMap::new();
 
         let td = whisper_tab::WhisperTab::TranscriptionDisplay(
             transcription_display_tab::TranscriptionTab::default(),
@@ -72,7 +62,7 @@ impl WhisperApp {
             progress_display_tab::ProgressDisplayTab::default(),
         );
         let ed = whisper_tab::WhisperTab::ErrorDisplay(
-            error_console_display_tab::ErrorConsoleDisplayTab::default(),
+            console_display_tab::ErrorConsoleDisplayTab::default(),
         );
         let rc = whisper_tab::WhisperTab::RealtimeConfigs(
             realtime_configs_tab::RealtimeConfigsTab::default(),

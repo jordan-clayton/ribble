@@ -1,8 +1,7 @@
 use egui::{Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
-use crate::ui::tabs::tab_view;
-use crate::whisper_app_context::WhisperAppController;
+use crate::{ui::tabs::tab_view, whisper_app_context::WhisperAppController};
 
 // TODO: Two buffers, current + target
 // On new data, change the target.
@@ -13,7 +12,6 @@ pub struct RecordingDisplayTab {
     // For determining whether to run/display the fft.
     visualize: bool,
 }
-
 
 // TODO: this will need a proper constructor.
 impl RecordingDisplayTab {
@@ -44,6 +42,7 @@ impl tab_view::TabView for RecordingDisplayTab {
         todo!()
     }
 
+    // TODO: determine if actually useful.
     fn context_menu(
         &mut self,
         ui: &mut Ui,
@@ -51,7 +50,6 @@ impl tab_view::TabView for RecordingDisplayTab {
         surface: SurfaceIndex,
         node: NodeIndex,
     ) {
-        todo!()
     }
 
     fn closeable(&mut self) -> bool {

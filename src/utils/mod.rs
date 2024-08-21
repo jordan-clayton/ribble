@@ -1,9 +1,10 @@
 pub mod configs;
+pub mod console_message;
 pub mod constants;
+pub mod errors;
+pub mod file_mgmt;
 pub mod preferences;
 pub mod progress;
-pub mod sdl_audio_wrapper;
-pub mod file_mgmt;
-pub mod threading;
 pub mod recording;
-pub mod console_message;
+pub mod sdl_audio_wrapper;
+pub mod threading;

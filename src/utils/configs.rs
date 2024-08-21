@@ -1,21 +1,30 @@
 use strum::{Display, EnumIter};
 
+use crate::utils::constants;
+
+#[derive(Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter)]
+pub enum LoadingState {
+    NotLoaded,
+    Loading,
+    Loaded,
+}
+
 // TODO: Remove this if unused - Refactor impl to use a bg joiner thread.
-#[derive(Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter)]
 pub enum WorkerType {
-    DOWNLOADING,
-    REALTIME,
-    STATIC,
-    RECORDING,
+    Downloading,
+    Realtime,
+    Static,
+    Recording,
 }
 
 impl WorkerType {
     pub fn to_key(&self) -> &str {
         match self {
-            WorkerType::DOWNLOADING => "downloading",
-            WorkerType::REALTIME => "realtime",
-            WorkerType::STATIC => "static",
-            WorkerType::RECORDING => "recording",
+            WorkerType::Downloading => "downloading",
+            WorkerType::Realtime => "realtime",
+            WorkerType::Static => "static",
+            WorkerType::Recording => "recording",
         }
     }
 }
@@ -43,9 +52,9 @@ impl AudioConfigs {
 
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum AudioConfigType {
-    REALTIME,
-    STATIC,
-    RECORDING,
+    Realtime,
+    Static,
+    Recording,
 }
 
 #[derive(
@@ -57,12 +66,22 @@ pub enum RecordingFormat {
     F32,
 }
 
+impl Default for RecordingFormat {
+    fn default() -> Self {
+        Self::I16
+    }
+}
+
 impl RecordingFormat {
     pub fn tooltip(&self) -> &str {
         match self {
-            RecordingFormat::I16 => { "16-bit signed integer format. Audio CD quality." }
-            RecordingFormat::I32 => { "32-bit signed integer format. Wider dynamic range, but slower to process." }
-            RecordingFormat::F32 => { "32-bit floating point format. Highest dynamic range, but large file size." }
+            RecordingFormat::I16 => "16-bit signed integer format. Audio CD quality.",
+            RecordingFormat::I32 => {
+                "32-bit signed integer format. Wider dynamic range, but slower to process."
+            }
+            RecordingFormat::F32 => {
+                "32-bit floating point format. Highest dynamic range, but large file size."
+            }
         }
     }
 }
@@ -71,21 +90,24 @@ impl RecordingFormat {
     Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter,
 )]
 pub enum Channel {
-    #[strum(to_string = "Default")]
-    DEFAULT,
-    #[strum(to_string = "Mono")]
-    MONO,
-    #[strum(to_string = "Stereo")]
-    STEREO,
+    Default,
+    Mono,
+    Stereo,
 }
 
 impl Channel {
     fn num_channels(&self) -> Option<u8> {
         match self {
-            Channel::DEFAULT => None,
-            Channel::MONO => Some(1),
-            Channel::STEREO => Some(2),
+            Channel::Default => None,
+            Channel::Mono => Some(1),
+            Channel::Stereo => Some(2),
         }
+    }
+}
+
+impl Default for Channel {
+    fn default() -> Self {
+        Self::Default
     }
 }
 
@@ -93,27 +115,28 @@ impl Channel {
     Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter,
 )]
 pub enum SampleRate {
-    #[strum(to_string = "Default")]
-    DEFAULT,
-    #[strum(to_string = "Low")]
-    LOW,
-    #[strum(to_string = "Medium")]
-    MEDIUM,
-    #[strum(to_string = "High")]
-    HIGH,
-    #[strum(to_string = "Highest")]
-    HIGHEST,
+    Default,
+    Low,
+    Medium,
+    High,
+    Highest,
 }
 
 impl SampleRate {
     pub fn sample_rate(&self) -> Option<i32> {
         match self {
-            SampleRate::DEFAULT => None,
-            SampleRate::LOW => Some(8000),
-            SampleRate::MEDIUM => Some(16000),
-            SampleRate::HIGH => Some(22050),
-            SampleRate::HIGHEST => Some(44100),
+            SampleRate::Default => None,
+            SampleRate::Low => Some(8000),
+            SampleRate::Medium => Some(16000),
+            SampleRate::High => Some(22050),
+            SampleRate::Highest => Some(44100),
         }
+    }
+}
+
+impl Default for SampleRate {
+    fn default() -> Self {
+        Self::Default
     }
 }
 
@@ -121,27 +144,28 @@ impl SampleRate {
     Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter,
 )]
 pub enum BufferSize {
-    #[strum(to_string = "Default")]
-    DEFAULT,
-    #[strum(to_string = "Small")]
-    SMALL,
-    #[strum(to_string = "Medium")]
-    MEDIUM,
-    #[strum(to_string = "Large")]
-    LARGE,
-    #[strum(to_string = "Huge")]
-    HUGE,
+    Default,
+    Small,
+    Medium,
+    Large,
+    Huge,
 }
 
 impl BufferSize {
     pub fn size(&self) -> Option<u16> {
         match self {
-            BufferSize::DEFAULT => None,
-            BufferSize::SMALL => Some(512),
-            BufferSize::MEDIUM => Some(1024),
-            BufferSize::LARGE => Some(2048),
-            BufferSize::HUGE => Some(4096),
+            BufferSize::Default => None,
+            BufferSize::Small => Some(512),
+            BufferSize::Medium => Some(1024),
+            BufferSize::Large => Some(2048),
+            BufferSize::Huge => Some(4096),
         }
+    }
+}
+
+impl Default for BufferSize {
+    fn default() -> Self {
+        Self::Default
     }
 }
 
@@ -154,7 +178,6 @@ pub struct RecorderConfigs {
     pub filter: bool,
     pub f_lower: f32,
     pub f_higher: f32,
-
 }
 
 impl RecorderConfigs {
@@ -172,6 +195,21 @@ impl RecorderConfigs {
 
 impl Default for RecorderConfigs {
     fn default() -> Self {
-        todo!()
+        let sample_rate = SampleRate::default();
+        let buffer_size = BufferSize::default();
+        let channel = Channel::default();
+        let format = RecordingFormat::default();
+        let filter = false;
+        let f_lower = constants::DEFAULT_F_LOWER;
+        let f_higher = constants::DEFAULT_F_HIGHER;
+        Self {
+            sample_rate,
+            buffer_size,
+            channel,
+            format,
+            filter,
+            f_lower,
+            f_higher,
+        }
     }
 }

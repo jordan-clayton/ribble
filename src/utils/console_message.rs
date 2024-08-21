@@ -2,6 +2,7 @@ use std::fmt::Formatter;
 
 use strum::Display;
 
+#[derive(Clone, Debug)]
 pub struct ConsoleMessage {
     msg_type: ConsoleMessageType,
     msg: String,
@@ -19,8 +20,8 @@ impl ConsoleMessage {
     }
 }
 
-#[derive(Display)]
+#[derive(Clone, Debug, Display)]
 pub enum ConsoleMessageType {
-    ERROR,
-    STATUS,
+    Error,
+    Status,
 }

@@ -3,9 +3,15 @@ use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::IntoEnumIterator;
 
 use crate::ui::tabs::tab_view;
-use crate::utils::configs::{AudioConfigs, BufferSize, Channel, RecorderConfigs, RecordingFormat, SampleRate};
-use crate::utils::constants;
-use crate::whisper_app_context::WhisperAppController;
+use crate::{
+    utils::{
+        configs::{
+            AudioConfigs, BufferSize, Channel, RecorderConfigs, RecordingFormat, SampleRate,
+        },
+        constants,
+    },
+    whisper_app_context::WhisperAppController,
+};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RecordingConfigsTab {
@@ -61,9 +67,10 @@ impl tab_view::TabView for RecordingConfigsTab {
         // Check for config-copy requests.
         let req = controller.recv_recording_configs_req();
         if let Ok(_) = req {
-            controller.send_configs(AudioConfigs::Recording(c_configs)).expect("Configs channel closed.");
+            controller
+                .send_configs(AudioConfigs::Recording(c_configs))
+                .expect("Configs channel closed.");
         }
-
 
         // *** flag for enabled
         let recorder_running = controller.recorder_running();
@@ -183,7 +190,8 @@ impl tab_view::TabView for RecordingConfigsTab {
         controller: &mut WhisperAppController,
         surface: SurfaceIndex,
         node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

@@ -1,14 +1,16 @@
 use egui::{Button, Checkbox, ComboBox, Grid, Slider, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::VariantArray;
-use whisper_realtime::configs::Configs;
-use whisper_realtime::model::{Model, ModelType};
+use whisper_realtime::{
+    configs::Configs,
+    model::{Model, ModelType},
+};
 
-use crate::ui::tabs::tab_view;
-use crate::utils::configs::AudioConfigs;
-use crate::utils::constants;
-use crate::utils::threading::get_max_threads;
-use crate::whisper_app_context::WhisperAppController;
+use crate::{
+    ui::tabs::tab_view,
+    utils::{configs::AudioConfigs, constants, threading::get_max_threads},
+    whisper_app_context::WhisperAppController,
+};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StaticConfigsTab {
@@ -84,7 +86,9 @@ impl tab_view::TabView for StaticConfigsTab {
         // Check for config-copy requests
         let req = controller.recv_static_configs_req();
         if let Ok(_) = req {
-            controller.send_configs(AudioConfigs::Static(c_configs)).expect("Configs channel closed.");
+            controller
+                .send_configs(AudioConfigs::Static(c_configs))
+                .expect("Configs channel closed.");
         }
 
         let downloading = controller.is_downloading();
@@ -117,14 +121,14 @@ impl tab_view::TabView for StaticConfigsTab {
 
                     if model_downloaded {
                         if !static_ready {
-                            controller.update_realtime_ready(true);
+                            controller.update_static_ready(true);
                         }
                         // Okay icon
                         // ui.add(okay icon);
                         ui.label("-Okay icon- here");
                     } else {
                         if static_ready {
-                            controller.update_realtime_ready(false);
+                            controller.update_static_ready(false);
                         }
                         // Warning icon
                         // ui.add(warning icon);

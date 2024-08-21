@@ -8,6 +8,13 @@ pub struct Progress {
 }
 
 impl Progress {
+    pub fn new(job_name: String, progress: usize, total_size: usize) -> Self {
+        Self {
+            job_name,
+            progress,
+            total_size,
+        }
+    }
     pub fn finished(&self) -> bool {
         self.progress == self.total_size
     }

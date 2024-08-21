@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use egui::{Id, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
-use crate::whisper_app_context::WhisperAppController;
-
-use super::{tab_view::TabView, whisper_tab::WhisperTab};
+use crate::{
+    ui::tabs::{tab_view::TabView, whisper_tab::WhisperTab},
+    whisper_app_context::WhisperAppController,
+};
 
 pub struct WhisperTabViewer<'a> {
     controller: WhisperAppController,

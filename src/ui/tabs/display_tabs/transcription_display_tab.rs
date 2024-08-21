@@ -1,11 +1,17 @@
 use egui::{CentralPanel, Layout, ScrollArea, SidePanel, Ui, Widget, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
-use crate::ui::tabs::tab_view;
-use crate::ui::widgets::recording_icon::recording_icon;
-use crate::ui::widgets::toggle_switch;
-use crate::utils::{constants, preferences};
-use crate::whisper_app_context::WhisperAppController;
+use crate::{
+    ui::{
+        tabs::tab_view,
+        widgets::{recording_icon::recording_icon, toggle_switch::toggle},
+    },
+    utils::{
+        console_message::{ConsoleMessage, ConsoleMessageType},
+        constants, preferences,
+    },
+    whisper_app_context::WhisperAppController,
+};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TranscriptionTab {
@@ -39,19 +45,22 @@ impl TranscriptionTab {
         let system_theme = controller.get_system_theme();
         let theme = preferences::get_app_theme(system_theme);
 
-        let mut icon = None;
-        let mut msg = "";
-
-        if controller.static_running() {
-            icon = Some(recording_icon(egui::Rgba::from(theme.red), true));
-            msg = "Transcribing in progress."
+        let (icon, msg) = if controller.static_running() {
+            (
+                Some(recording_icon(egui::Rgba::from(theme.red), true)),
+                "Transcribing in progress.",
+            )
         } else if controller.static_ready() {
-            icon = Some(recording_icon(egui::Rgba::from(theme.green), false));
-            msg = "Ready to transcribe."
+            (
+                Some(recording_icon(egui::Rgba::from(theme.green), false)),
+                "Ready to transcribe.",
+            )
         } else {
-            icon = Some(recording_icon(egui::Rgba::from(theme.yellow), false));
-            msg = "Not ready."
-        }
+            (
+                Some(recording_icon(egui::Rgba::from(theme.yellow), false)),
+                "Not ready.",
+            )
+        };
 
         let icon = icon.expect("Recording icon not set");
 
@@ -157,7 +166,10 @@ impl tab_view::TabView for TranscriptionTab {
                     }
                 }
                 Err(e) => {
-                    controller.send_error(e).expect("Error channel closed");
+                    let msg = ConsoleMessage::new(ConsoleMessageType::Error, e.to_string());
+                    controller
+                        .send_console_message(msg)
+                        .expect("Error channel closed");
                 }
             }
         }
@@ -167,7 +179,7 @@ impl tab_view::TabView for TranscriptionTab {
         SidePanel::right("realtime_panel").show_inside(ui, |ui| {
             ui.with_layout(Layout::right_to_left(Default::default()), |ui| {
                 // Toggle button.
-                ui.add(toggle_switch::toggle(realtime_mode));
+                ui.add(toggle(realtime_mode));
                 // Label
                 let label = if *realtime_mode { "Realtime" } else { "Static" };
 
@@ -212,7 +224,8 @@ impl tab_view::TabView for TranscriptionTab {
         controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

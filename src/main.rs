@@ -1,22 +1,31 @@
+use std::thread;
+
 use directories::ProjectDirs;
 use eframe;
 use egui::ViewportBuilder;
 
-use crate::ui::app::WhisperApp;
-use crate::utils::constants;
-use crate::utils::sdl_audio_wrapper::SdlAudioWrapper;
+use crate::{
+    ui::app::WhisperApp,
+    utils::{
+        constants,
+        errors::{WhisperAppError, WhisperAppErrorType},
+        sdl_audio_wrapper::SdlAudioWrapper,
+        threading::join_threads_loop,
+    },
+    whisper_app_context::WhisperAppController,
+};
 
 mod ui;
 mod utils;
 mod whisper_app_context;
 
-fn main() -> eframe::Result<()> {
+fn main() -> Result<(), WhisperAppError> {
     let proj_dirs = ProjectDirs::from(
         constants::QUALIFIER,
         constants::ORGANIZATION,
         constants::APP_ID,
     )
-    .expect("Failed to get proj dir");
+        .expect("Failed to get proj dir");
     let data_dir = proj_dirs.data_dir();
     let mut native_options = eframe::NativeOptions::default();
     let viewport = build_viewport();
@@ -33,13 +42,44 @@ fn main() -> eframe::Result<()> {
     let audio_wrapper = SdlAudioWrapper { audio_subsystem };
     let audio_wrapper = std::sync::Arc::new(audio_wrapper);
 
-    // TODO: spawn a background thread for the controller to spawn threads.
+    // Bg thread queue
+    let (sender, receiver) = crossbeam::channel::unbounded();
+    let c_receiver = receiver.clone();
 
-    eframe::run_native(
+    // App controller - Theme is set upon app construction.
+    let controller = WhisperAppController::new(audio_wrapper, None, sender);
+
+    let c_controller = controller.clone();
+
+    // Bg thread to join threads spawned by the app.
+    let joiner_thread = thread::spawn(move || {
+        join_threads_loop(c_receiver, c_controller);
+    });
+
+    let app = eframe::run_native(
         constants::APP_ID,
         native_options,
-        Box::new(|cc| Ok(Box::new(WhisperApp::new(cc, audio_wrapper)))),
-    )
+        Box::new(|cc| Ok(Box::new(WhisperApp::new(cc, controller)))),
+    );
+
+    let t = joiner_thread.join();
+    if let Err(e) = app {
+        let err = WhisperAppError::new(
+            WhisperAppErrorType::GUIError,
+            format!("Failed to set up GFX ctx, Error: {}", e),
+        );
+        return Err(err);
+    }
+
+    if let Err(e) = t {
+        let err = WhisperAppError::new(
+            WhisperAppErrorType::ThreadError,
+            format!("Thread panicked. Error: {:?}", e),
+        );
+        return Err(err);
+    }
+
+    Ok(())
 }
 
 // TODO: MacOS might require different configs to look more "Apple-y".

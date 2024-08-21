@@ -1,17 +1,18 @@
 // Encapsulation struct of trait T for covariant implementation type S.
-
 use egui::{Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
-use crate::ui::tabs::{
-    config_tabs::{realtime_configs_tab, recording_configs_tab, static_configs_tab},
-    display_tabs::{
-        error_console_display_tab, progress_display_tab, recording_display_tab,
-        transcription_display_tab,
+use crate::{
+    ui::tabs::{
+        config_tabs::{realtime_configs_tab, recording_configs_tab, static_configs_tab},
+        display_tabs::{
+            console_display_tab, progress_display_tab, recording_display_tab,
+            transcription_display_tab,
+        },
+        tab_view::TabView,
     },
-    tab_view::TabView,
+    whisper_app_context::WhisperAppController,
 };
-use crate::whisper_app_context::WhisperAppController;
 
 // This is a concession made to keep the implementation as decoupled as possible.
 // Generics are not possible due to the sized type bound required for egui_dock::TabViewer
@@ -24,7 +25,7 @@ pub enum WhisperTab {
     TranscriptionDisplay(transcription_display_tab::TranscriptionTab),
     RecordingDisplay(recording_display_tab::RecordingDisplayTab),
     ProgressDisplay(progress_display_tab::ProgressDisplayTab),
-    ErrorDisplay(error_console_display_tab::ErrorConsoleDisplayTab),
+    ErrorDisplay(console_display_tab::ErrorConsoleDisplayTab),
 }
 
 impl WhisperTab {
@@ -78,6 +79,7 @@ impl TabView for WhisperTab {
 fn id(tab: &mut impl TabView) -> String {
     tab.id()
 }
+
 fn title(tab: &mut impl TabView) -> WidgetText {
     tab.title()
 }

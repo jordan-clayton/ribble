@@ -2,26 +2,27 @@ use std::collections::VecDeque;
 
 use egui::{ScrollArea, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
-use whisper_realtime::errors::WhisperRealtimeError;
 
-use crate::ui::tabs::tab_view;
-use crate::utils::constants;
-use crate::whisper_app_context::WhisperAppController;
+use crate::{
+    ui::tabs::tab_view,
+    utils::{console_message::ConsoleMessage, constants},
+    whisper_app_context::WhisperAppController,
+};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ErrorConsoleDisplayTab {
     title: String,
-    #[serde(default = "error_history")]
+    #[serde(default = "console_history")]
     #[serde(skip)]
-    errors: VecDeque<WhisperRealtimeError>,
+    console_queue: VecDeque<ConsoleMessage>,
 }
 
 impl ErrorConsoleDisplayTab {
     pub fn new() -> Self {
-        let errors = error_history();
+        let errors = console_history();
         Self {
             title: String::from("Errors"),
-            errors,
+            console_queue: errors,
         }
     }
 }
@@ -42,16 +43,19 @@ impl tab_view::TabView for ErrorConsoleDisplayTab {
 
     // TODO: this will need to be refactored if/when App errors implemented.
     fn ui(&mut self, ui: &mut Ui, controller: &mut WhisperAppController) {
-        let Self { title: _, errors } = self;
+        let Self {
+            title: _,
+            console_queue: errors,
+        } = self;
 
         // Get errors
-        let new_error = controller.recv_error();
+        let new_error = controller.recv_console_message();
         let mut len = errors.len();
         if let Ok(message) = new_error {
             errors.push_back(message);
             len += 1;
 
-            if len > constants::DEFAULT_ERROR_HISTORY_SIZE {
+            if len > constants::DEFAULT_CONSOLE_HISTORY_SIZE {
                 errors.pop_front();
                 len -= 1;
             }
@@ -79,7 +83,8 @@ impl tab_view::TabView for ErrorConsoleDisplayTab {
         controller: &mut WhisperAppController,
         surface: SurfaceIndex,
         node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true
@@ -90,6 +95,6 @@ impl tab_view::TabView for ErrorConsoleDisplayTab {
     }
 }
 
-fn error_history() -> VecDeque<WhisperRealtimeError> {
-    VecDeque::with_capacity(constants::DEFAULT_ERROR_HISTORY_SIZE)
+fn console_history() -> VecDeque<ConsoleMessage> {
+    VecDeque::with_capacity(constants::DEFAULT_CONSOLE_HISTORY_SIZE)
 }

@@ -1,14 +1,16 @@
 use egui::{Button, Checkbox, ComboBox, Grid, Slider, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::{IntoEnumIterator, VariantArray};
-use whisper_realtime::configs::Configs;
-use whisper_realtime::model::{Model, ModelType};
+use whisper_realtime::{
+    configs::Configs,
+    model::{Model, ModelType},
+};
 
-use crate::ui::tabs::tab_view;
-use crate::utils::configs::AudioConfigs;
-use crate::utils::constants;
-use crate::utils::threading::get_max_threads;
-use crate::whisper_app_context::WhisperAppController;
+use crate::{
+    ui::tabs::tab_view,
+    utils::{configs::AudioConfigs, constants, threading::get_max_threads},
+    whisper_app_context::WhisperAppController,
+};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RealtimeConfigsTab {
@@ -83,7 +85,9 @@ impl tab_view::TabView for RealtimeConfigsTab {
         // Check for config-copy requests
         let req = controller.recv_realtime_configs_req();
         if let Ok(_) = req {
-            controller.send_configs(AudioConfigs::Realtime(c_configs)).expect("Configs channel closed.");
+            controller
+                .send_configs(AudioConfigs::Realtime(c_configs))
+                .expect("Configs channel closed.");
         }
 
         let downloading = controller.is_downloading();
@@ -115,8 +119,8 @@ impl tab_view::TabView for RealtimeConfigsTab {
                         });
 
                     let dir = eframe::storage_dir(constants::APP_ID).expect("Failed to get data dir.");
-                    let mut m_model = Model::new_with_type_and_dir(*model, dir);
-                    let mut model_downloaded = m_model.is_downloaded();
+                    let m_model = Model::new_with_type_and_dir(*model, dir);
+                    let model_downloaded = m_model.is_downloaded();
 
                     if model_downloaded {
                         if !realtime_ready {
@@ -135,10 +139,12 @@ impl tab_view::TabView for RealtimeConfigsTab {
                     }
 
                     // Open button
-                    if ui.button("Open").on_hover_ui(|ui| {
-                        ui.style_mut().interaction.selectable_labels = true;
-                        ui.label(format!("Open compatible {} model", model.to_string()));
-                    }).clicked() {
+                    if ui.button("Open")
+                        .on_hover_ui(|ui| {
+                            ui.style_mut().interaction.selectable_labels = true;
+                            ui.label(format!("Open compatible {} model", model.to_string()));
+                        }).clicked()
+                    {
                         // TODO: controller fn for opening model:
                         // -Open file dialog: get path
                         // -Copy the file to the models directory.
@@ -251,7 +257,7 @@ impl tab_view::TabView for RealtimeConfigsTab {
                 });
 
                 ui.horizontal(|ui| {
-                    ui.add(Slider::new(phrase_timeout, constants::MIN_AUDIO_CHUNK_SIZE..=constants::MAX_PHRASE_TIMEOUT)
+                    ui.add(Slider::new(phrase_timeout, constants::MAX_PHRASE_TIMEOUT..=constants::MAX_PHRASE_TIMEOUT)
                         .step_by(100f64));
                     ui.label({
                         let s = (*phrase_timeout as f32) / 1000f32;
@@ -343,7 +349,8 @@ impl tab_view::TabView for RealtimeConfigsTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

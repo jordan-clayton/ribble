@@ -3,9 +3,9 @@ use std::collections::HashSet;
 use egui::{Grid, ProgressBar, ScrollArea, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
-use crate::ui::tabs::tab_view;
-use crate::utils::progress::Progress;
-use crate::whisper_app_context::WhisperAppController;
+use crate::{
+    ui::tabs::tab_view, utils::progress::Progress, whisper_app_context::WhisperAppController,
+};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ProgressDisplayTab {

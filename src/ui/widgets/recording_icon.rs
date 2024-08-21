@@ -1,5 +1,6 @@
-use egui::{Color32, lerp, Response, Rgba, Sense, Stroke, Ui, vec2, Widget};
-use egui::emath::easing::quadratic_out;
+use egui::{
+    emath::easing::quadratic_out, lerp, vec2, Color32, Response, Rgba, Sense, Stroke, Ui, Widget,
+};
 
 use crate::utils::constants;
 

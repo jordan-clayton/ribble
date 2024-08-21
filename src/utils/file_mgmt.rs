@@ -1,19 +1,27 @@
-use std::fs::File;
-use std::io::{BufReader, BufWriter};
-use std::path::{Path, PathBuf};
+use std::{
+    fs::File,
+    io::{self, BufReader, BufWriter, ErrorKind, Write},
+    path::{Path, PathBuf},
+};
 
 use hound::{Sample, WavReader, WavSpec, WavWriter};
-use symphonia::core::audio::{Layout, SampleBuffer};
-use symphonia::core::codecs::{CODEC_TYPE_NULL, Decoder, DecoderOptions};
-use symphonia::core::errors::Error;
-use symphonia::core::formats::{FormatOptions, FormatReader};
-use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
-use symphonia::default::get_probe;
-use whisper_realtime::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
+use symphonia::{
+    core::{
+        audio::{Layout, SampleBuffer},
+        codecs::{Decoder, DecoderOptions, CODEC_TYPE_NULL},
+        errors::Error,
+        formats::{FormatOptions, FormatReader},
+        io::MediaSourceStream,
+        meta::MetadataOptions,
+        probe::Hint,
+    },
+    default::get_probe,
+};
 
-use crate::utils::constants;
+use crate::utils::{
+    constants,
+    errors::{WhisperAppError, WhisperAppErrorType},
+};
 
 fn qualify_path(dir: &Path) -> PathBuf {
     let mut path = dir.to_path_buf();
@@ -21,12 +29,15 @@ fn qualify_path(dir: &Path) -> PathBuf {
     path
 }
 
-pub fn copy_data(from: &Path, to: &Path) -> std::io::Result<()> {
+pub fn copy_data(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::copy(from, to)?;
     Ok(())
 }
 
-pub fn get_tmp_file_writer(data_dir: &Path, spec: &WavSpec) -> hound::Result<WavWriter<BufWriter<File>>> {
+pub fn get_tmp_file_writer(
+    data_dir: &Path,
+    spec: &WavSpec,
+) -> hound::Result<WavWriter<BufWriter<File>>> {
     let path = qualify_path(data_dir);
     get_wav_output_writer(path.as_path(), spec)
 }
@@ -36,7 +47,10 @@ pub fn get_tmp_file_reader(data_dir: &Path) -> hound::Result<WavReader<BufReader
     get_wav_input_reader(path.as_path())
 }
 
-pub fn get_wav_output_writer(path: &Path, spec: &WavSpec) -> hound::Result<WavWriter<BufWriter<File>>> {
+pub fn get_wav_output_writer(
+    path: &Path,
+    spec: &WavSpec,
+) -> hound::Result<WavWriter<BufWriter<File>>> {
     hound::WavWriter::create(path, *spec)
 }
 
@@ -44,50 +58,94 @@ pub fn get_wav_input_reader(path: &Path) -> hound::Result<WavReader<BufReader<Fi
     hound::WavReader::open(path)
 }
 
-pub fn get_audio_reader(path: &Path) -> Result<(u32, Box<dyn FormatReader>, Box<dyn Decoder>), WhisperRealtimeError> {
+pub fn get_audio_reader(
+    path: &Path,
+) -> Result<(u32, Box<dyn FormatReader>, Box<dyn Decoder>), WhisperAppError> {
     let src = File::open(path);
     if let Err(_e) = src.as_ref() {
-        let error = WhisperRealtimeError::new(WhisperRealtimeErrorType::ParameterError, format!("Invalid path: {:?}", path));
+        let error = WhisperAppError::new(
+            WhisperAppErrorType::ParameterError,
+            format!("Invalid path: {:?}", path),
+        );
         return Err(error);
     }
 
     let src = src.unwrap();
     let mss = MediaSourceStream::new(Box::new(src), Default::default());
     let mut hint = Hint::new();
-    let ext = path.extension().expect(&format!("Failed to parse file extension, {:?}", path));
-    let ext = ext.to_str().expect(&format!("Failed to convert OsStr {:?} to str", ext));
+
+    let ext = path.extension();
+    if ext.is_none() {
+        let error = WhisperAppError::new(
+            WhisperAppErrorType::IOError,
+            format!("Failed to parse file extension, {:?}", path),
+        );
+        return Err(error);
+    }
+    let ext = ext.unwrap();
+
+    let ext = ext.to_str();
+    if ext.is_none() {
+        let error = WhisperAppError::new(
+            WhisperAppErrorType::IOError,
+            format!("Failed to convert OsStr {:?} to str", ext),
+        );
+        return Err(error);
+    }
+
+    let ext = ext.unwrap();
+
     hint.with_extension(ext);
 
     let meta_opts: MetadataOptions = Default::default();
     let fmt_opts: FormatOptions = Default::default();
 
     let probe = get_probe().format(&hint, mss, &fmt_opts, &meta_opts);
-
     if let Err(e) = probe.as_ref() {
-        let error = WhisperRealtimeError::new(WhisperRealtimeErrorType::ParameterError, format!("Unsupported format: {}. Error: {}", ext, e));
+        let error = WhisperAppError::new(
+            WhisperAppErrorType::ParameterError,
+            format!("Unsupported file format. Error: {}", e),
+        );
         return Err(error);
     }
 
     let probe = probe.unwrap();
 
-
-    let mut format = probe.format;
-    let track = format.tracks().iter().find(|t| t.codec_params.codec != CODEC_TYPE_NULL);
+    let format = probe.format;
+    let track = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL);
     if track.is_none() {
-        let error = WhisperRealtimeError::new(WhisperRealtimeErrorType::ParameterError, String::from("No supported audio tracks"));
+        let error = WhisperAppError::new(
+            WhisperAppErrorType::ParameterError,
+            format!("Failed to find an audio track in {:?}", path),
+        );
         return Err(error);
     }
 
     let track = track.unwrap();
     let dec_opts: DecoderOptions = Default::default();
-    let mut decoder = symphonia::default::get_codecs().make(&track.codec_params, &dec_opts);
+    let decoder = symphonia::default::get_codecs().make(&track.codec_params, &dec_opts);
 
     if let Err(e) = decoder.as_ref() {
-        let error = WhisperRealtimeError::new(WhisperRealtimeErrorType::ParameterError, String::from("Unsupported codec"));
+        let error = WhisperAppError::new(
+            WhisperAppErrorType::ParameterError,
+            format!("Unsupported format. Error: {}", e),
+        );
         return Err(error);
     }
 
-    let mut decoder = decoder.unwrap();
+    let decoder = decoder;
+    if let Err(e) = decoder.as_ref() {
+        let error = WhisperAppError::new(
+            WhisperAppErrorType::ParameterError,
+            format!("Failed to get audio decoder. Error: {}", e),
+        );
+        return Err(error);
+    }
+
+    let decoder = decoder.unwrap();
 
     let track_id = track.id;
 
@@ -95,24 +153,63 @@ pub fn get_audio_reader(path: &Path) -> Result<(u32, Box<dyn FormatReader>, Box<
 }
 
 // This should be run on a separate thread.
-pub fn decode_audio(id: u32, mut reader: Box<dyn FormatReader>, mut decoder: Box<dyn Decoder>, audio_closure: Option<impl Fn(&[f32])>) -> Result<(), WhisperRealtimeError> {
+// Use the audio closure to receive packets of decoded audio.
+pub fn decode_audio(
+    id: u32,
+    mut reader: Box<dyn FormatReader>,
+    mut decoder: Box<dyn Decoder>,
+    audio_closure: Option<impl Fn(&[f32])>,
+) -> Result<(), WhisperAppError> {
     let mut sample_buf = None;
-    let channel_layout = decoder.codec_params().channel_layout.expect("Failed to get channel layout");
+    let channel_layout = decoder.codec_params().channel_layout;
+    if channel_layout.is_none() {
+        let error = WhisperAppError::new(
+            WhisperAppErrorType::ParameterError,
+            String::from("Decoder failed to get channel layout"),
+        );
+        return Err(error);
+    }
+    let channel_layout = channel_layout.unwrap();
+
     let in_mono = match channel_layout {
-        Layout::Mono => { true }
-        Layout::Stereo => { false }
-        _ => { panic!("Invalid channel format") }
+        Layout::Mono => Ok(true),
+        Layout::Stereo => Ok(false),
+        _ => {
+            let error = WhisperAppError::new(
+                WhisperAppErrorType::ParameterError,
+                String::from("Invalid channel format"),
+            );
+            Err(error)
+        }
     };
+
+    if let Err(e) = in_mono.as_ref() {
+        return Err(e.clone());
+    }
+    let in_mono = in_mono.unwrap();
 
     loop {
         let packet = match reader.next_packet() {
-            Ok(p) => { p }
+            Ok(p) => p,
             Err(Error::ResetRequired) => {
-                // Track list has been changed -> needs to be re-examined and then the decode loop needs restarting.
-                todo!();
+                decoder.reset();
+                continue;
+            }
+            Err(Error::IoError(e)) => {
+                if e.kind() == ErrorKind::UnexpectedEof {
+                    break;
+                }
+                let error = WhisperAppError::new(
+                    WhisperAppErrorType::Unknown,
+                    format!("Unable to decode audio samples. Error: {}", e),
+                );
+                return Err(error);
             }
             Err(e) => {
-                let error = WhisperRealtimeError::new(WhisperRealtimeErrorType::Unknown, String::from("Unable to decode audio samples."));
+                let error = WhisperAppError::new(
+                    WhisperAppErrorType::Unknown,
+                    format!("Unable to decode audio samples. Error: {}", e),
+                );
                 return Err(error);
             }
         };
@@ -126,7 +223,6 @@ pub fn decode_audio(id: u32, mut reader: Box<dyn FormatReader>, mut decoder: Box
         if packet.track_id() != id {
             continue;
         }
-
 
         // Decode the packet into audio samples.
         match decoder.decode(&packet) {
@@ -143,7 +239,9 @@ pub fn decode_audio(id: u32, mut reader: Box<dyn FormatReader>, mut decoder: Box
 
                     // Convert to mono for whisper.
                     if !in_mono {
-                        let mono = whisper_realtime::whisper_rs::convert_stereo_to_mono_audio(new_audio).expect("Failed to convert to mono");
+                        let mono =
+                            whisper_realtime::whisper_rs::convert_stereo_to_mono_audio(new_audio)
+                                .expect("Failed to convert to mono");
                         new_audio = mono.as_slice();
                         if let Some(closure) = audio_closure.as_ref() {
                             closure(new_audio);
@@ -155,34 +253,120 @@ pub fn decode_audio(id: u32, mut reader: Box<dyn FormatReader>, mut decoder: Box
                     }
                 }
             }
-            // TODO: Determine whether to send this to console.
-            // It might just be easier to panic the thread.
-            Err(Error::DecodeError(_e)) => {
-                let error = WhisperRealtimeError::new(WhisperRealtimeErrorType::ParameterError, String::from("Unsupported codec"));
-                return Err(error);
-                // TODO:
-                // This should be separated to handle:
-                // IoError, DecodeError
+            Err(Error::ResetRequired) => {
+                decoder.reset();
+                continue;
             }
-            Err(_) => break,
+            Err(Error::DecodeError(e)) => {
+                let error = WhisperAppError::new(
+                    WhisperAppErrorType::ParameterError,
+                    format!("Decode failure. {}", e),
+                );
+                return Err(error);
+            }
+            Err(Error::IoError(e)) => {
+                if e.kind() == ErrorKind::UnexpectedEof {
+                    break;
+                }
+                let error = WhisperAppError::new(
+                    WhisperAppErrorType::ParameterError,
+                    format!("IO Error. {}", e),
+                );
+                return Err(error);
+            }
+            Err(e) => {
+                let error = WhisperAppError::new(
+                    WhisperAppErrorType::ParameterError,
+                    format!("Decode failure. {}", e),
+                );
+                return Err(error);
+            }
         }
     }
     Ok(())
 }
 
-pub fn write_sample<T: Sample + Clone>(sample: &[T], writer: &mut WavWriter<BufWriter<File>>, progress_callback: Option<impl Fn(usize, usize) + Send + Sync + 'static>) {
+// TODO: edit once RFD implemented
+pub fn save_transcript(
+    file_path: &Path,
+    transcript: &str,
+    progress_callback: Option<impl Fn(usize)>,
+) -> Result<(), WhisperAppError> {
+    let mut byte_string = transcript.as_bytes();
+    let file = File::create(file_path);
+
+    if let Err(e) = file.as_ref() {
+        let error = WhisperAppError::new(
+            WhisperAppErrorType::IOError,
+            format!("Failed to write to file: {:?}. Error: {}", file_path, e),
+        );
+        return Err(error);
+    }
+
+    let file = file.unwrap();
+    let mut writer = BufWriter::new(file);
+    while !byte_string.is_empty() {
+        match writer.write(byte_string) {
+            Ok(0) => {
+                let error = WhisperAppError::new(
+                    WhisperAppErrorType::IOError,
+                    format!("Unexpected EOF, cannot write to: {:?}", file_path),
+                );
+                return Err(error);
+            }
+            Ok(n) => {
+                if let Some(callback) = progress_callback.as_ref() {
+                    callback(n)
+                }
+                byte_string = &byte_string[n..];
+            }
+            Err(e) => {
+                if e.kind() == ErrorKind::Interrupted {
+                    continue;
+                }
+
+                let error = WhisperAppError::new(
+                    WhisperAppErrorType::IOError,
+                    format!("Failed to write to file: {:?}.  Error: {}", file_path, e),
+                );
+                return Err(error);
+            }
+        }
+    }
+
+    let flushed = writer.flush();
+    if let Err(e) = flushed.as_ref() {
+        let error = WhisperAppError::new(
+            WhisperAppErrorType::IOError,
+            format!("Failed to write to file: {:?}. Error: {}", file_path, e),
+        );
+        return Err(error);
+    }
+
+    Ok(())
+}
+
+pub fn write_audio_sample<T: Sample + Clone>(
+    sample: &[T],
+    writer: &mut WavWriter<BufWriter<File>>,
+    progress_callback: Option<impl Fn(usize) + Send + Sync + 'static>,
+) {
     let len = sample.len();
 
     match progress_callback {
         None => {
             for i in 0..len {
-                writer.write_sample(sample[i].clone()).expect("Failed to write sample.");
+                writer
+                    .write_sample(sample[i].clone())
+                    .expect("Failed to write sample.");
             }
         }
         Some(c) => {
             for i in 0..len {
-                writer.write_sample(sample[i].clone()).expect("Failed to write sample");
-                c(i, len)
+                writer
+                    .write_sample(sample[i].clone())
+                    .expect("Failed to write sample");
+                c(i)
             }
         }
     };
