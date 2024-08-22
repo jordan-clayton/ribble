@@ -47,22 +47,20 @@ impl TranscriptionTab {
 
         let (icon, msg) = if controller.static_running() {
             (
-                Some(recording_icon(egui::Rgba::from(theme.red), true)),
+                recording_icon(egui::Rgba::from(theme.red), true),
                 "Transcribing in progress.",
             )
         } else if controller.static_ready() {
             (
-                Some(recording_icon(egui::Rgba::from(theme.green), false)),
+                recording_icon(egui::Rgba::from(theme.green), false),
                 "Ready to transcribe.",
             )
         } else {
             (
-                Some(recording_icon(egui::Rgba::from(theme.yellow), false)),
+                recording_icon(egui::Rgba::from(theme.yellow), false),
                 "Not ready.",
             )
         };
-
-        let icon = icon.expect("Recording icon not set");
 
         ui.horizontal(|ui| {
             ui.add(icon);
@@ -80,24 +78,27 @@ impl TranscriptionTab {
         let system_theme = controller.get_system_theme();
         let theme = preferences::get_app_theme(system_theme);
 
-        let mut icon = None;
-        let mut msg = "";
-
-        if accepting_speech {
-            icon = Some(recording_icon(egui::Rgba::from(theme.red), true));
-            msg = "Speak now.";
+        let (icon, msg) = if accepting_speech {
+            (
+                recording_icon(egui::Rgba::from(theme.red), true),
+                "Speak now.",
+            )
         } else if controller.realtime_running() {
-            icon = Some(recording_icon(egui::Rgba::from(theme.green), true));
-            msg = "Preparing to transcribe."
+            (
+                recording_icon(egui::Rgba::from(theme.green), true),
+                "Preparing to transcribe.",
+            )
         } else if controller.realtime_ready() {
-            icon = Some(recording_icon(egui::Rgba::from(theme.green), false));
-            msg = "Ready to transcribe."
+            (
+                recording_icon(egui::Rgba::from(theme.green), false),
+                "Ready to transcribe.",
+            )
         } else {
-            icon = Some(recording_icon(egui::Rgba::from(theme.yellow), false));
-            msg = "Not ready."
+            (
+                recording_icon(egui::Rgba::from(theme.yellow), false),
+                "Not ready.",
+            )
         };
-
-        let icon = icon.expect("Recording icon not set");
 
         ui.horizontal(|ui| {
             ui.add(icon);

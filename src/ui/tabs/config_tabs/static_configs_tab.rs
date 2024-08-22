@@ -1,3 +1,7 @@
+use std::any::Any;
+use std::path::PathBuf;
+use std::thread;
+
 use egui::{Button, Checkbox, ComboBox, Grid, Slider, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::VariantArray;
@@ -11,6 +15,9 @@ use crate::{
     utils::{configs::AudioConfigs, constants, threading::get_max_threads},
     whisper_app_context::WhisperAppController,
 };
+use crate::ui::tabs::tabs_common::{download_button, FileFilter, open_file_button};
+use crate::utils::configs::WorkerType;
+use crate::utils::file_mgmt::copy_data;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StaticConfigsTab {
@@ -105,6 +112,7 @@ impl tab_view::TabView for StaticConfigsTab {
 
                 let available_models: Vec<ModelType> = ModelType::VARIANTS.to_vec();
 
+                // TODO: Move to configs_common
                 ui.horizontal(|ui| {
                     ComboBox::from_id_source("modeltype")
                         .selected_text(model.to_string())
@@ -117,7 +125,7 @@ impl tab_view::TabView for StaticConfigsTab {
                     let dir =
                         eframe::storage_dir(constants::APP_ID).expect("Failed to get data dir.");
                     let mut m_model = Model::new_with_type_and_dir(*model, dir);
-                    let mut model_downloaded = m_model.is_downloaded();
+                    let model_downloaded = m_model.is_downloaded();
 
                     if model_downloaded {
                         if !static_ready {
@@ -135,37 +143,75 @@ impl tab_view::TabView for StaticConfigsTab {
                         ui.label("-Warning icon- here");
                     }
 
-                    // Open button
-                    if ui
-                        .button("Open")
-                        .on_hover_ui(|ui| {
-                            ui.style_mut().interaction.selectable_labels = true;
-                            ui.label(format!("Open compatible {} model", model.to_string()));
-                        })
-                        .clicked()
-                    {
-                        // TODO: controller fn for opening model:
-                        // -Open file dialog: get path
-                        // -Copy the file to the models directory.
-                        // controller.open_model(...);
-                    }
+                    // Open button -->TODO:  Refactor into void fn and move to configs_common
+                    let filters = vec![FileFilter {
+                        file_type: "ggml model",
+                        filters: vec!["bin"],
+                    }];
+                    let s_filters = Some(filters.as_slice());
+                    let open_file_tooltip =
+                        Some(format!("Open compatible {} model", model.to_string()));
+                    let c_controller = controller.clone();
+                    let model_path_open = m_model.file_path();
 
+                    let open_file_callback = move |path: &Option<PathBuf>| {
+                        if let Some(p) = path {
+                            let from = p.clone();
+                            let to = model_path_open.clone();
+                            let copy_thread = thread::spawn(move || {
+                                let success = copy_data(&from, &to);
+                                match success {
+                                    Ok(_) => Ok(format!(
+                                        "File: {:?}, successfully copied to: {:?}",
+                                        from.as_os_str(),
+                                        to.as_os_str()
+                                    )),
+                                    Err(e) => {
+                                        panic!("{}", e)
+                                    }
+                                }
+                            });
+
+                            let worker = (WorkerType::Downloading, copy_thread);
+
+                            c_controller
+                                .send_thread_handle(worker)
+                                .expect("Thread channel closed");
+                        }
+                    };
+
+                    ui.add(open_file_button(
+                        s_filters,
+                        open_file_tooltip,
+                        true,
+                        open_file_callback,
+                    ));
+
+                    let c_controller = controller.clone();
+                    let url = m_model.url();
+                    let file_name = m_model.model_file_name().to_owned();
+                    let directory = m_model.model_directory();
+                    let download_callback = move || {
+                        c_controller.start_download(url, file_name, directory);
+                    };
+
+                    let download_tooltip =
+                        Some(format!("Download compatible {} model", model.to_string()));
                     // Download button
-                    if ui
-                        .add_enabled(!downloading, Button::new("Download"))
-                        .on_hover_ui(|ui| {
-                            ui.style_mut().interaction.selectable_labels = true;
-                            ui.label(format!("Download compatible {} model", model.to_string()));
-                        })
-                        .clicked()
-                    {
-                        // TODO: finish controller download fn
-                        // controller.download_model( ... either model or name);
-                    }
+                    ui.add_enabled(
+                        !downloading,
+                        download_button(
+                            download_tooltip,
+                            true,
+                            "Download Model",
+                            download_callback,
+                        ),
+                    );
                 });
 
                 ui.end_row();
 
+                // TODO: Move to configs_common
                 // Num_threads
                 ui.label("Threads:").on_hover_ui(|ui| {
                     ui.style_mut().interaction.selectable_labels = true;
@@ -173,6 +219,7 @@ impl tab_view::TabView for StaticConfigsTab {
                     ui.label(format!("Recommended: {}", std::cmp::min(7, *max_threads)));
                 });
 
+                // TODO: Move to configs_common
                 ui.add(Slider::new(
                     n_threads,
                     1..=std::cmp::min(*max_threads, constants::MAX_WHISPER_THREADS),
@@ -180,6 +227,7 @@ impl tab_view::TabView for StaticConfigsTab {
 
                 ui.end_row();
 
+                // TODO: Move to configs_common
                 // Use gpu
                 if cfg!(feature = "_gpu") {
                     ui.label("Hardware Accelerated (GPU):").on_hover_ui(|ui| {
@@ -199,6 +247,7 @@ impl tab_view::TabView for StaticConfigsTab {
                     ui.label("Select input language. Set to Auto for auto-detection");
                 });
 
+                // TODO: Move to configs_common
                 ComboBox::from_id_source("language")
                     .selected_text(
                         *constants::LANGUAGE_CODES

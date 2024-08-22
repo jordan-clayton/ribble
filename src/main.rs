@@ -3,6 +3,7 @@ use std::thread;
 use directories::ProjectDirs;
 use eframe;
 use egui::ViewportBuilder;
+use whisper_realtime::downloader::request::reqwest;
 
 use crate::{
     ui::app::WhisperApp,
@@ -25,7 +26,7 @@ fn main() -> Result<(), WhisperAppError> {
         constants::ORGANIZATION,
         constants::APP_ID,
     )
-        .expect("Failed to get proj dir");
+    .expect("Failed to get proj dir");
     let data_dir = proj_dirs.data_dir();
     let mut native_options = eframe::NativeOptions::default();
     let viewport = build_viewport();
@@ -46,8 +47,23 @@ fn main() -> Result<(), WhisperAppError> {
     let (sender, receiver) = crossbeam::channel::unbounded();
     let c_receiver = receiver.clone();
 
+    // Async runtime + downloading
+    let client = reqwest::Client::new();
+    let rt = tokio::runtime::Runtime::new();
+    if let Err(e) = rt.as_ref() {
+        let err = WhisperAppError::new(
+            WhisperAppErrorType::Unknown,
+            format!("Failed to build tokio runtime. Error: {}", e),
+        );
+        return Err(err);
+    }
+    let rt = rt.unwrap();
+
+    let handle = rt.handle();
+
     // App controller - Theme is set upon app construction.
-    let controller = WhisperAppController::new(audio_wrapper, None, sender);
+    let controller =
+        WhisperAppController::new(client.clone(), handle.clone(), audio_wrapper, None, sender);
 
     let c_controller = controller.clone();
 

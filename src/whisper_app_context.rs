@@ -2,32 +2,32 @@ use std::{
     any::Any,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
-        Mutex,
-        TryLockError,
+        atomic::{AtomicBool, Ordering}, Mutex, TryLockError,
     },
     thread::{self, JoinHandle},
 };
+use std::path::PathBuf;
 
 use crossbeam::channel::SendError;
 use hound::{SampleFormat, WavSpec};
 use sdl2::audio::AudioDevice;
+use tokio::runtime::Handle;
 use whisper_realtime::{
     audio_ring_buffer::AudioRingBuffer,
     errors::WhisperRealtimeError,
     microphone,
     recorder::Recorder,
-    transcriber::{
-        realtime_transcriber::RealtimeTranscriber,
-        transcriber::Transcriber,
-    },
+    transcriber::{realtime_transcriber::RealtimeTranscriber, transcriber::Transcriber},
 };
+use whisper_realtime::downloader::download::AsyncDownload;
+use whisper_realtime::downloader::request::{async_download_request, reqwest};
 
 use crate::utils::{
     configs::{AudioConfigs, AudioConfigType, RecorderConfigs, WorkerType},
     console_message::{ConsoleMessage, ConsoleMessageType},
     constants,
-    errors::{WhisperAppError, WhisperAppErrorType}, file_mgmt::{get_tmp_file_writer, write_audio_sample},
+    errors::{WhisperAppError, WhisperAppErrorType},
+    file_mgmt::{get_tmp_file_writer, write_audio_sample},
     progress::Progress,
     sdl_audio_wrapper::SdlAudioWrapper,
 };
@@ -45,11 +45,19 @@ impl std::fmt::Debug for WhisperAppController {
 
 impl WhisperAppController {
     pub fn new(
+        client: reqwest::Client,
+        handle: Handle,
         audio_wrapper: Arc<SdlAudioWrapper>,
         system_theme: Option<eframe::Theme>,
         thread_handle_sender: crossbeam::channel::Sender<WhisperAppThread>,
     ) -> Self {
-        let app_ctx = WhisperAppContext::new(audio_wrapper, system_theme, thread_handle_sender);
+        let app_ctx = WhisperAppContext::new(
+            client,
+            handle,
+            audio_wrapper,
+            system_theme,
+            thread_handle_sender,
+        );
         let app_ctx = Arc::new(app_ctx);
         Self(app_ctx)
     }
@@ -219,7 +227,7 @@ impl WhisperAppController {
         }
     }
 
-    fn send_thread_handle(
+    pub fn send_thread_handle(
         &self,
         thread: WhisperAppThread,
     ) -> Result<(), SendError<WhisperAppThread>> {
@@ -228,7 +236,6 @@ impl WhisperAppController {
 
     pub fn start_realtime_transcription(&mut self, ctx: &egui::Context) {
         let job_name = "realtime_setup";
-        let c_job_name = job_name.clone();
 
         // UPDATE PROGRESS BAR
         let progress = Progress::new(String::from(job_name), 1, 100);
@@ -247,8 +254,8 @@ impl WhisperAppController {
             .realtime_configs_request_sender
             .send(())
             .expect("Realtime configs request channel already closed");
-        let actor = self.clone();
-        let c_actor = actor.clone();
+        let controller = self.clone();
+        let c_controller = controller.clone();
 
         // UPDATE PROGRESS BAR
         let progress = Progress::new(String::from(job_name), 33, 100);
@@ -256,40 +263,55 @@ impl WhisperAppController {
 
         let rt_thread = thread::spawn(move || {
             // UPDATE PROGRESS BAR
-            let progress = Progress::new(String::from(c_job_name), 50, 100);
-            c_actor.send_progress(progress).expect("Channel closed");
+            let progress = Progress::new(String::from(job_name), 50, 100);
+            c_controller
+                .send_progress(progress)
+                .expect("Channel closed");
 
             // This spawns a scoped thread to poll the msg queue and get the correct configurations.
-            let configs = get_requested_configs(c_actor.clone(), AudioConfigType::Realtime, ctx);
+            let configs =
+                get_requested_configs(c_controller.clone(), AudioConfigType::Realtime, ctx);
             if let Err(e) = &configs {
                 let msg = ConsoleMessage::new(ConsoleMessageType::Error, e.to_string());
-                c_actor
+                c_controller
                     .0
                     .console_sender
                     .send(msg)
                     .expect("Error Channel closed");
-                c_actor.0.realtime_running.store(false, Ordering::Release);
+                c_controller
+                    .0
+                    .realtime_running
+                    .store(false, Ordering::Release);
                 panic!();
             }
             // UPDATE PROGRESS BAR
-            let progress = Progress::new(String::from(c_job_name), 76, 100);
-            c_actor.send_progress(progress).expect("Channel closed");
+            let progress = Progress::new(String::from(job_name), 76, 100);
+            c_controller
+                .send_progress(progress)
+                .expect("Channel closed");
 
             let configs = configs.unwrap();
 
             if !configs.is_realtime() {
                 let e = WhisperAppError::new(WhisperAppErrorType::ParameterError, String::from("Invalid configs provided to realtime stream. Either invalid data passed, or data race condition"));
                 let msg = ConsoleMessage::new(ConsoleMessageType::Error, e.to_string());
-                c_actor
+                c_controller
                     .0
                     .console_sender
                     .send(msg)
                     .expect("Error Channel closed");
-                c_actor.0.realtime_running.store(false, Ordering::Release);
+                c_controller
+                    .0
+                    .realtime_running
+                    .store(false, Ordering::Release);
                 panic!();
             }
 
             let AudioConfigs::Realtime(configs) = configs else {
+                c_controller
+                    .0
+                    .realtime_running
+                    .store(false, Ordering::Release);
                 panic!()
             };
 
@@ -297,14 +319,17 @@ impl WhisperAppController {
 
             // UPDATE PROGRESS BAR
             let progress = Progress::new(String::from(job_name), 100, 100);
-            c_actor.send_progress(progress).expect("Channel closed");
+            c_controller
+                .send_progress(progress)
+                .expect("Channel closed");
 
-            run_realtime_audio_transcription(c_actor.clone(), configs)
+            run_realtime_audio_transcription(c_controller.clone(), configs)
         });
 
         let thread = (WorkerType::Realtime, rt_thread);
 
-        // Send to the background actor to join.
+        // Send to the background controller to join.
+        // TODO: fix - set bool before panicking.
         self.send_thread_handle(thread)
             .expect("Thread channel closed");
     }
@@ -334,10 +359,65 @@ impl WhisperAppController {
         // Set state.
         // Progress = uh. Not sure.
     }
+
+    pub fn start_download(&self, url: String, file_name: String, file_directory: PathBuf) {
+        let c_file_name = file_name.clone();
+
+        let c_file_directory = file_directory.clone();
+
+        let controller = self.clone();
+        let c_controller = controller.clone();
+        let download_thread = thread::spawn(move || {
+            let client = controller.0.client.clone();
+            let handle = controller.0.handle.clone();
+            let stream_downloader = async_download_request(&client, url.as_str(), None);
+
+            controller.0.downloading.store(true, Ordering::Release);
+
+            let file_directory = c_file_directory.as_path();
+            let p_file_name = c_file_name.clone();
+            let stream = handle.block_on(stream_downloader);
+            if let Err(e) = stream.as_ref() {
+                controller.0.downloading.store(false, Ordering::Release);
+                panic!("{}", e);
+            }
+
+            let mut stream = stream.unwrap();
+
+            let total_size = stream.total_size;
+
+            stream.progress_callback = Some(move |n| {
+                let progress = Progress::new(p_file_name.clone(), n, total_size);
+                let sent = c_controller.send_progress(progress);
+                if let Err(e) = sent {
+                    c_controller.0.downloading.store(false, Ordering::Release);
+                    panic!("{}", e);
+                }
+            });
+
+            let download = stream.download(file_directory, c_file_name.as_str());
+            let success = handle.block_on(download);
+            controller.0.downloading.store(false, Ordering::Release);
+
+            if let Err(e) = success {
+                panic!("{}", e);
+            }
+            Ok(format!(
+                "Model: {}, successfully downloaded to {:?}",
+                file_name,
+                c_file_directory.as_os_str()
+            ))
+        });
+
+        let worker = (WorkerType::Downloading, download_thread);
+
+        self.send_thread_handle(worker)
+            .expect("Thread channel closed");
+    }
 }
 
 fn get_requested_configs(
-    actor: WhisperAppController,
+    controller: WhisperAppController,
     requested_config_type: AudioConfigType,
     ctx: egui::Context,
 ) -> Result<AudioConfigs, WhisperAppError> {
@@ -351,7 +431,7 @@ fn get_requested_configs(
                 }
 
                 ctx.request_repaint();
-                let try_for_configs = actor.0.configs_receiver.try_recv();
+                let try_for_configs = controller.0.configs_receiver.try_recv();
                 if let Err(e) = &try_for_configs {
                     match e {
                         crossbeam::channel::TryRecvError::Empty => {
@@ -405,12 +485,12 @@ fn get_requested_configs(
 }
 
 fn run_realtime_audio_transcription(
-    actor: WhisperAppController,
+    controller: WhisperAppController,
     configs: Arc<whisper_realtime::configs::Configs>,
 ) -> Result<String, Box<dyn Any + Send>> {
-    // Clone the actor
-    let c_actor_audio = actor.clone();
-    let c_actor_write = actor.clone();
+    // Clone the controller
+    let c_controller_audio = controller.clone();
+    let c_controller_write = controller.clone();
 
     // Init model.
     let model = init_model(configs.clone());
@@ -425,17 +505,17 @@ fn run_realtime_audio_transcription(
     let c_audio_transcriber = audio.clone();
 
     // Text sender
-    let c_text_sender = actor.0.transcription_text_sender.clone();
+    let c_text_sender = controller.0.transcription_text_sender.clone();
     // Recording sender for tmp file
-    let c_recording_sender = actor.0.record_audio_f32_sender.clone();
+    let c_recording_sender = controller.0.record_audio_f32_sender.clone();
 
     // State Flags - This should likely be refactored.
-    let c_realtime_is_ready = actor.0.realtime_ready.clone();
-    let c_realtime_is_running = actor.0.realtime_running.clone();
+    let c_realtime_is_ready = controller.0.realtime_ready.clone();
+    let c_realtime_is_running = controller.0.realtime_running.clone();
 
     let mic_stream = init_realtime_microphone(
-        &actor.0.audio_wrapper.audio_subsystem,
-        actor.0.record_audio_f32_sender.clone(),
+        &controller.0.audio_wrapper.audio_subsystem,
+        controller.0.record_audio_f32_sender.clone(),
     );
     let audio_spec = Arc::new(mic_stream.spec().clone());
     let c_audio_spec = audio_spec.clone();
@@ -469,7 +549,7 @@ fn run_realtime_audio_transcription(
                     writer.finalize().expect("Failed to close writer.");
                     break;
                 }
-                let output = c_actor_audio.receive_realtime_audio();
+                let output = c_controller_audio.receive_realtime_audio();
                 assert!(output.is_ok(), "F32 Audio Channel Closed");
                 let output = output.unwrap();
                 write_audio_sample(&output, &mut writer, None::<fn(usize)>);
@@ -481,7 +561,7 @@ fn run_realtime_audio_transcription(
                 break;
             }
 
-            let output = c_actor_write.receive_realtime_audio();
+            let output = c_controller_write.receive_realtime_audio();
             assert!(output.is_ok(), "Realtime Audio Channel closed");
 
             let mut audio_data = output.unwrap();
@@ -589,6 +669,9 @@ fn init_whisper_ctx(
 type WhisperAppThread = (WorkerType, JoinHandle<Result<String, Box<dyn Any + Send>>>);
 
 struct WhisperAppContext {
+    // ASYNC (DOWNLOADS)
+    client: reqwest::Client,
+    handle: Handle,
     // SYSTEM THEME
     system_theme: Mutex<Option<eframe::Theme>>,
     // SDL AUDIO
@@ -651,6 +734,8 @@ struct WhisperAppContext {
 
 impl WhisperAppContext {
     fn new(
+        client: reqwest::Client,
+        handle: Handle,
         audio_wrapper: Arc<SdlAudioWrapper>,
         system_theme: Option<eframe::Theme>,
         thread_handle_sender: crossbeam::channel::Sender<WhisperAppThread>,
@@ -668,19 +753,19 @@ impl WhisperAppContext {
 
         // CONFIGS
         let (realtime_configs_request_sender, realtime_configs_request_receiver) =
-            crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
+            crossbeam::channel::bounded(1);
         let (static_configs_request_sender, static_configs_request_receiver) =
-            crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
+            crossbeam::channel::bounded(1);
         let (recording_configs_request_sender, recording_configs_request_receiver) =
-            crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
+            crossbeam::channel::bounded(1);
 
-        let (configs_sender, configs_receiver) = crossbeam::channel::unbounded();
+        let (configs_sender, configs_receiver) = crossbeam::channel::bounded(1);
 
         // Recording
-        let (record_audio_i16_sender, record_audio_i16_receiver) = crossbeam::channel::unbounded();
+        let (record_audio_i16_sender, record_audio_i16_receiver) = crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
         // TODO: remove if no hound spt.
-        let (record_audio_i32_sender, record_audio_i32_receiver) = crossbeam::channel::unbounded();
-        let (record_audio_f32_sender, record_audio_f32_receiver) = crossbeam::channel::unbounded();
+        let (record_audio_i32_sender, record_audio_i32_receiver) = crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
+        let (record_audio_f32_sender, record_audio_f32_receiver) = crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
 
         // GUI
         let (transcription_text_sender, transcription_text_receiver) =
@@ -692,6 +777,8 @@ impl WhisperAppContext {
         let fft_buffer = Mutex::new([0.0; constants::NUM_BUCKETS]);
 
         Self {
+            client,
+            handle,
             system_theme,
             audio_wrapper,
             realtime_ready,
