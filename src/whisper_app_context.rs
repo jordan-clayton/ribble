@@ -1,15 +1,12 @@
-use std::{
-    any::Any,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering}, Mutex, TryLockError,
-    },
-    thread::{self, JoinHandle},
-};
+use std::{any::Any, sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering}, Mutex, TryLockError,
+}, thread::{self, JoinHandle}};
 use std::path::PathBuf;
 
 use crossbeam::channel::SendError;
 use hound::{SampleFormat, WavSpec};
+use nvml_wrapper::{cuda_driver_version_major, cuda_driver_version_minor};
 use sdl2::audio::AudioDevice;
 use tokio::runtime::Handle;
 use whisper_realtime::{
@@ -60,6 +57,10 @@ impl WhisperAppController {
         );
         let app_ctx = Arc::new(app_ctx);
         Self(app_ctx)
+    }
+
+    pub fn gpu_enabled(&self) -> bool {
+        self.0.gpu_support.load(Ordering::Relaxed)
     }
 
     pub fn get_system_theme(&self) -> Option<eframe::Theme> {
@@ -669,6 +670,8 @@ fn init_whisper_ctx(
 type WhisperAppThread = (WorkerType, JoinHandle<Result<String, Box<dyn Any + Send>>>);
 
 struct WhisperAppContext {
+    // GPU AVAILABLE
+    gpu_support: Arc<AtomicBool>,
     // ASYNC (DOWNLOADS)
     client: reqwest::Client,
     handle: Handle,
@@ -740,6 +743,9 @@ impl WhisperAppContext {
         system_theme: Option<eframe::Theme>,
         thread_handle_sender: crossbeam::channel::Sender<WhisperAppThread>,
     ) -> Self {
+        let gpu_enabled = check_gpu_target();
+        let gpu_support = Arc::new(AtomicBool::new(gpu_enabled));
+
         let system_theme = Mutex::new(system_theme);
 
         // STATE
@@ -762,10 +768,13 @@ impl WhisperAppContext {
         let (configs_sender, configs_receiver) = crossbeam::channel::bounded(1);
 
         // Recording
-        let (record_audio_i16_sender, record_audio_i16_receiver) = crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
+        let (record_audio_i16_sender, record_audio_i16_receiver) =
+            crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
         // TODO: remove if no hound spt.
-        let (record_audio_i32_sender, record_audio_i32_receiver) = crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
-        let (record_audio_f32_sender, record_audio_f32_receiver) = crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
+        let (record_audio_i32_sender, record_audio_i32_receiver) =
+            crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
+        let (record_audio_f32_sender, record_audio_f32_receiver) =
+            crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
 
         // GUI
         let (transcription_text_sender, transcription_text_receiver) =
@@ -777,6 +786,7 @@ impl WhisperAppContext {
         let fft_buffer = Mutex::new([0.0; constants::NUM_BUCKETS]);
 
         Self {
+            gpu_support,
             client,
             handle,
             system_theme,
@@ -811,4 +821,94 @@ impl WhisperAppContext {
             thread_handle_sender,
         }
     }
+}
+
+#[cfg(all(target_os = "windows", feature = "cuda"))]
+fn check_gpu_target() -> bool {
+    use nvml_wrapper::Nvml;
+    let nvml = Nvml::init();
+    if let Err(_) = &nvml {
+        return false;
+    };
+
+    let nvml = nvml.unwrap();
+    let device_count = nvml.device_count();
+    if let Err(_) = &device_count {
+        return false;
+    };
+
+    let device_count = device_count.unwrap();
+    if device_count < 1 {
+        return false;
+    };
+
+    let cuda_version = nvml.sys_cuda_driver_version();
+    if let Err(_) = &cuda_version {
+        return false;
+    }
+
+    let cuda_version = cuda_version.unwrap();
+    let sys_major_version = cuda_driver_version_major(cuda_version);
+    let sys_minor_version = cuda_driver_version_minor(cuda_version);
+    sys_major_version >= constants::MIN_CUDA_MAJOR && sys_minor_version >= constants::MIN_CUDA_MINOR
+}
+
+#[cfg(all(target_os = "linux", feature = "cuda"))]
+fn check_gpu_target() -> bool {
+    use nvml_wrapper::Nvml;
+    let nvml = Nvml::init();
+    if let Err(_) = &nvml {
+        return false;
+    };
+
+    let nvml = nvml.unwrap();
+    let device_count = nvml.device_count();
+    if let Err(_) = &device_count {
+        return false;
+    };
+
+    let device_count = device_count.unwrap();
+    if device_count < 1 {
+        return false;
+    };
+
+    let cuda_version = nvml.sys_cuda_driver_version();
+    if let Err(_) = &cuda_version {
+        return false;
+    }
+
+    let cuda_version = cuda_version.unwrap();
+    let sys_major_version = cuda_driver_version_major(cuda_version);
+    let sys_minor_version = cuda_driver_version_minor(cuda_version);
+    sys_major_version >= constants::MIN_CUDA_MAJOR && sys_minor_version >= constants::MIN_CUDA_MINOR
+}
+
+#[cfg(all(target_os = "linux", feature = "hipblas"))]
+fn check_gpu_target() -> bool {
+    let hip = env::var("HIP_PATH").is_ok();
+    let common_paths = ["/opt/rocm/lib/libhipblas.so", "/opt/rocm/hip/lib/libhipblas.so", "opt/rocm/lib/librocblas.so", "opt/rocm/hipblas"];
+    let found_path = common_paths.iter().any(|&path| Path::new(path).exists());
+    let blas = env::var("HIP_BLAS_PATH").is_ok();
+
+    (hip & blas) | found_path
+}
+
+#[cfg(all(feature = "metal", target_arch = "x86_64-apple-darwin"))]
+fn check_gpu_target() -> bool {
+    use metal;
+    let available_devices = metal::Device::all();
+
+    // Using raytracing as a base-minimum for running the gpu at a reasonable speed.
+    available_devices.iter().any(|d| d.supports_raytracing());
+}
+
+// Apple Silicon is fully supported by Whisper.cpp
+#[cfg(all(feature = "metal", target_arch = "aarch64-apple-darwin"))]
+fn check_gpu_target() -> bool {
+    true
+}
+
+#[cfg(not(feature = "_gpu"))]
+fn check_gpu_target() -> bool {
+    false
 }

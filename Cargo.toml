@@ -15,6 +15,7 @@ egui_dock = { version = "0.13.0", features = ["serde"] }
 hound = "3.5.1"
 lazy_static = "1.5.0"
 maplit = "1.0.2"
+nvml-wrapper = "0.10.0"
 realfft = "3.3.0"
 rfd = "0.14.1"
 sdl2 = "0.37.0"
@@ -23,6 +24,9 @@ strum = "0.26.3"
 symphonia = { version = "0.5.4", features = ["opt-simd", "all-codecs"] }
 tokio = { version = "1.39.3", features = ["rt"] }
 whisper_realtime = { git = "https://github.com/jordan-clayton/whisper-realtime.git", version = "0.1.0", features = ["serde", "crossbeam", "strum"] }
+
+[target.x86_64-apple-darwin.dependencies]
+metal = "0.29.0"
 
 [features]
 default = []

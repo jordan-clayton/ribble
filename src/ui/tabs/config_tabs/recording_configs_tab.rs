@@ -2,7 +2,6 @@ use egui::{Checkbox, ComboBox, Grid, Slider, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::IntoEnumIterator;
 
-use crate::ui::tabs::tab_view;
 use crate::{
     utils::{
         configs::{
@@ -12,6 +11,7 @@ use crate::{
     },
     whisper_app_context::WhisperAppController,
 };
+use crate::ui::tabs::tab_view;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RecordingConfigsTab {
@@ -186,12 +186,11 @@ impl tab_view::TabView for RecordingConfigsTab {
     // TODO: determine if this is required.
     fn context_menu(
         &mut self,
-        ui: &mut Ui,
-        controller: &mut WhisperAppController,
-        surface: SurfaceIndex,
-        node: NodeIndex,
-    ) {
-    }
+        _ui: &mut Ui,
+        _controller: &mut WhisperAppController,
+        _surface: SurfaceIndex,
+        _node: NodeIndex,
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true
