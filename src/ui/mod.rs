@@ -1,3 +1,3 @@
-pub mod app;
-pub mod tabs;
-pub mod widgets;
+pub(crate) mod app;
+pub(crate) mod tabs;
+pub(crate) mod widgets;

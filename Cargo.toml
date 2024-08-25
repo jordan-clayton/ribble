@@ -19,7 +19,7 @@ nvml-wrapper = "0.10.0"
 realfft = "3.3.0"
 rfd = "0.14.1"
 sdl2 = "0.37.0"
-serde = { version = "1.0.204", features = ["derive"] }
+serde = { version = "1.0.204", features = ["derive", "rc"] }
 strum = "0.26.3"
 symphonia = { version = "0.5.4", features = ["opt-simd", "all-codecs"] }
 tokio = { version = "1.39.3", features = ["rt"] }

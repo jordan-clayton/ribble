@@ -1,10 +1,9 @@
 use std::path::PathBuf;
 use std::thread;
 
-use egui::{Checkbox, ComboBox, Slider, Ui};
+use egui::{Button, Checkbox, ComboBox, Slider, Ui};
 use whisper_realtime::model::{Model, ModelType};
 
-use crate::ui::tabs::tabs_common::{download_button, FileFilter, open_file_button};
 use crate::utils::configs::AudioConfigType;
 use crate::utils::configs::WorkerType;
 use crate::utils::constants;
@@ -80,18 +79,28 @@ pub fn model_row(
             ui.label("-Warning icon- here");
         }
 
-        // Open button -->TODO:  Refactor into void fn and move to configs_common
-        let filters = vec![FileFilter {
-            file_type: "ggml model",
-            filters: vec!["bin"],
-        }];
-        let s_filters = Some(filters.as_slice());
-        let open_file_tooltip = Some(format!("Open compatible {} model", model.to_string()));
-        let c_controller = controller.clone();
         let model_path_open = m_model.file_path();
 
-        let open_file_callback = move |path: &Option<PathBuf>| {
-            if let Some(p) = path {
+        if ui
+            .button("Open Model")
+            .on_hover_ui(|ui| {
+                ui.style_mut().interaction.selectable_labels = true;
+                ui.label(format!("Open a compatible {}, model.", model.to_string()));
+            })
+            .clicked()
+        {
+            // Open File dialog at HOME directory, fallback to root.
+            let base_dirs = directories::BaseDirs::new();
+            let dir = if let Some(dir) = base_dirs {
+                dir.home_dir().to_path_buf()
+            } else {
+                PathBuf::from("/")
+            };
+            if let Some(p) = rfd::FileDialog::new()
+                .add_filter("ggml model", &["bin"])
+                .set_directory(dir)
+                .pick_file()
+            {
                 let from = p.clone();
                 let to = model_path_open.clone();
                 let copy_thread = thread::spawn(move || {
@@ -109,39 +118,28 @@ pub fn model_row(
                 });
 
                 let worker = (WorkerType::Downloading, copy_thread);
-
-                c_controller
+                controller
                     .send_thread_handle(worker)
-                    .expect("Thread channel closed");
+                    .expect("Thread channel closed")
             }
-        };
-
-        ui.add(open_file_button(
-            s_filters,
-            open_file_tooltip,
-            true,
-            open_file_callback,
-        ));
-
-        let c_controller = controller.clone();
-        let url = m_model.url();
-        let file_name = m_model.model_file_name().to_owned();
-        let directory = m_model.model_directory();
-        let download_callback = move || {
-            c_controller.start_download(url, file_name, directory);
-        };
-
-        let download_tooltip = Some(format!("Download compatible {} model", model.to_string()));
-        // Download button
-        ui.add_enabled(
-            !downloading,
-            download_button(download_tooltip, true, "Download Model", download_callback),
-        );
+        }
+        if ui
+            .add_enabled(!downloading, Button::new("Download"))
+            .on_hover_ui(|ui| {
+                ui.style_mut().interaction.selectable_labels = true;
+                ui.label(format!("Download compatible {} model", model.to_string()));
+            })
+            .clicked()
+        {
+            let url = m_model.url();
+            let file_name = m_model.model_file_name().to_owned();
+            let directory = m_model.model_directory();
+            controller.start_download(url, file_name, directory)
+        }
     });
 
     ui.end_row();
 }
-
 
 pub fn n_threads_row(ui: &mut Ui, n_threads: &mut std::ffi::c_int, max_threads: std::ffi::c_int) {
     ui.label("Threads:").on_hover_ui(|ui| {
@@ -166,17 +164,16 @@ pub fn use_gpu_row(ui: &mut Ui, use_gpu: &mut bool, gpu_capable: bool) {
             "Enable hardware acceleration (if supported). REQUIRED to use large models in realtime mode.",
         );
     });
-    ui.add_enabled(gpu_capable, Checkbox::without_text(use_gpu)).on_hover_ui(|ui| {
-        ui.style_mut().interaction.selectable_labels = true;
-        let status = if gpu_capable {
-            "supported"
-        } else {
-            "unsupported"
-        };
-        ui.label(
-            format!("Hardware acceleration is {}", status),
-        );
-    });
+    ui.add_enabled(gpu_capable, Checkbox::without_text(use_gpu))
+        .on_hover_ui(|ui| {
+            ui.style_mut().interaction.selectable_labels = true;
+            let status = if gpu_capable {
+                "supported"
+            } else {
+                "unsupported"
+            };
+            ui.label(format!("Hardware acceleration is {}", status));
+        });
 
     ui.end_row();
 }

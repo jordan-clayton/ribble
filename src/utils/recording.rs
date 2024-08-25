@@ -3,16 +3,16 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use biquad::{Biquad, Coefficients, DirectForm2Transposed, ToHertz, Type, Q_BUTTERWORTH_F32};
+use biquad::{Biquad, Coefficients, DirectForm2Transposed, Q_BUTTERWORTH_F32, ToHertz, Type};
 use lazy_static::lazy_static;
 use realfft::{
     num_complex::Complex32,
     num_traits::{FromPrimitive, NumCast, ToPrimitive, Zero},
     RealFftPlanner, RealToComplex,
 };
-use whisper_realtime::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
 
 use crate::utils::constants;
+use crate::utils::errors::{WhisperAppError, WhisperAppErrorType};
 
 lazy_static! {
     static ref FFT_PLANNER: Mutex<RealFftPlanner<f32>> = Mutex::new(RealFftPlanner::<f32>::new());
@@ -106,7 +106,7 @@ pub fn fft_analysis(samples: &[f32], result: &mut [f32; constants::NUM_BUCKETS])
             process_fft(frame, fft.clone(), &mut input, &mut output);
             let mag = (output.iter().map(|c| c.norm_sqr()).sum::<f32>()
                 / (frame.len() as f32).powi(2))
-            .ln();
+                .ln();
             if mag > max_mag {
                 max_mag = mag;
             }
@@ -145,19 +145,18 @@ fn process_fft(
         .expect("Slice with incorrect length supplied to fft");
 }
 
-// TODO: implement proper errors.
 fn welch_frames(
     windowed_samples: &[f32],
     num_segments: Option<usize>,
     overlap: Option<f32>,
-) -> Result<Vec<Vec<f32>>, WhisperRealtimeError> {
+) -> Result<Vec<Vec<f32>>, WhisperAppError> {
     let mut len = windowed_samples.len();
     let k = num_segments.unwrap_or(4);
     let a = overlap.unwrap_or(0.5);
 
     if len < 4 {
-        return Err(WhisperRealtimeError::new(
-            WhisperRealtimeErrorType::ParameterError,
+        return Err(WhisperAppError::new(
+            WhisperAppErrorType::ParameterError,
             format!("Invalid sample size {}, minimum is 4", len),
         ));
     }
@@ -197,24 +196,7 @@ fn welch_frames(
     Ok(frames)
 }
 
-// Currently unused.
-// fn normalize_zero_to_one(samples: &mut [f32], maximum: f32) {
-//     for i in 0..samples.len() {
-//         samples[i] = samples[i] / maximum;
-//     }
-// }
-//
-// // This is effectively the "amplitude"
-// fn ln_sqr_magnitude(n: Complex32) -> f32 {
-//     n.norm_sqr().ln()
-// }
-//
-// // This calculates sqrt, is slightly more expensive.
-// fn magnitude(n: Complex32) -> f32 {
-//     n.norm()
-// }
-
-fn smoothing(current: &mut [f32], target: &[f32], dt: f32) {
+pub fn smoothing(current: &mut [f32], target: &[f32], dt: f32) {
     assert_eq!(
         current.len(),
         target.len(),

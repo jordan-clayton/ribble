@@ -16,12 +16,7 @@ fn draw_recording_icon(ui: &mut Ui, color: Rgba, animate: bool) -> Response {
             let mut time = ui.input(|i| i.time);
             time = time.cos().abs();
             let t = quadratic_out(time as f32);
-            color = Rgba::from_rgba_premultiplied(
-                lerp(constants::FROM_COLOR.r()..=color.r(), t),
-                lerp(constants::FROM_COLOR.g()..=color.g(), t),
-                lerp(constants::FROM_COLOR.b()..=color.b(), t),
-                lerp(constants::FROM_COLOR.a()..=color.a(), t),
-            );
+            color = lerp(constants::FROM_COLOR..=color, t);
         }
 
         let col_32 = Color32::from(color);

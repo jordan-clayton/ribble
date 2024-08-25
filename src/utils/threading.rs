@@ -41,10 +41,7 @@ pub fn join_threads_loop(
 
                 let res = res.unwrap();
 
-                if worker == WorkerType::Downloading || worker == WorkerType::Recording {
-                    let msg = ConsoleMessage::new(ConsoleMessageType::Status, res);
-                    send_console_msg(msg, controller.clone());
-                } else {
+                if worker == WorkerType::Realtime || worker == WorkerType::Static {
                     // Transcription thread -> send to transcription window.
                     let sender = controller.transcription_text_sender();
                     sender
@@ -53,6 +50,9 @@ pub fn join_threads_loop(
                     sender
                         .send(Ok((res, true)))
                         .expect("Transcription Channel Closed");
+                } else {
+                    let msg = ConsoleMessage::new(ConsoleMessageType::Status, res);
+                    send_console_msg(msg, controller.clone());
                 }
             }
             // Channel has closed.
@@ -63,7 +63,6 @@ pub fn join_threads_loop(
     }
 }
 
-// TODO: refactor once console messaging implemented.
 fn send_console_msg(msg: ConsoleMessage, controller: WhisperAppController) {
     controller
         .send_console_message(msg)

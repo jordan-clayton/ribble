@@ -41,7 +41,6 @@ impl tab_view::TabView for ErrorConsoleDisplayTab {
         WidgetText::from(&self.title)
     }
 
-    // TODO: this will need to be refactored if/when App errors implemented.
     fn ui(&mut self, ui: &mut Ui, controller: &mut WhisperAppController) {
         let Self {
             title: _,
@@ -83,8 +82,7 @@ impl tab_view::TabView for ErrorConsoleDisplayTab {
         controller: &mut WhisperAppController,
         surface: SurfaceIndex,
         node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

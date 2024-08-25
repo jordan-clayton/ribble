@@ -1,18 +1,15 @@
 use egui::{Grid, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::VariantArray;
-use whisper_realtime::{
-    configs::Configs,
-    model::ModelType,
-};
+use whisper_realtime::{configs::Configs, model::ModelType};
 
+use crate::ui::tabs::config_tabs::configs_common;
+use crate::utils::configs::AudioConfigType;
 use crate::{
     ui::tabs::tab_view,
     utils::{configs::AudioConfigs, threading::get_max_threads},
     whisper_app_context::WhisperAppController,
 };
-use crate::ui::tabs::config_tabs::configs_common;
-use crate::utils::configs::AudioConfigType;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StaticConfigsTab {
@@ -22,7 +19,6 @@ pub struct StaticConfigsTab {
     #[serde(default = "get_max_threads")]
     max_threads: std::ffi::c_int,
 }
-
 
 impl StaticConfigsTab {
     pub fn new() -> Self {
@@ -98,7 +94,13 @@ impl tab_view::TabView for StaticConfigsTab {
             Grid::new("static_configs").striped(true).show(ui, |ui| {
                 // MODEL ROW, see configs common.
                 // Contains dropdown to select model type, to open a downloaded model + download a model.
-                configs_common::model_row(ui, model, AudioConfigType::Static, controller.clone(), available_models.as_slice());
+                configs_common::model_row(
+                    ui,
+                    model,
+                    AudioConfigType::Static,
+                    controller.clone(),
+                    available_models.as_slice(),
+                );
                 // Num_threads
                 configs_common::n_threads_row(ui, n_threads, *max_threads);
                 let gpu_enabled = controller.gpu_enabled();
@@ -151,7 +153,8 @@ impl tab_view::TabView for StaticConfigsTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

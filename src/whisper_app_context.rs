@@ -1,7 +1,11 @@
-use std::{any::Any, sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering}, Mutex, TryLockError,
-}, thread::{self, JoinHandle}};
+use std::{
+    any::Any,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering}, Mutex, TryLockError,
+    },
+    thread::{self, JoinHandle},
+};
 use std::path::PathBuf;
 
 use crossbeam::channel::SendError;
@@ -24,10 +28,12 @@ use crate::utils::{
     console_message::{ConsoleMessage, ConsoleMessageType},
     constants,
     errors::{WhisperAppError, WhisperAppErrorType},
+    file_mgmt,
     file_mgmt::{get_tmp_file_writer, write_audio_sample},
     progress::Progress,
     sdl_audio_wrapper::SdlAudioWrapper,
 };
+use crate::utils::file_mgmt::copy_data;
 
 // TODO: Remaining impls + Download impl.
 
@@ -107,6 +113,10 @@ impl WhisperAppController {
         self.0.static_ready.store(ready, Ordering::Relaxed);
     }
 
+    pub fn save_recording_ready(&self) -> bool {
+        self.0.save_recording_ready.load(Ordering::Acquire)
+    }
+
     // RUNNING
     pub fn is_downloading(&self) -> bool {
         self.0.downloading.load(Ordering::Acquire)
@@ -122,6 +132,19 @@ impl WhisperAppController {
     pub fn static_running(&self) -> bool {
         self.0.static_running.load(Ordering::Acquire)
     }
+
+    pub fn stop_transcriber(&self, realtime: bool) {
+        if realtime {
+            self.0.realtime_running.store(false, Ordering::Release);
+        } else {
+            self.0.static_running.store(false, Ordering::Release);
+        }
+    }
+
+    pub fn stop_recording(&self) {
+        self.0.recorder_running.store(false, Ordering::Release);
+    }
+
     // CONFIGS
 
     pub fn send_configs(&self, configs: AudioConfigs) -> Result<(), SendError<AudioConfigs>> {
@@ -158,12 +181,11 @@ impl WhisperAppController {
         self.0.console_receiver.try_recv()
     }
 
+    // TODO: factor out & just use receive_audio_f32
     fn realtime_audio_sender(&self) -> crossbeam::channel::Sender<Vec<f32>> {
         self.0.record_audio_f32_sender.clone()
     }
 
-    // TODO: this might be better as an internal function run on a thread.
-    // TODO: This might actually be better to recv and block on a thread.
     fn receive_realtime_audio(&self) -> Result<Vec<f32>, crossbeam::channel::RecvError> {
         self.0.record_audio_f32_receiver.recv()
     }
@@ -174,14 +196,14 @@ impl WhisperAppController {
         self.0.record_audio_i16_sender.clone()
     }
 
-    pub fn receive_audio_i16(&self) -> Result<Vec<i16>, crossbeam::channel::TryRecvError> {
+    fn receive_audio_i16(&self) -> Result<Vec<i16>, crossbeam::channel::TryRecvError> {
         self.0.record_audio_i16_receiver.try_recv()
     }
     pub fn record_audio_i32_sender(&self) -> crossbeam::channel::Sender<Vec<i32>> {
         self.0.record_audio_i32_sender.clone()
     }
 
-    pub fn receive_audio_i32(&self) -> Result<Vec<i32>, crossbeam::channel::TryRecvError> {
+    fn receive_audio_i32(&self) -> Result<Vec<i32>, crossbeam::channel::TryRecvError> {
         self.0.record_audio_i32_receiver.try_recv()
     }
 
@@ -189,7 +211,7 @@ impl WhisperAppController {
         self.0.record_audio_f32_sender.clone()
     }
 
-    pub fn receive_audio_f32(&self) -> Result<Vec<f32>, crossbeam::channel::TryRecvError> {
+    fn receive_audio_f32(&self) -> Result<Vec<f32>, crossbeam::channel::TryRecvError> {
         self.0.record_audio_f32_receiver.try_recv()
     }
 
@@ -235,6 +257,7 @@ impl WhisperAppController {
         self.0.thread_handle_sender.send(thread)
     }
 
+    // TODO: try and get rid of the need for ctx -> Should be called anyway.
     pub fn start_realtime_transcription(&mut self, ctx: &egui::Context) {
         let job_name = "realtime_setup";
 
@@ -245,6 +268,7 @@ impl WhisperAppController {
         let ctx = ctx.clone();
         // Update state
         self.0.realtime_running.store(true, Ordering::Release);
+        self.0.save_recording_ready.store(false, Ordering::Release);
 
         // UPDATE PROGRESS BAR
         let progress = Progress::new(String::from(job_name), 17, 100);
@@ -318,28 +342,32 @@ impl WhisperAppController {
 
             let configs = Arc::new(configs);
 
+            // Clear the transcription buffer.
+            c_controller
+                .0
+                .transcription_text_sender
+                .send(Ok((String::from(constants::CLEAR_MSG), true)))
+                .expect("Transcription channel closed");
+
             // UPDATE PROGRESS BAR
             let progress = Progress::new(String::from(job_name), 100, 100);
             c_controller
                 .send_progress(progress)
                 .expect("Channel closed");
 
+            // Run
             run_realtime_audio_transcription(c_controller.clone(), configs)
         });
 
         let thread = (WorkerType::Realtime, rt_thread);
 
         // Send to the background controller to join.
-        // TODO: fix - set bool before panicking.
         self.send_thread_handle(thread)
             .expect("Thread channel closed");
     }
 
     // TODO: see rt fn for ideas on how to structure.
-    pub fn start_static_transcription(
-        &self,
-        _file_path: &std::path::Path,
-    ) -> Result<(), WhisperRealtimeError> {
+    pub fn start_static_transcription(&self, _file_path: &std::path::Path) {
         todo!()
         // Setup
         // Progress = setup progress.
@@ -352,7 +380,9 @@ impl WhisperAppController {
         // Store join-handles
     }
 
-    pub fn start_recording(&self) -> Result<(), WhisperRealtimeError> {
+    pub fn start_recording(&self, run_fft: Arc<AtomicBool>) {
+        // Update state.
+        self.0.save_recording_ready.store(false, Ordering::Release);
         todo!()
         // Setup -> Write to tmp file.
         // Spawn threads
@@ -376,7 +406,6 @@ impl WhisperAppController {
             controller.0.downloading.store(true, Ordering::Release);
 
             let file_directory = c_file_directory.as_path();
-            let p_file_name = c_file_name.clone();
             let stream = handle.block_on(stream_downloader);
             if let Err(e) = stream.as_ref() {
                 controller.0.downloading.store(false, Ordering::Release);
@@ -387,8 +416,10 @@ impl WhisperAppController {
 
             let total_size = stream.total_size;
 
+            let job_name = format!("Downloading: {}", c_file_name);
+
             stream.progress_callback = Some(move |n| {
-                let progress = Progress::new(p_file_name.clone(), n, total_size);
+                let progress = Progress::new(job_name.clone(), n, total_size);
                 let sent = c_controller.send_progress(progress);
                 if let Err(e) = sent {
                     c_controller.0.downloading.store(false, Ordering::Release);
@@ -415,8 +446,67 @@ impl WhisperAppController {
         self.send_thread_handle(worker)
             .expect("Thread channel closed");
     }
+
+    pub fn save_audio_recording(&self, output_path: &PathBuf) {
+        let to = output_path.to_path_buf();
+        let data_dir = eframe::storage_dir(constants::APP_ID).expect("Failed to get storage dir");
+        let tmp_file_path = file_mgmt::get_temp_file_path(data_dir.as_path());
+        assert!(tmp_file_path.exists(), "Audio buffer file missing!");
+        let from = tmp_file_path.clone();
+        let copy_thread = thread::spawn(move || {
+            let success = copy_data(&from, &to);
+            match success {
+                Ok(_) => Ok(format!("File: {:?} saved successfully.", to.file_stem())),
+                Err(e) => {
+                    panic!("{}", e)
+                }
+            }
+        });
+
+        let worker = (WorkerType::Saving, copy_thread);
+        self.send_thread_handle(worker)
+            .expect("Thread channel closed.");
+    }
+
+    pub fn save_transcription(&self, output_path: &PathBuf, transcription: &[String]) {
+        let p = output_path.clone();
+        let transcription_text = transcription.join("\n");
+        let c_controller = self.clone();
+        let save_thread = thread::spawn(move || {
+            let job_name = format!("Saving: {:?}", p.file_name());
+            let total_size = transcription_text.len();
+
+            let file_name = p.file_stem().expect("Invalid filename");
+            let directory = p.parent().expect("Failed to get saving directory");
+            let directory = directory.as_os_str();
+
+            let progress_callback = move |n: usize| {
+                let progress = Progress::new(job_name.clone(), n, total_size);
+                c_controller
+                    .send_progress(progress)
+                    .expect("Progress channel closed.");
+            };
+
+            let write_success = file_mgmt::save_transcription(
+                p.as_path(),
+                &transcription_text,
+                Some(progress_callback),
+            );
+            match write_success {
+                Ok(_) => Ok(format!("{:?} saved to {:?}", file_name, directory)),
+                Err(e) => {
+                    panic!("{}", e)
+                }
+            }
+        });
+
+        let worker = (WorkerType::Saving, save_thread);
+        self.send_thread_handle(worker)
+            .expect("Thread channel closed.")
+    }
 }
 
+// TODO: refactor this to recv_timeout.
 fn get_requested_configs(
     controller: WhisperAppController,
     requested_config_type: AudioConfigType,
@@ -501,7 +591,7 @@ fn run_realtime_audio_transcription(
     let c_configs = configs.clone();
 
     // Audio buffer.
-    let audio = init_audio_buffer(Some(whisper_realtime::constants::INPUT_BUFFER_CAPACITY));
+    let audio = init_audio_ring_buffer(Some(whisper_realtime::constants::INPUT_BUFFER_CAPACITY));
     let c_audio_reader = audio.clone();
     let c_audio_transcriber = audio.clone();
 
@@ -548,9 +638,15 @@ fn run_realtime_audio_transcription(
             loop {
                 if !c_realtime_is_running_write_thread.load(Ordering::Acquire) {
                     writer.finalize().expect("Failed to close writer.");
+                    // Update state - can save recording.
+                    c_controller_write
+                        .0
+                        .save_recording_ready
+                        .store(true, Ordering::Release);
+
                     break;
                 }
-                let output = c_controller_audio.receive_realtime_audio();
+                let output = c_controller_write.receive_realtime_audio();
                 assert!(output.is_ok(), "F32 Audio Channel Closed");
                 let output = output.unwrap();
                 write_audio_sample(&output, &mut writer, None::<fn(usize)>);
@@ -562,7 +658,7 @@ fn run_realtime_audio_transcription(
                 break;
             }
 
-            let output = c_controller_write.receive_realtime_audio();
+            let output = c_controller_audio.receive_realtime_audio();
             assert!(output.is_ok(), "Realtime Audio Channel closed");
 
             let mut audio_data = output.unwrap();
@@ -588,12 +684,11 @@ fn run_realtime_audio_transcription(
     });
 
     c_mic_stream.pause();
-
     transcription
 }
 
 // IMPL FN's -> TODO: determine whether to migrate to separate util fn file.
-fn init_audio_buffer<
+fn init_audio_ring_buffer<
     T: Default + Clone + Copy + sdl2::audio::AudioFormatNum + Sync + Send + 'static,
 >(
     len_ms: Option<usize>,
@@ -682,6 +777,7 @@ struct WhisperAppContext {
     // STATE
     realtime_ready: Arc<AtomicBool>,
     static_ready: Arc<AtomicBool>,
+    save_recording_ready: Arc<AtomicBool>,
 
     // WORKER FLAGS
     downloading: Arc<AtomicBool>,
@@ -752,11 +848,13 @@ impl WhisperAppContext {
         let downloading = Arc::new(AtomicBool::new(false));
         let realtime_ready = Arc::new(AtomicBool::new(false));
         let static_ready = Arc::new(AtomicBool::new(false));
+        let save_recording_ready = Arc::new(AtomicBool::new(false));
 
         let realtime_running = Arc::new(AtomicBool::new(false));
         let static_running = Arc::new(AtomicBool::new(false));
         let recorder_running = Arc::new(AtomicBool::new(false));
 
+        // TODO: factor out into functions so that channels can be reset.
         // CONFIGS
         let (realtime_configs_request_sender, realtime_configs_request_receiver) =
             crossbeam::channel::bounded(1);
@@ -764,10 +862,10 @@ impl WhisperAppContext {
             crossbeam::channel::bounded(1);
         let (recording_configs_request_sender, recording_configs_request_receiver) =
             crossbeam::channel::bounded(1);
-
+        // LIKELY SHOULD RESET - Test first.
         let (configs_sender, configs_receiver) = crossbeam::channel::bounded(1);
-
         // Recording
+        // DEFINITELY SHOULD RESET
         let (record_audio_i16_sender, record_audio_i16_receiver) =
             crossbeam::channel::bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
         // TODO: remove if no hound spt.
@@ -793,6 +891,7 @@ impl WhisperAppContext {
             audio_wrapper,
             realtime_ready,
             static_ready,
+            save_recording_ready,
             downloading,
             recorder_running,
             realtime_running,
@@ -886,14 +985,19 @@ fn check_gpu_target() -> bool {
 #[cfg(all(target_os = "linux", feature = "hipblas"))]
 fn check_gpu_target() -> bool {
     let hip = env::var("HIP_PATH").is_ok();
-    let common_paths = ["/opt/rocm/lib/libhipblas.so", "/opt/rocm/hip/lib/libhipblas.so", "opt/rocm/lib/librocblas.so", "opt/rocm/hipblas"];
+    let common_paths = [
+        "/opt/rocm/lib/libhipblas.so",
+        "/opt/rocm/hip/lib/libhipblas.so",
+        "opt/rocm/lib/librocblas.so",
+        "opt/rocm/hipblas",
+    ];
     let found_path = common_paths.iter().any(|&path| Path::new(path).exists());
     let blas = env::var("HIP_BLAS_PATH").is_ok();
 
     (hip & blas) | found_path
 }
 
-#[cfg(all(feature = "metal", target_arch = "x86_64-apple-darwin"))]
+#[cfg(all(feature = "metal", target_arch = "x86_64"))]
 fn check_gpu_target() -> bool {
     use metal;
     let available_devices = metal::Device::all();
@@ -903,7 +1007,7 @@ fn check_gpu_target() -> bool {
 }
 
 // Apple Silicon is fully supported by Whisper.cpp
-#[cfg(all(feature = "metal", target_arch = "aarch64-apple-darwin"))]
+#[cfg(all(feature = "metal", target_arch = "aarch64"))]
 fn check_gpu_target() -> bool {
     true
 }

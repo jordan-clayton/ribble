@@ -1,10 +1,7 @@
 use egui::{Grid, Slider, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::{IntoEnumIterator, VariantArray};
-use whisper_realtime::{
-    configs::Configs,
-    model::ModelType,
-};
+use whisper_realtime::{configs::Configs, model::ModelType};
 
 use crate::{
     ui::tabs::tab_view,
@@ -44,7 +41,6 @@ impl Default for RealtimeConfigsTab {
     }
 }
 
-// TODO: refactor duplicated code fragments into shared functions.
 impl tab_view::TabView for RealtimeConfigsTab {
     fn id(&mut self) -> String {
         self.title.clone()
@@ -96,7 +92,9 @@ impl tab_view::TabView for RealtimeConfigsTab {
         let available_models: Vec<ModelType> = if *use_gpu {
             ModelType::VARIANTS.to_vec()
         } else {
-            ModelType::iter().filter(|m| *m < ModelType::Small).collect()
+            ModelType::iter()
+                .filter(|m| *m < ModelType::Small)
+                .collect()
         };
 
         ui.add_enabled_ui(!realtime_running, |ui| {

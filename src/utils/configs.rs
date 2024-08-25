@@ -9,19 +9,21 @@ pub enum LoadingState {
     Loaded,
 }
 
-// TODO: Remove this if unused - Refactor impl to use a bg joiner thread.
 #[derive(Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter)]
 pub enum WorkerType {
     Downloading,
+    Saving,
     Realtime,
     Static,
     Recording,
 }
 
+// TODO: remove if unused.
 impl WorkerType {
     pub fn to_key(&self) -> &str {
         match self {
             WorkerType::Downloading => "downloading",
+            WorkerType::Saving => "saving",
             WorkerType::Realtime => "realtime",
             WorkerType::Static => "static",
             WorkerType::Recording => "recording",

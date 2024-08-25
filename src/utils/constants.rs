@@ -31,12 +31,15 @@ pub const MAX_LOW_FREQUENCY: f32 = 300.0;
 pub const MIN_HIGH_FREQUENCY: f32 = 330.0;
 pub const DEFAULT_HIGH_FREQUENCY: f32 = 1000.0;
 pub const MAX_HIGH_FREQUENCY: f32 = 10000.0;
+pub const MAX_FFT_HEIGHT: f32 = 800.0;
+pub const FFT_MAX_HEIGHT_PROPORTION: f32 = 0.75;
 
 pub const APP_ID: &str = "WhisperGUI";
 pub const QUALIFIER: &str = "com";
 pub const ORGANIZATION: &str = "Jordan";
 
 pub const CLEAR_MSG: &str = "[CLEAR]";
+pub const GO_MSG: &str = "[START SPEAKING]";
 
 pub const TEMP_FILE: &str = "tmp.wav";
 

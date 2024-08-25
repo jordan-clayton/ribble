@@ -8,7 +8,7 @@ use hound::{Sample, WavReader, WavSpec, WavWriter};
 use symphonia::{
     core::{
         audio::{Layout, SampleBuffer},
-        codecs::{Decoder, DecoderOptions, CODEC_TYPE_NULL},
+        codecs::{CODEC_TYPE_NULL, Decoder, DecoderOptions},
         errors::Error,
         formats::{FormatOptions, FormatReader},
         io::MediaSourceStream,
@@ -32,6 +32,10 @@ fn qualify_path(dir: &Path) -> PathBuf {
 pub fn copy_data(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::copy(from, to)?;
     Ok(())
+}
+
+pub fn get_temp_file_path(data_dir: &Path) -> PathBuf {
+    qualify_path(data_dir)
 }
 
 pub fn get_tmp_file_writer(
@@ -158,7 +162,7 @@ pub fn decode_audio(
     id: u32,
     mut reader: Box<dyn FormatReader>,
     mut decoder: Box<dyn Decoder>,
-    audio_closure: Option<impl Fn(&[f32])>,
+    mut audio_closure: Option<impl FnMut(&[f32])>,
 ) -> Result<(), WhisperAppError> {
     let mut sample_buf = None;
     let channel_layout = decoder.codec_params().channel_layout;
@@ -243,12 +247,12 @@ pub fn decode_audio(
                             whisper_realtime::whisper_rs::convert_stereo_to_mono_audio(new_audio)
                                 .expect("Failed to convert to mono");
                         new_audio = mono.as_slice();
-                        if let Some(closure) = audio_closure.as_ref() {
-                            closure(new_audio);
+                        if let Some(c) = audio_closure.as_mut() {
+                            c(new_audio);
                         }
                     } else {
-                        if let Some(closure) = audio_closure.as_ref() {
-                            closure(new_audio);
+                        if let Some(c) = audio_closure.as_mut() {
+                            c(new_audio);
                         }
                     }
                 }
@@ -286,11 +290,10 @@ pub fn decode_audio(
     Ok(())
 }
 
-// TODO: edit once RFD implemented
-pub fn save_transcript(
+pub fn save_transcription(
     file_path: &Path,
     transcript: &str,
-    progress_callback: Option<impl Fn(usize)>,
+    mut progress_callback: Option<impl FnMut(usize)>,
 ) -> Result<(), WhisperAppError> {
     let mut byte_string = transcript.as_bytes();
     let file = File::create(file_path);
@@ -305,6 +308,7 @@ pub fn save_transcript(
 
     let file = file.unwrap();
     let mut writer = BufWriter::new(file);
+    let mut total_bytes_written = 0;
     while !byte_string.is_empty() {
         match writer.write(byte_string) {
             Ok(0) => {
@@ -315,8 +319,9 @@ pub fn save_transcript(
                 return Err(error);
             }
             Ok(n) => {
-                if let Some(callback) = progress_callback.as_ref() {
-                    callback(n)
+                if let Some(c) = progress_callback.as_mut() {
+                    total_bytes_written += n;
+                    c(total_bytes_written)
                 }
                 byte_string = &byte_string[n..];
             }
@@ -349,7 +354,7 @@ pub fn save_transcript(
 pub fn write_audio_sample<T: Sample + Clone>(
     sample: &[T],
     writer: &mut WavWriter<BufWriter<File>>,
-    progress_callback: Option<impl Fn(usize) + Send + Sync + 'static>,
+    progress_callback: Option<impl FnMut(usize) + Send + Sync + 'static>,
 ) {
     let len = sample.len();
 
@@ -361,7 +366,7 @@ pub fn write_audio_sample<T: Sample + Clone>(
                     .expect("Failed to write sample.");
             }
         }
-        Some(c) => {
+        Some(mut c) => {
             for i in 0..len {
                 writer
                     .write_sample(sample[i].clone())
