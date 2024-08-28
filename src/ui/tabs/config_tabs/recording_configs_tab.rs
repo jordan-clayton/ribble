@@ -2,16 +2,16 @@ use egui::{Checkbox, ComboBox, Grid, Slider, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::IntoEnumIterator;
 
-use crate::ui::tabs::tab_view;
 use crate::{
+    controller::whisper_app_controller::WhisperAppController,
     utils::{
         configs::{
             AudioConfigs, BufferSize, Channel, RecorderConfigs, RecordingFormat, SampleRate,
         },
         constants,
     },
-    whisper_app_context::WhisperAppController,
 };
+use crate::ui::tabs::tab_view;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RecordingConfigsTab {
@@ -176,9 +176,25 @@ impl tab_view::TabView for RecordingConfigsTab {
                             ui.label("Frequencies lower than this threshold will be filtered out.");
                         });
 
-                        ui.add(Slider::new(f_lower, constants::MIN_HIGH_FREQUENCY..=constants::MAX_HIGH_FREQUENCY).suffix("Hz"));
+                        ui.add(Slider::new(f_lower, constants::MIN_LOW_FREQUENCY..=constants::MAX_LOW_FREQUENCY).suffix("Hz"));
                         ui.end_row();
-                    })
+                    });
+
+                    // DEFAULTS.
+                    ui.label("Reset To Defaults");
+                    if ui.button("Reset").clicked() {
+                        let default = RecorderConfigs::default();
+                        let RecorderConfigs {
+                            sample_rate: default_sample_rate, buffer_size: default_buffer_size, channel: default_channel, format: default_format, filter: default_filter, f_lower: default_f_lower, f_higher: default_f_higher
+                        } = default;
+                        *sample_rate = default_sample_rate;
+                        *buffer_size = default_buffer_size;
+                        *channel = default_channel;
+                        *format = default_format;
+                        *filter = default_filter;
+                        *f_lower = default_f_lower;
+                        *f_higher = default_f_higher;
+                    }
                 });
         });
     }
@@ -190,8 +206,7 @@ impl tab_view::TabView for RecordingConfigsTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

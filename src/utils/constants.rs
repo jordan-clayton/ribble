@@ -23,16 +23,18 @@ pub const MAX_VAD_PROBABILITY: f32 = 0.9;
 // TODO: SETTLE ON PROPER VALUES
 pub const DEFAULT_F_LOWER: f32 = 100f32;
 pub const DEFAULT_F_HIGHER: f32 = 4000f32;
-pub const NUM_BUCKETS: usize = 64;
+pub const NUM_BUCKETS: usize = 32;
 pub const SMOOTH_FACTOR: f32 = 8.0;
 pub const MIN_LOW_FREQUENCY: f32 = 25.0;
-pub const DEFAULT_LOW_FREQUENCY: f32 = 100.0;
 pub const MAX_LOW_FREQUENCY: f32 = 300.0;
 pub const MIN_HIGH_FREQUENCY: f32 = 330.0;
-pub const DEFAULT_HIGH_FREQUENCY: f32 = 1000.0;
 pub const MAX_HIGH_FREQUENCY: f32 = 10000.0;
 pub const MAX_FFT_HEIGHT: f32 = 800.0;
-pub const FFT_MAX_HEIGHT_PROPORTION: f32 = 0.75;
+pub const MIN_FFT_HEIGHT: f32 = 200.0;
+pub const FFT_MAX_HEIGHT_PROPORTION: f32 = 0.95;
+pub const FFT_MIN_HEIGHT_PROPORTION: f32 = 0.10;
+
+pub const FFT_GAIN: f32 = 30.0;
 
 pub const APP_ID: &str = "WhisperGUI";
 pub const QUALIFIER: &str = "com";

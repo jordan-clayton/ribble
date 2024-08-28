@@ -1,10 +1,11 @@
 use std::collections::HashSet;
 
-use egui::{Grid, ProgressBar, ScrollArea, Ui, WidgetText};
+use egui::{Grid, ProgressBar, ScrollArea, Spinner, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
 use crate::{
-    ui::tabs::tab_view, utils::progress::Progress, whisper_app_context::WhisperAppController,
+    controller::whisper_app_controller::WhisperAppController, ui::tabs::tab_view,
+    utils::progress::Progress,
 };
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -24,11 +25,23 @@ impl ProgressDisplayTab {
     }
 
     fn progress_widget(ui: &mut Ui, progress: &Progress) {
-        let percent = (progress.progress() as f32) / (progress.total_size() as f32);
-        ui.vertical(|ui| {
-            ui.label(progress.job_name());
-            ui.add(ProgressBar::new(percent).show_percentage().animate(true));
-        });
+        let p = progress.progress();
+        let total_size = progress.total_size();
+        match total_size {
+            0 => {
+                ui.vertical(|ui| {
+                    ui.label(progress.job_name());
+                    ui.add(Spinner::new())
+                });
+            }
+            _ => {
+                let percent = (p as f32) / (total_size as f32);
+                ui.vertical(|ui| {
+                    ui.label(progress.job_name());
+                    ui.add(ProgressBar::new(percent).show_percentage().animate(true));
+                });
+            }
+        }
     }
 }
 
@@ -80,12 +93,11 @@ impl tab_view::TabView for ProgressDisplayTab {
     // TODO: Determine if actually required.
     fn context_menu(
         &mut self,
-        ui: &mut Ui,
-        controller: &mut WhisperAppController,
-        surface: SurfaceIndex,
-        node: NodeIndex,
-    ) {
-    }
+        _ui: &mut Ui,
+        _controller: &mut WhisperAppController,
+        _surface: SurfaceIndex,
+        _node: NodeIndex,
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

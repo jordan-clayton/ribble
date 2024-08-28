@@ -3,13 +3,13 @@ use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::{IntoEnumIterator, VariantArray};
 use whisper_realtime::{configs::Configs, model::ModelType};
 
-use crate::{
-    ui::tabs::tab_view,
-    utils::{configs::AudioConfigs, constants, threading::get_max_threads},
-    whisper_app_context::WhisperAppController,
-};
 use crate::ui::tabs::config_tabs::configs_common;
 use crate::utils::configs::AudioConfigType;
+use crate::{
+    controller::whisper_app_controller::WhisperAppController,
+    ui::tabs::tab_view,
+    utils::{configs::AudioConfigs, constants, threading::get_max_threads},
+};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RealtimeConfigsTab {
@@ -247,7 +247,8 @@ impl tab_view::TabView for RealtimeConfigsTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

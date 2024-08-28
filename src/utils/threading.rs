@@ -1,10 +1,10 @@
 use std::any::Any;
 use std::thread::JoinHandle;
 
+use crate::controller::whisper_app_controller::WhisperAppController;
 use crate::utils::configs::WorkerType;
 use crate::utils::console_message::{ConsoleMessage, ConsoleMessageType};
 use crate::utils::constants;
-use crate::whisper_app_context::WhisperAppController;
 
 pub fn get_max_threads() -> std::ffi::c_int {
     match std::thread::available_parallelism() {

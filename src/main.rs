@@ -6,6 +6,7 @@ use egui::ViewportBuilder;
 use whisper_realtime::downloader::request::reqwest;
 
 use crate::{
+    controller::whisper_app_controller::WhisperAppController,
     ui::app::WhisperApp,
     utils::{
         constants,
@@ -13,12 +14,11 @@ use crate::{
         sdl_audio_wrapper::SdlAudioWrapper,
         threading::join_threads_loop,
     },
-    whisper_app_context::WhisperAppController,
 };
 
+mod controller;
 mod ui;
 mod utils;
-mod whisper_app_context;
 
 fn main() -> Result<(), WhisperAppError> {
     let proj_dirs = ProjectDirs::from(

@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use eframe::Storage;
 use egui_dock::{DockArea, DockState, NodeIndex, Style};
 
 use crate::{
+    controller::whisper_app_controller::WhisperAppController,
     ui::tabs::{
         config_tabs::{realtime_configs_tab, recording_configs_tab, static_configs_tab},
         display_tabs::{
@@ -13,7 +13,6 @@ use crate::{
         tab_viewer, whisper_tab,
     },
     utils::preferences,
-    whisper_app_context::WhisperAppController,
 };
 
 pub struct WhisperApp {
@@ -115,9 +114,12 @@ impl eframe::App for WhisperApp {
 
         DockArea::new(&mut self.tree)
             .style(Style::from_egui(ctx.style().as_ref()))
+            // Quick-fix for tabs being non-recoverable if a window is closed.
+            .show_window_close_buttons(false)
             .show_add_buttons(show_add)
             .show_add_popup(show_add)
             .show(ctx, &mut tab_viewer);
+
 
         self.closed_tabs = closed_tabs;
 
@@ -127,12 +129,14 @@ impl eframe::App for WhisperApp {
         });
     }
 
-    fn save(&mut self, storage: &mut dyn Storage) {
-        eframe::set_value(storage, eframe::APP_KEY, &(&self.tree, &self.closed_tabs));
-    }
 
-    // TODO: set to false when testing default layout.
+    // TODO: Restore once testing finished.
+    // fn save(&mut self, storage: &mut dyn Storage) {
+    //     eframe::set_value(storage, eframe::APP_KEY, &(&self.tree, &self.closed_tabs));
+    // }
+
+    // TODO: set back to true once testing done
     fn persist_egui_memory(&self) -> bool {
-        true
+        false
     }
 }

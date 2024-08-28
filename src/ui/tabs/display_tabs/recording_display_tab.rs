@@ -6,16 +6,16 @@ use std::{
     },
 };
 
-use egui::{Button, Grid, SidePanel, Ui, WidgetText};
+use egui::{Button, CentralPanel, Grid, SidePanel, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
 use crate::{
+    controller::whisper_app_controller::WhisperAppController,
     ui::{
         tabs::tab_view,
         widgets::{fft_visualizer, recording_icon::recording_icon},
     },
     utils::{constants, preferences, recording},
-    whisper_app_context::WhisperAppController,
 };
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -80,7 +80,7 @@ impl tab_view::TabView for RecordingDisplayTab {
         // Check whether mic is occupied by another process.
         let mic_occupied = controller.audio_running() ^ recorder_running;
 
-        if run_visualizer {
+        if run_visualizer && recorder_running {
             *target_cleared = false;
             // Update to the latest fft data.
             controller.read_fft_buffer(target);
@@ -103,7 +103,9 @@ impl tab_view::TabView for RecordingDisplayTab {
                 Grid::new("inner_recording_panel").striped(true).show(ui, |ui| {
                     // Start recording button
                     if ui.add_enabled(!recorder_running, Button::new("Start Recording")).clicked() {
-                        controller.start_recording(visualize.clone());
+                        controller.start_recording(visualize.clone(), &ui.ctx().clone());
+                        // TODO: remove once proper implemented
+                        accepting_speech = true;
                     }
 
                     ui.end_row();
@@ -145,49 +147,51 @@ impl tab_view::TabView for RecordingDisplayTab {
             });
         });
 
-        // Visualization.
-        // Header
-        let system_theme = controller.get_system_theme();
-        let theme = preferences::get_app_theme(system_theme);
+        CentralPanel::default().show_inside(ui, |ui| {
+            // Visualization.
+            // Header
+            let system_theme = controller.get_system_theme();
+            let theme = preferences::get_app_theme(system_theme);
 
-        let (icon, msg) = if accepting_speech {
-            (
-                recording_icon(egui::Rgba::from(theme.red), true),
-                "Recording in progress.",
-            )
-        } else if recorder_running {
-            (
-                recording_icon(egui::Rgba::from(theme.green), true),
-                "Preparing to record.",
-            )
-        } else if mic_occupied {
-            (
-                recording_icon(egui::Rgba::from(theme.yellow), true),
-                "Microphone in use.",
-            )
-        } else {
-            (
-                recording_icon(egui::Rgba::from(theme.green), false),
-                "Ready to record.",
-            )
-        };
+            let (icon, msg) = if accepting_speech {
+                (
+                    recording_icon(egui::Rgba::from(theme.red), true),
+                    "Recording in progress.",
+                )
+            } else if recorder_running {
+                (
+                    recording_icon(egui::Rgba::from(theme.green), true),
+                    "Preparing to record.",
+                )
+            } else if mic_occupied {
+                (
+                    recording_icon(egui::Rgba::from(theme.yellow), true),
+                    "Microphone in use.",
+                )
+            } else {
+                (
+                    recording_icon(egui::Rgba::from(theme.green), false),
+                    "Ready to record.",
+                )
+            };
 
-        ui.horizontal(|ui| {
-            ui.add(icon);
-            ui.label(msg);
+            ui.horizontal(|ui| {
+                ui.add(icon);
+                ui.label(msg);
+            });
+
+            // FFT visualizer
+            fft_visualizer::draw_fft(ui, &current);
         });
-
-        // FFT visualizer
-        fft_visualizer::draw_fft(ui, &current);
     }
 
     // TODO: determine if actually useful.
     fn context_menu(
         &mut self,
-        ui: &mut Ui,
-        controller: &mut WhisperAppController,
-        surface: SurfaceIndex,
-        node: NodeIndex,
+        _ui: &mut Ui,
+        _controller: &mut WhisperAppController,
+        _surface: SurfaceIndex,
+        _node: NodeIndex,
     ) {}
 
     fn closeable(&mut self) -> bool {

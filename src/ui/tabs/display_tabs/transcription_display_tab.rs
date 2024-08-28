@@ -1,10 +1,12 @@
 use std::path::PathBuf;
 
 use catppuccin_egui::Theme;
-use egui::{Button, CentralPanel, Grid, Layout, ScrollArea, SidePanel, Ui, Widget, WidgetText};
+use egui::{Button, CentralPanel, Grid, Layout, ScrollArea, SidePanel, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
+use crate::utils::{file_mgmt, preferences};
 use crate::{
+    controller::whisper_app_controller::WhisperAppController,
     ui::{
         tabs::tab_view,
         widgets::{recording_icon::recording_icon, toggle_switch::toggle},
@@ -13,9 +15,7 @@ use crate::{
         console_message::{ConsoleMessage, ConsoleMessageType},
         constants,
     },
-    whisper_app_context::WhisperAppController,
 };
-use crate::utils::{file_mgmt, preferences};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TranscriptionTab {
@@ -124,7 +124,8 @@ impl TranscriptionTab {
                 .striped(true)
                 .show(ui, |ui| {
                     if ui.add_enabled(can_start, Button::new("Start")).clicked() {
-                        controller.start_static_transcription(&file_path);
+                        let ctx = ui.ctx().clone();
+                        controller.start_static_transcription(&file_path, &ctx);
                     }
 
                     ui.end_row();
@@ -186,6 +187,7 @@ impl TranscriptionTab {
         let audio_running = controller.audio_running();
         // Check whether mic is occupied by another process.
         let mic_occupied = audio_running ^ realtime_running;
+        let ctx = ui.ctx().clone();
 
         ui.add_enabled_ui(!mic_occupied, |ui| {
             Grid::new("inner_realtime_panel")
@@ -195,7 +197,7 @@ impl TranscriptionTab {
                         .add_enabled(!realtime_running, Button::new("Start"))
                         .clicked()
                     {
-                        controller.start_realtime_transcription(&ui.ctx().clone());
+                        controller.start_realtime_transcription(&ctx);
                     }
                     ui.end_row();
 
@@ -217,7 +219,7 @@ impl TranscriptionTab {
                             .expect("Failed to get storage dir");
                         let path = file_mgmt::get_temp_file_path(&data_dir);
                         assert!(path.exists(), "Temporary file missing");
-                        controller.start_static_transcription(path.as_path());
+                        controller.start_static_transcription(path.as_path(), &ctx);
                     }
                     ui.end_row();
 
@@ -427,7 +429,8 @@ impl tab_view::TabView for TranscriptionTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

@@ -1,7 +1,7 @@
 use egui::{Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
-use crate::whisper_app_context::WhisperAppController;
+use crate::controller::whisper_app_controller::WhisperAppController;
 
 // Port of egui_dock::TabViewer interface, removing type parameter
 // To be able to have heterogeneous tabs.

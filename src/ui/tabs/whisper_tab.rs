@@ -1,17 +1,20 @@
-// Encapsulation struct of trait T for covariant implementation type S.
 use egui::{Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
 use crate::{
+    controller::whisper_app_controller::WhisperAppController,
     ui::tabs::{
-        config_tabs::{realtime_configs_tab, recording_configs_tab, static_configs_tab},
+        config_tabs::{
+            realtime_configs_tab::RealtimeConfigsTab, recording_configs_tab::RecordingConfigsTab,
+            static_configs_tab::StaticConfigsTab,
+        },
         display_tabs::{
-            console_display_tab, progress_display_tab, recording_display_tab,
-            transcription_display_tab,
+            console_display_tab::ErrorConsoleDisplayTab, progress_display_tab::ProgressDisplayTab,
+            recording_display_tab::RecordingDisplayTab,
+            transcription_display_tab::TranscriptionTab,
         },
         tab_view::TabView,
     },
-    whisper_app_context::WhisperAppController,
 };
 
 // This is a concession made to keep the implementation as decoupled as possible.
@@ -19,18 +22,17 @@ use crate::{
 // Each member of WhisperTab must implement TabView, a port of the egui_dock::TabViewer interface
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub enum WhisperTab {
-    RealtimeConfigs(realtime_configs_tab::RealtimeConfigsTab),
-    StaticConfigs(static_configs_tab::StaticConfigsTab),
-    RecordingConfigs(recording_configs_tab::RecordingConfigsTab),
-    TranscriptionDisplay(transcription_display_tab::TranscriptionTab),
-    RecordingDisplay(recording_display_tab::RecordingDisplayTab),
-    ProgressDisplay(progress_display_tab::ProgressDisplayTab),
-    ErrorDisplay(console_display_tab::ErrorConsoleDisplayTab),
+    RealtimeConfigs(RealtimeConfigsTab),
+    StaticConfigs(StaticConfigsTab),
+    RecordingConfigs(RecordingConfigsTab),
+    TranscriptionDisplay(TranscriptionTab),
+    RecordingDisplay(RecordingDisplayTab),
+    ProgressDisplay(ProgressDisplayTab),
+    ErrorDisplay(ErrorConsoleDisplayTab),
 }
 
 impl WhisperTab {
-    // TODO: remove if unused
-    fn as_tab_view(&mut self) -> &mut dyn TabView {
+    fn decay(&mut self) -> &mut dyn TabView {
         match self {
             WhisperTab::RealtimeConfigs(rc) => rc,
             WhisperTab::StaticConfigs(sc) => sc,
@@ -45,14 +47,14 @@ impl WhisperTab {
 
 impl TabView for WhisperTab {
     fn id(&mut self) -> String {
-        id(self)
+        self.decay().id()
     }
     fn title(&mut self) -> WidgetText {
-        title(self)
+        self.decay().title()
     }
 
     fn ui(&mut self, ui: &mut Ui, controller: &mut WhisperAppController) {
-        draw_ui(self, ui, controller)
+        self.decay().ui(ui, controller)
     }
 
     fn context_menu(
@@ -62,46 +64,14 @@ impl TabView for WhisperTab {
         surface: SurfaceIndex,
         node: NodeIndex,
     ) {
-        context_menu(self, ui, controller, surface, node);
+        self.decay().context_menu(ui, controller, surface, node);
     }
 
     fn closeable(&mut self) -> bool {
-        closeable(self)
+        self.decay().closeable()
     }
 
     fn allowed_in_windows(&mut self) -> bool {
-        allowed_in_windows(self)
+        self.decay().allowed_in_windows()
     }
-}
-
-// IMPL functions:
-// To enforce that all members of the struct implement tabview
-fn id(tab: &mut impl TabView) -> String {
-    tab.id()
-}
-
-fn title(tab: &mut impl TabView) -> WidgetText {
-    tab.title()
-}
-
-fn draw_ui(tab: &mut impl TabView, ui: &mut Ui, controller: &mut WhisperAppController) {
-    tab.ui(ui, controller);
-}
-
-fn context_menu(
-    tab: &mut impl TabView,
-    ui: &mut Ui,
-    controller: &mut WhisperAppController,
-    surface: SurfaceIndex,
-    node: NodeIndex,
-) {
-    tab.context_menu(ui, controller, surface, node)
-}
-
-fn closeable(tab: &mut impl TabView) -> bool {
-    tab.closeable()
-}
-
-fn allowed_in_windows(tab: &mut impl TabView) -> bool {
-    tab.allowed_in_windows()
 }

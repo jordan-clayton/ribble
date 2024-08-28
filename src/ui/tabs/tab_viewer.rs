@@ -4,8 +4,8 @@ use egui::{Id, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
 use crate::{
+    controller::whisper_app_controller::WhisperAppController,
     ui::tabs::{tab_view::TabView, whisper_tab::WhisperTab},
-    whisper_app_context::WhisperAppController,
 };
 
 pub struct WhisperTabViewer<'a> {
@@ -62,6 +62,7 @@ impl egui_dock::TabViewer for WhisperTabViewer<'_> {
         true
     }
 
+    // TODO: fix sizing
     fn add_popup(&mut self, ui: &mut Ui, surface: SurfaceIndex, node: NodeIndex) {
         let closed_tabs: Vec<String> = self.closed_tabs.keys().cloned().collect();
         ui.style_mut().visuals.button_frame = false;

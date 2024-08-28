@@ -18,18 +18,6 @@ pub enum WorkerType {
     Recording,
 }
 
-// TODO: remove if unused.
-impl WorkerType {
-    pub fn to_key(&self) -> &str {
-        match self {
-            WorkerType::Downloading => "downloading",
-            WorkerType::Saving => "saving",
-            WorkerType::Realtime => "realtime",
-            WorkerType::Static => "static",
-            WorkerType::Recording => "recording",
-        }
-    }
-}
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum AudioConfigs {
@@ -98,7 +86,7 @@ pub enum Channel {
 }
 
 impl Channel {
-    fn num_channels(&self) -> Option<u8> {
+    pub fn num_channels(&self) -> Option<u8> {
         match self {
             Channel::Default => None,
             Channel::Mono => Some(1),
@@ -180,19 +168,6 @@ pub struct RecorderConfigs {
     pub filter: bool,
     pub f_lower: f32,
     pub f_higher: f32,
-}
-
-impl RecorderConfigs {
-    pub fn extract_sample_rate(&self) -> Option<i32> {
-        self.sample_rate.sample_rate()
-    }
-    pub fn extract_num_channels(&self) -> Option<u8> {
-        self.channel.num_channels()
-    }
-
-    pub fn extract_buffer_size(&self) -> Option<u16> {
-        self.buffer_size.size()
-    }
 }
 
 impl Default for RecorderConfigs {

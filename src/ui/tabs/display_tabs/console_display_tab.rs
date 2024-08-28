@@ -4,9 +4,9 @@ use egui::{ScrollArea, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
 use crate::{
+    controller::whisper_app_controller::WhisperAppController,
     ui::tabs::tab_view,
     utils::{console_message::ConsoleMessage, constants},
-    whisper_app_context::WhisperAppController,
 };
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -21,7 +21,7 @@ impl ErrorConsoleDisplayTab {
     pub fn new() -> Self {
         let errors = console_history();
         Self {
-            title: String::from("Errors"),
+            title: String::from("Console"),
             console_queue: errors,
         }
     }
@@ -78,10 +78,10 @@ impl tab_view::TabView for ErrorConsoleDisplayTab {
     // TODO: determine whether needed
     fn context_menu(
         &mut self,
-        ui: &mut Ui,
-        controller: &mut WhisperAppController,
-        surface: SurfaceIndex,
-        node: NodeIndex,
+        _ui: &mut Ui,
+        _controller: &mut WhisperAppController,
+        _surface: SurfaceIndex,
+        _node: NodeIndex,
     ) {}
 
     fn closeable(&mut self) -> bool {

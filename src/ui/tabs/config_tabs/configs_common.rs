@@ -1,15 +1,20 @@
-use std::path::PathBuf;
-use std::thread;
+use std::{path::PathBuf, thread};
 
 use egui::{Button, Checkbox, ComboBox, Slider, Ui};
 use whisper_realtime::model::{Model, ModelType};
 
-use crate::utils::configs::AudioConfigType;
-use crate::utils::configs::WorkerType;
-use crate::utils::constants;
-use crate::utils::errors::{WhisperAppError, WhisperAppErrorType};
-use crate::utils::file_mgmt::copy_data;
-use crate::whisper_app_context::WhisperAppController;
+use crate::{
+    controller::whisper_app_controller::WhisperAppController,
+    ui::widgets::icons::ok_icon,
+    utils::{
+        configs::{AudioConfigType, WorkerType},
+        constants,
+        errors::{WhisperAppError, WhisperAppErrorType},
+        file_mgmt::copy_data,
+        preferences::get_app_theme,
+    },
+};
+use crate::ui::widgets::icons::warning_icon;
 
 // I'm not 100% sold on this - It might be worth the heap allocation?
 // TODO: Might also be better to avoid the branching & supply the boolean + callback.
@@ -60,23 +65,26 @@ pub fn model_row(
             });
 
         let dir = eframe::storage_dir(constants::APP_ID).expect("Failed to get data dir.");
-        let mut m_model = Model::new_with_type_and_dir(*model, dir);
+        let m_model = Model::new_with_type_and_dir(*model, dir);
         let model_downloaded = m_model.is_downloaded();
 
+        let system_theme = controller.get_system_theme();
+        let theme = get_app_theme(system_theme);
         if model_downloaded {
             if !ready {
                 update_ready(true);
             }
-            // Okay icon
-            // ui.add(okay icon);
-            ui.label("-Okay icon- here");
+
+            ui.add(ok_icon(1.5, Some(theme))).on_hover_ui(|ui| {
+                ui.label("THIS SHOULD BE THE OK ICON");
+            });
         } else {
             if ready {
                 update_ready(false);
             }
-            // Warning icon
-            // ui.add(warning icon);
-            ui.label("-Warning icon- here");
+            ui.add(warning_icon(1.5, Some(theme))).on_hover_ui(|ui| {
+                ui.label("THIS SHOULD BE THE WARNING ICON");
+            });
         }
 
         let model_path_open = m_model.file_path();

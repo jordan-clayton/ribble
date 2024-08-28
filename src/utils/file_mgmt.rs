@@ -8,7 +8,7 @@ use hound::{Sample, WavReader, WavSpec, WavWriter};
 use symphonia::{
     core::{
         audio::{Layout, SampleBuffer},
-        codecs::{CODEC_TYPE_NULL, Decoder, DecoderOptions},
+        codecs::{Decoder, DecoderOptions, CODEC_TYPE_NULL},
         errors::Error,
         formats::{FormatOptions, FormatReader},
         io::MediaSourceStream,
@@ -156,14 +156,14 @@ pub fn get_audio_reader(
     Ok((track_id, format, decoder))
 }
 
-// This should be run on a separate thread.
-// Use the audio closure to receive packets of decoded audio.
+// progress closure = (samples decoded so far, in bytes);
 pub fn decode_audio(
     id: u32,
     mut reader: Box<dyn FormatReader>,
     mut decoder: Box<dyn Decoder>,
-    mut audio_closure: Option<impl FnMut(&[f32])>,
-) -> Result<(), WhisperAppError> {
+    mut progress_closure: Option<impl FnMut(usize)>,
+) -> Result<Vec<f32>, WhisperAppError> {
+    let mut samples = vec![];
     let mut sample_buf = None;
     let channel_layout = decoder.codec_params().channel_layout;
     if channel_layout.is_none() {
@@ -239,21 +239,19 @@ pub fn decode_audio(
 
                 if let Some(buf) = sample_buf.as_mut() {
                     buf.copy_interleaved_ref(audio_buf);
-                    let mut new_audio = buf.samples();
-
-                    // Convert to mono for whisper.
-                    if !in_mono {
-                        let mono =
-                            whisper_realtime::whisper_rs::convert_stereo_to_mono_audio(new_audio)
-                                .expect("Failed to convert to mono");
-                        new_audio = mono.as_slice();
-                        if let Some(c) = audio_closure.as_mut() {
-                            c(new_audio);
-                        }
+                    let new_audio = if in_mono {
+                        buf.samples().to_vec()
                     } else {
-                        if let Some(c) = audio_closure.as_mut() {
-                            c(new_audio);
-                        }
+                        let audio = buf.samples();
+
+                        whisper_realtime::whisper_rs::convert_stereo_to_mono_audio(audio)
+                            .expect("Failed to convert to mono")
+                    };
+
+                    samples.extend_from_slice(&new_audio);
+                    if let Some(p) = progress_closure.as_mut() {
+                        let p_size = samples.len() * size_of::<f32>();
+                        p(p_size);
                     }
                 }
             }
@@ -287,7 +285,7 @@ pub fn decode_audio(
             }
         }
     }
-    Ok(())
+    Ok(samples)
 }
 
 pub fn save_transcription(

@@ -10,6 +10,7 @@ use realfft::{
     num_traits::{FromPrimitive, NumCast, ToPrimitive, Zero},
     RealFftPlanner, RealToComplex,
 };
+use realfft::num_traits::{Bounded, Signed};
 
 use crate::utils::constants;
 use crate::utils::errors::{WhisperAppError, WhisperAppErrorType};
@@ -18,20 +19,43 @@ lazy_static! {
     static ref FFT_PLANNER: Mutex<RealFftPlanner<f32>> = Mutex::new(RealFftPlanner::<f32>::new());
 }
 
+
 fn apply_gain(samples: &mut [f32], gain: f32) {
     for sample in samples.iter_mut() {
         *sample *= gain;
     }
 }
 
-pub fn cast_to_f64<T: NumCast + FromPrimitive + ToPrimitive + Zero>(
+pub fn to_f32_normalized<T: NumCast + Bounded + FromPrimitive + ToPrimitive + Zero>(
     source: &[T],
-    dest: &mut [f64],
+    dest: &mut [f32],
 ) {
     let cast = source
         .iter()
-        .map(|n| n.to_f64().expect("Failed to cast T to f64"))
-        .collect::<Vec<f64>>();
+        .map(|n| {
+            let num = n.to_f32().expect("Failed to cast T to f32");
+            let denom = T::max_value()
+                .to_f32()
+                .expect("Failed to cast T::MAX to f32");
+            num / denom
+        })
+        .collect::<Vec<_>>();
+    let cast = cast.as_slice();
+    dest.copy_from_slice(cast);
+}
+
+pub fn from_f32_normalized<T: Copy + NumCast + Bounded + FromPrimitive + ToPrimitive + Zero>(
+    source: &[f32],
+    dest: &mut [T],
+) {
+    let cast = source
+        .iter()
+        .map(|n| {
+            let max = T::max_value().to_f32().expect("Failed to cast T to f32");
+            let num = *n * max;
+            T::from(num).expect("Failed to cast f32 to T")
+        })
+        .collect::<Vec<_>>();
     let cast = cast.as_slice();
     dest.copy_from_slice(cast);
 }
@@ -44,6 +68,18 @@ pub fn cast_to_f32<T: NumCast + FromPrimitive + ToPrimitive + Zero>(
         .iter()
         .map(|n| n.to_f32().expect("Failed to cast T to f32"))
         .collect::<Vec<_>>();
+    let cast = cast.as_slice();
+    dest.copy_from_slice(cast);
+}
+
+pub fn cast_from_f32<T: NumCast + FromPrimitive + ToPrimitive + Zero + Copy>(
+    source: &[f32],
+    dest: &mut [T],
+) {
+    let cast: Vec<T> = source
+        .iter()
+        .map(|n| T::from(*n).expect("Failed to cast f32 to T"))
+        .collect();
     let cast = cast.as_slice();
     dest.copy_from_slice(cast);
 }
@@ -62,6 +98,7 @@ pub fn bandpass_filter(samples: &mut [f32], sample_rate: f32, f_central: f32) {
     let f0 = f_central.hz();
     let coeffs = Coefficients::<f32>::from_params(Type::BandPass, fs, f0, Q_BUTTERWORTH_F32)
         .expect("Cutoff does not adhere to Nyquist Freq");
+
     let mut biquad = DirectForm2Transposed::<f32>::new(coeffs);
 
     let len = samples.len();
@@ -88,7 +125,7 @@ pub fn fft_analysis(samples: &[f32], result: &mut [f32; constants::NUM_BUCKETS])
     hann_window(samples, &mut window_samples);
 
     // Build frames
-    let frames = welch_frames(&window_samples, Some(constants::NUM_BUCKETS), None)
+    let mut frames = welch_frames(&window_samples, Some(constants::NUM_BUCKETS), None)
         .expect("Failed to build frames");
 
     // Init FFT
@@ -101,16 +138,19 @@ pub fn fft_analysis(samples: &[f32], result: &mut [f32; constants::NUM_BUCKETS])
     // (Also, grab max log magnitude).
     let mut max_mag = 1.0;
     let log_average_signal_density: Vec<f32> = frames
-        .iter()
+        .iter_mut()
         .map(|frame| {
+            apply_gain(frame, constants::FFT_GAIN);
             process_fft(frame, fft.clone(), &mut input, &mut output);
-            let mag = (output.iter().map(|c| c.norm_sqr()).sum::<f32>()
-                / (frame.len() as f32).powi(2))
-                .ln();
-            if mag > max_mag {
+            let mag = output.iter().map(|c| c.norm_sqr().abs()).sum::<f32>()
+                / (output.len() as f32).powi(2);
+
+            let log_mag = mag.log10();
+
+            if log_mag > max_mag {
                 max_mag = mag;
             }
-            mag
+            log_mag.max(0.0)
         })
         .collect();
 
@@ -127,6 +167,8 @@ pub fn fft_analysis(samples: &[f32], result: &mut [f32; constants::NUM_BUCKETS])
         constants::NUM_BUCKETS,
         normalized_signal.len()
     );
+
+    debug_assert!(normalized_signal.iter().all(|n| *n <= 1.0 && *n >= 0.0), "Normalizing failed");
 
     // Copy the normalized signal to the result slice.
     result.copy_from_slice(&normalized_signal);
@@ -145,6 +187,7 @@ fn process_fft(
         .expect("Slice with incorrect length supplied to fft");
 }
 
+// TODO: Fix this implementation -> this needs to frame into constants::NUM_BUCKETS
 fn welch_frames(
     windowed_samples: &[f32],
     num_segments: Option<usize>,
@@ -176,23 +219,35 @@ fn welch_frames(
 
     // If l does not land on a power of two, zero-pad the end of the samples.
     if m > l {
-        samples.resize(m, 0.0);
+        let diff = m.abs_diff(l);
+        let new_size = samples.len() + diff;
+        samples.resize(new_size, 0.0);
         l = m;
     }
 
     let overlap = l - (l as f64 * a as f64).round() as usize;
 
-    let frames: Vec<Vec<f32>> = samples
+    let mut frames: Vec<Vec<f32>> = samples
         .windows(l)
         .step_by(overlap)
         .map(|s| s.to_vec())
         .collect();
 
-    assert!(frames.len() > 1, "Failed to group into frames");
+
+    assert!(frames.len() > 0, "Failed to group into frames");
     assert!(
         frames[0].len().is_power_of_two(),
         "Failed to group in powers of 2"
     );
+
+    // TODO: fix this - this is not a fix.
+    if frames.len() != constants::NUM_BUCKETS {
+        let diff = frames.len().abs_diff(constants::NUM_BUCKETS);
+        let new_size = frames.len() + diff;
+        let inner = frames[0].len();
+        frames.resize(new_size, vec![0.0; inner]);
+    }
+
     Ok(frames)
 }
 
@@ -204,8 +259,28 @@ pub fn smoothing(current: &mut [f32], target: &[f32], dt: f32) {
         current.len(),
         target.len()
     );
+    debug_assert!(current.iter().all(|n| !n.is_nan()), "Nan values in current before smoothing");
+    debug_assert!(current.iter().all(|n| !n.is_infinite()), "Infinite values in current before smoothing");
+    debug_assert!(target.iter().all(|n| !n.is_nan()), "Nan values in target before smoothing");
+    debug_assert!(target.iter().all(|n| !n.is_infinite()), "Infinite values in target before smoothing");
 
     for i in 0..current.len() {
+        let x = current[i];
+        let y = target[i];
+        let z = x - y;
+        let t = constants::SMOOTH_FACTOR * dt;
         current[i] += (target[i] - current[i]) * constants::SMOOTH_FACTOR * dt;
+        if current[i].is_infinite() {
+            panic!("Infinite value.\n\
+            Case:\n\
+            x: {},\
+            y: {},\
+            x - y: {},\
+            t: {}
+            ", x, y, z, t);
+        }
     }
+    debug_assert!(current.iter().all(|n| !n.is_nan()), "Nan values after smoothing");
+
+    debug_assert!(current.iter().all(|n| !n.is_infinite()), "Infinite values after smoothing");
 }
