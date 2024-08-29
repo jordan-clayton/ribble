@@ -53,7 +53,7 @@ use crate::controller::utils::transcriber_utilities::init_microphone;
 use crate::utils::configs::{RecorderConfigs, RecordingFormat};
 use crate::utils::file_mgmt::{decode_audio, get_audio_reader};
 use crate::utils::recording::{
-    bandpass_filter, f_central, fft_analysis, from_f32_normalized, to_f32_normalized,
+    bandpass_filter, f_central, frequency_analysis, from_f32_normalized, to_f32_normalized,
 };
 
 // TODO: Remaining impls;
@@ -540,7 +540,10 @@ impl WhisperAppController {
         let controller = self.clone();
 
         // Send a request for configs.
-        self.0.recording_configs_request_sender.send(()).expect("Recording configs request channel closed");
+        self.0
+            .recording_configs_request_sender
+            .send(())
+            .expect("Recording configs request channel closed");
 
         let rec_thread = thread::spawn(move || {
             let configs =
@@ -564,7 +567,6 @@ impl WhisperAppController {
                     .store(false, Ordering::Release);
                 panic!("{}", msg);
             };
-
 
             run_recording(controller.clone(), confs, run_fft);
 
@@ -867,8 +869,11 @@ fn recording_impl<
                         .fft_buffer
                         .lock()
                         .expect("Poisoned fft buffer");
-                    fft_analysis(&output, &mut guard);
-                    debug_assert!(guard.iter().all(|n| *n >= 0.0 && *n <= 1.0), "Failed to normalize")
+                    frequency_analysis(&output, &mut guard, sample_rate as f64);
+                    debug_assert!(
+                        guard.iter().all(|n| *n >= 0.0 && *n <= 1.0),
+                        "Failed to normalize"
+                    )
                 } else {
                     let len = output.len();
                     let mut fft_data = vec![0.0; len];
@@ -879,8 +884,11 @@ fn recording_impl<
                         .fft_buffer
                         .lock()
                         .expect("Poisoned fft buffer");
-                    fft_analysis(&fft_data, &mut guard);
-                    debug_assert!(guard.iter().all(|n| *n >= 0.0 && *n <= 1.0), "Failed to normalize")
+                    frequency_analysis(&fft_data, &mut guard, sample_rate as f64);
+                    debug_assert!(
+                        guard.iter().all(|n| *n >= 0.0 && *n <= 1.0),
+                        "Failed to normalize"
+                    )
                 }
             }
         });
@@ -1139,6 +1147,8 @@ fn run_static_audio_transcription(
 
 type WhisperAppThread = (WorkerType, JoinHandle<Result<String, Box<dyn Any + Send>>>);
 
+// TODO: refactor & remove configs msg queues. Config windows don't paint if not seen leading to timeouts.
+// TODO: add Atomic Enum for fft visualization types.
 #[derive(Debug)]
 struct WhisperAppContext {
     // GPU AVAILABLE
@@ -1164,17 +1174,21 @@ struct WhisperAppContext {
 
     // FFT buffer
     fft_buffer: Mutex<[f32; constants::NUM_BUCKETS]>,
+    // [REMOVE]
     // Configs Channels (BOUNDED):
     // Request configs
     realtime_configs_request_sender: Sender<()>,
     realtime_configs_request_receiver: Receiver<()>,
 
+    // [REMOVE]
     static_configs_request_sender: Sender<()>,
     static_configs_request_receiver: Receiver<()>,
 
+    // [REMOVE]
     recording_configs_request_sender: Sender<()>,
     recording_configs_request_receiver: Receiver<()>,
 
+    // [REMOVE]
     // Send-Recv Configs channel (BOUNDED):
     configs_sender: Sender<AudioConfigs>,
     configs_receiver: Receiver<AudioConfigs>,

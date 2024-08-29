@@ -41,6 +41,12 @@ pub fn join_threads_loop(
 
                 let res = res.unwrap();
 
+                if worker == WorkerType::ThreadManagement {
+                    if res == constants::CLOSE_MSG {
+                        break;
+                    }
+                }
+
                 if worker == WorkerType::Realtime || worker == WorkerType::Static {
                     // Transcription thread -> send to transcription window.
                     let sender = controller.transcription_text_sender();

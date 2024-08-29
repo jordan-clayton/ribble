@@ -16,8 +16,8 @@ pub enum WorkerType {
     Realtime,
     Static,
     Recording,
+    ThreadManagement,
 }
-
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum AudioConfigs {

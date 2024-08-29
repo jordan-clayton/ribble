@@ -44,7 +44,6 @@ pub fn init_realtime_microphone(
     init_microphone(audio_subsystem, &desired_audio_spec, audio_sender)
 }
 
-
 pub fn init_model(configs: Arc<whisper_realtime::configs::Configs>) -> Arc<Model> {
     let model_type = configs.model;
     let data_dir = eframe::storage_dir(constants::APP_ID).expect("Failed to get Data dir");
@@ -62,5 +61,5 @@ pub fn init_whisper_ctx(model: Arc<Model>, use_gpu: bool) -> whisper_rs::Whisper
         model_path.to_str().expect("Failed to stringify path"),
         whisper_ctx_params,
     )
-        .expect("Failed to load model")
+    .expect("Failed to load model")
 }

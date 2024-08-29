@@ -1,4 +1,4 @@
-use egui::{Color32, lerp, Rgba, Sense, Stroke, Ui, vec2};
+use egui::{lerp, vec2, Color32, Rgba, Sense, Stroke, Ui};
 
 use crate::utils::constants;
 
@@ -23,7 +23,8 @@ pub fn draw_fft(ui: &mut Ui, data: &[f32; constants::NUM_BUCKETS]) {
         // Bounded to 800 px atm.
         let max_cell_height =
             available_size.y * constants::FFT_MAX_HEIGHT_PROPORTION.min(constants::MAX_FFT_HEIGHT);
-        let min_cell_height = available_size.y * constants::FFT_MIN_HEIGHT_PROPORTION.min(constants::MIN_FFT_HEIGHT);
+        let min_cell_height =
+            available_size.y * constants::FFT_MIN_HEIGHT_PROPORTION.min(constants::MIN_FFT_HEIGHT);
 
         let visuals = ui.style().visuals.clone();
         let high_color: Rgba = visuals.widgets.active.bg_fill.into();

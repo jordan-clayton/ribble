@@ -331,10 +331,9 @@ impl tab_view::TabView for TranscriptionTab {
                     if &text == constants::CLEAR_MSG {
                         text_buffer.clear();
                     }
-
                     // Special case: [START SPEAKING]
                     // Set the speech flag.
-                    if &text == constants::GO_MSG {
+                    else if &text == constants::GO_MSG {
                         *processing_speech = true;
                     } else {
                         // Append to the text buffer.

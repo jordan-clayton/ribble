@@ -10,7 +10,9 @@ use realfft::{
     num_traits::{FromPrimitive, NumCast, ToPrimitive, Zero},
     RealFftPlanner, RealToComplex,
 };
-use realfft::num_traits::{Bounded, Signed};
+use realfft::num_complex::ComplexFloat;
+use realfft::num_traits::Bounded;
+use sdl2::log::log;
 
 use crate::utils::constants;
 use crate::utils::errors::{WhisperAppError, WhisperAppErrorType};
@@ -18,7 +20,6 @@ use crate::utils::errors::{WhisperAppError, WhisperAppErrorType};
 lazy_static! {
     static ref FFT_PLANNER: Mutex<RealFftPlanner<f32>> = Mutex::new(RealFftPlanner::<f32>::new());
 }
-
 
 fn apply_gain(samples: &mut [f32], gain: f32) {
     for sample in samples.iter_mut() {
@@ -118,7 +119,81 @@ fn hann_window(samples: &[f32], window_out: &mut [f32]) {
     }
 }
 
-pub fn fft_analysis(samples: &[f32], result: &mut [f32; constants::NUM_BUCKETS]) {
+pub fn normalized_waveform(samples: &[f32], result: &mut [f32; constants::NUM_BUCKETS]) {
+    let len = samples.len();
+
+    assert!(len >= constants::NUM_BUCKETS, "Insufficient samples length: {}", len);
+    let chunk_size = (len / constants::NUM_BUCKETS).max(1);
+    let mut max_amp = 0.0;
+    let mut wave_form: Vec<f32> = samples.chunks(chunk_size).map(|c| {
+        let avg_amp = c.iter().sum::<f32>() / c.len() as f32;
+        if avg_amp > max_amp {
+            max_amp = avg_amp;
+        }
+        avg_amp
+    }).collect();
+
+    for avg in wave_form.iter_mut() {
+        *avg = *avg / max_amp;
+    }
+
+    // This either truncates or zero-pads input that doesn't fit neatly into the bucket
+    // size.
+    if wave_form.len() != constants::NUM_BUCKETS {
+        wave_form.resize(constants::NUM_BUCKETS, 0.0);
+    };
+
+    debug_assert!(wave_form.iter().all(|n| *n >= 0.0 && *n <= 1.0), "Failed to normalize");
+
+    result.copy_from_slice(&wave_form);
+}
+
+pub fn power_analysis(samples: &[f32], result: &mut [f32; constants::NUM_BUCKETS]) {
+    // Apply the window.
+    let len = samples.len();
+    let mut window_samples = vec![0.0f32; len];
+    hann_window(samples, &mut window_samples);
+
+    let mut frames = fixed_frames(&window_samples, Some(constants::NUM_BUCKETS), None, None, None)
+        .expect("Failed to build frames");
+
+    // Init FFT
+    let mut planner = FFT_PLANNER.lock().expect("Failed to get FFT Planner mutex");
+    let fft = planner.plan_fft_forward(frames[0].len());
+    let mut input = fft.make_input_vec();
+    let mut output = fft.make_output_vec();
+
+    let mut max_amp = 0.0;
+    let mut power_samples: Vec<f32> = frames.iter_mut().map(|frame| {
+        apply_gain(frame, constants::FFT_GAIN);
+        process_fft(frame, fft.clone(), &mut input, &mut output);
+
+        let power = output.iter().map(|c| c.norm_sqr()).sum::<f32>() / (frame.len() as f32).powi(2);
+        let log_power = if power > 0.0 {
+            power.log10()
+        } else {
+            0.0
+        };
+
+        // This is just to avoid having to re-find the maximum.
+        if log_power > max_amp {
+            max_amp = log_power;
+        }
+
+        log_power
+    }).collect();
+
+    for amp in power_samples.iter_mut() {
+        *amp = *amp / max_amp;
+    }
+
+    debug_assert!(power_samples.iter().all(|n| *n >= 0.0 && *n <= 1.0), "Failed to normalize");
+
+    result.copy_from_slice(&power_samples);
+}
+
+
+pub fn frequency_analysis(samples: &[f32], result: &mut [f32; constants::NUM_BUCKETS], sample_rate: f64) {
     // Apply the window.
     let len = samples.len();
     let mut window_samples = vec![0.0f32; len];
@@ -134,44 +209,51 @@ pub fn fft_analysis(samples: &[f32], result: &mut [f32; constants::NUM_BUCKETS])
     let mut input = fft.make_input_vec();
     let mut output = fft.make_output_vec();
 
-    // Take the average signal density per mini fft, on log scale.
-    // (Also, grab max log magnitude).
-    let mut max_mag = 1.0;
-    let log_average_signal_density: Vec<f32> = frames
-        .iter_mut()
-        .map(|frame| {
-            apply_gain(frame, constants::FFT_GAIN);
-            process_fft(frame, fft.clone(), &mut input, &mut output);
-            let mag = output.iter().map(|c| c.norm_sqr().abs()).sum::<f32>()
-                / (output.len() as f32).powi(2);
+    for frame in frames.iter_mut() {
+        process_fft(frame, fft.clone(), &mut input, &mut output);
 
-            let log_mag = mag.log10();
+        let n = output.len();
+        let min_freq = sample_rate / (n as f64);
+        let max_freq = sample_rate / 2.0;
 
-            if log_mag > max_mag {
-                max_mag = mag;
+        let log_min = min_freq.log10();
+        let log_max = max_freq.log10();
+        let log_range = log_max - log_min;
+
+        // Compute edges
+        let bucket_edges: Vec<f64> = (0..constants::NUM_BUCKETS + 1)
+            .map(|n| 10.0.powf(log_min + log_range * (n as f64) / (constants::NUM_BUCKETS as f64)))
+            .collect();
+
+        for (i, &value) in output.iter().enumerate() {
+            let freq = (i as f64) * sample_rate / (n as f64);
+            if freq < min_freq || freq > max_freq {
+                continue;
             }
-            log_mag.max(0.0)
-        })
-        .collect();
 
-    // Normalize between 0 and 1.
-    let normalized_signal: Vec<f32> = log_average_signal_density
-        .iter()
-        .map(|n| *n / max_mag)
-        .collect();
+            // The value will be normalized, so this can be norm_sqr()
+            for j in 0..constants::NUM_BUCKETS {
+                if freq >= bucket_edges[j] && freq < bucket_edges[j + 1] {
+                    result[j] += value.norm_sqr();
+                }
+            }
+        }
+    }
 
-    assert_eq!(
-        normalized_signal.len(),
-        constants::NUM_BUCKETS,
-        "Grouping failed. Expected: {}, Actual: {}",
-        constants::NUM_BUCKETS,
-        normalized_signal.len()
+    // Normalize.
+    let max = result.iter().fold(1.0, |acc: f32, n| acc.max(*n));
+
+    for res in result.iter_mut() {
+        *res = *res / max;
+    }
+
+    debug_assert!(
+        result.iter().all(|n| *n <= 1.0 && *n >= 0.0),
+        "Normalizing failed"
     );
 
-    debug_assert!(normalized_signal.iter().all(|n| *n <= 1.0 && *n >= 0.0), "Normalizing failed");
-
-    // Copy the normalized signal to the result slice.
-    result.copy_from_slice(&normalized_signal);
+    #[cfg(debug_assertions)]
+    log(&format!("FFT: {:?},", result));
 }
 
 #[inline]
@@ -187,22 +269,110 @@ fn process_fft(
         .expect("Slice with incorrect length supplied to fft");
 }
 
-// TODO: Fix this implementation -> this needs to frame into constants::NUM_BUCKETS
+fn fixed_frames(windowed_samples: &[f32], num_segments: Option<usize>, overlap: Option<f32>, tolerance: Option<usize>, max_iterations: Option<usize>) -> Result<Vec<Vec<f32>>, WhisperAppError> {
+    let max_iterations = max_iterations.unwrap_or(constants::FRAME_CONVERGENCE_ITERATIONS);
+    let tolerance = tolerance.unwrap_or(constants::FRAME_CONVERGENCE_TOLERANCE);
+    let mut len = windowed_samples.len();
+    if len < 1 {
+        return Err(WhisperAppError::new(
+            WhisperAppErrorType::ParameterError,
+            String::from("Zero sample size provided."),
+        ));
+    }
+    let mut samples = vec![0.0; len];
+
+    samples.copy_from_slice(windowed_samples);
+
+    let k = num_segments.unwrap_or(4);
+
+    if k < 1 {
+        return Err(WhisperAppError::new(
+            WhisperAppErrorType::ParameterError,
+            String::from("Cannot return 0 segments."),
+        ));
+    }
+
+    if len < k {
+        samples.resize(k, 0.0);
+        len = k;
+    }
+
+    let mut a = overlap.unwrap_or(0.5);
+
+    let mut l = (len as f64 / (k as f64 * (1.0 - a as f64) + a as f64)).trunc() as usize;
+
+    let mut iteration = 0;
+
+    loop {
+        let overlap = (l - (l as f64 * a as f64).round() as usize).max(1);
+        let n = ((len - l) / overlap) + 1;
+
+        if n.abs_diff(k) <= tolerance {
+            break;
+        }
+
+        if iteration >= max_iterations {
+            break;
+        }
+
+        if n > k {
+            a = (a + 0.1).max(1.0);
+        } else {
+            a -= (a - 0.01).min(0.0);
+        }
+
+        l = (len as f64 / (k as f64 * (1.0 - a as f64) + a as f64)).trunc() as usize;
+        iteration += 1;
+    }
+
+    let overlap = (l - (l as f64 * a as f64).round() as usize).max(1);
+    let m = l.next_power_of_two();
+
+    let mut frames: Vec<Vec<_>> =
+        samples
+            .windows(l)
+            .step_by(overlap)
+            .map(|s| {
+                let mut v = s.to_vec();
+                v.resize(m, 0.0);
+                v
+            })
+            .collect();
+
+    if frames.len() == 0 {
+        let err = WhisperAppError::new(WhisperAppErrorType::ParameterError, String::from("Zero length frames, insufficient sample size"));
+        return Err(err);
+    }
+
+    // Truncate or zero-pad +- tolerance number of frames.
+    if frames.len() != k {
+        frames.resize(k, vec![0.0; m]);
+    }
+
+    Ok(frames)
+}
+
 fn welch_frames(
     windowed_samples: &[f32],
     num_segments: Option<usize>,
     overlap: Option<f32>,
 ) -> Result<Vec<Vec<f32>>, WhisperAppError> {
     let mut len = windowed_samples.len();
-    let k = num_segments.unwrap_or(4);
-    let a = overlap.unwrap_or(0.5);
 
-    if len < 4 {
+    if len < 1 {
         return Err(WhisperAppError::new(
             WhisperAppErrorType::ParameterError,
-            format!("Invalid sample size {}, minimum is 4", len),
+            String::from("Zero sample size provided."),
         ));
     }
+    let k = num_segments.unwrap_or(4);
+    if k < 1 {
+        return Err(WhisperAppError::new(
+            WhisperAppErrorType::ParameterError,
+            String::from("Cannot return 0 segments."),
+        ));
+    }
+    let a = overlap.unwrap_or(0.5);
 
     let mut samples = vec![0.0; len];
     samples.copy_from_slice(windowed_samples);
@@ -214,38 +384,26 @@ fn welch_frames(
     }
 
     // l - length - must land on a power of two.
-    let mut l = (len as f64 / (k as f64 * (1.0 - a as f64) + a as f64)).trunc() as usize;
+    let l = (len as f64 / (k as f64 * (1.0 - a as f64) + a as f64)).trunc() as usize;
     let m = l.next_power_of_two();
 
-    // If l does not land on a power of two, zero-pad the end of the samples.
-    if m > l {
-        let diff = m.abs_diff(l);
-        let new_size = samples.len() + diff;
-        samples.resize(new_size, 0.0);
-        l = m;
-    }
+    let overlap = (l - (l as f64 * a as f64).round() as usize).max(1);
 
-    let overlap = l - (l as f64 * a as f64).round() as usize;
+    let frames: Vec<Vec<_>> =
+        samples
+            .windows(l)
+            .step_by(overlap)
+            .map(|s| {
+                // If l does not land on a power of two, zero-pad the end of the samples.
+                let mut v = s.to_vec();
+                v.resize(m, 0.0);
+                v
+            })
+            .collect();
 
-    let mut frames: Vec<Vec<f32>> = samples
-        .windows(l)
-        .step_by(overlap)
-        .map(|s| s.to_vec())
-        .collect();
-
-
-    assert!(frames.len() > 0, "Failed to group into frames");
-    assert!(
-        frames[0].len().is_power_of_two(),
-        "Failed to group in powers of 2"
-    );
-
-    // TODO: fix this - this is not a fix.
-    if frames.len() != constants::NUM_BUCKETS {
-        let diff = frames.len().abs_diff(constants::NUM_BUCKETS);
-        let new_size = frames.len() + diff;
-        let inner = frames[0].len();
-        frames.resize(new_size, vec![0.0; inner]);
+    if frames.len() == 0 {
+        let err = WhisperAppError::new(WhisperAppErrorType::ParameterError, String::from("Zero length frames, insufficient sample size"));
+        return Err(err);
     }
 
     Ok(frames)
@@ -259,10 +417,22 @@ pub fn smoothing(current: &mut [f32], target: &[f32], dt: f32) {
         current.len(),
         target.len()
     );
-    debug_assert!(current.iter().all(|n| !n.is_nan()), "Nan values in current before smoothing");
-    debug_assert!(current.iter().all(|n| !n.is_infinite()), "Infinite values in current before smoothing");
-    debug_assert!(target.iter().all(|n| !n.is_nan()), "Nan values in target before smoothing");
-    debug_assert!(target.iter().all(|n| !n.is_infinite()), "Infinite values in target before smoothing");
+    debug_assert!(
+        current.iter().all(|n| !n.is_nan()),
+        "Nan values in current before smoothing"
+    );
+    debug_assert!(
+        current.iter().all(|n| !n.is_infinite()),
+        "Infinite values in current before smoothing"
+    );
+    debug_assert!(
+        target.iter().all(|n| !n.is_nan()),
+        "Nan values in target before smoothing"
+    );
+    debug_assert!(
+        target.iter().all(|n| !n.is_infinite()),
+        "Infinite values in target before smoothing"
+    );
 
     for i in 0..current.len() {
         let x = current[i];
@@ -271,16 +441,25 @@ pub fn smoothing(current: &mut [f32], target: &[f32], dt: f32) {
         let t = constants::SMOOTH_FACTOR * dt;
         current[i] += (target[i] - current[i]) * constants::SMOOTH_FACTOR * dt;
         if current[i].is_infinite() {
-            panic!("Infinite value.\n\
+            panic!(
+                "Infinite value.\n\
             Case:\n\
             x: {},\
             y: {},\
             x - y: {},\
             t: {}
-            ", x, y, z, t);
+            ",
+                x, y, z, t
+            );
         }
     }
-    debug_assert!(current.iter().all(|n| !n.is_nan()), "Nan values after smoothing");
+    debug_assert!(
+        current.iter().all(|n| !n.is_nan()),
+        "Nan values after smoothing"
+    );
 
-    debug_assert!(current.iter().all(|n| !n.is_infinite()), "Infinite values after smoothing");
+    debug_assert!(
+        current.iter().all(|n| !n.is_infinite()),
+        "Infinite values after smoothing"
+    );
 }

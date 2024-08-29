@@ -1,6 +1,6 @@
 use catppuccin_egui::Theme;
 use eframe::epaint::Color32;
-use egui::{Image, ImageSource, include_image, Response, Sense, Ui, vec2, Widget};
+use egui::{include_image, vec2, Image, ImageSource, Response, Sense, Ui, Widget};
 
 // TODO: fix this - currently showing an error.
 fn draw_icon(ui: &mut Ui, scale: f32, image: ImageSource, tint: Color32) -> Response {

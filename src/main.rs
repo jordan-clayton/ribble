@@ -15,6 +15,7 @@ use crate::{
         threading::join_threads_loop,
     },
 };
+use crate::utils::configs::WorkerType;
 
 mod controller;
 mod ui;
@@ -26,7 +27,7 @@ fn main() -> Result<(), WhisperAppError> {
         constants::ORGANIZATION,
         constants::APP_ID,
     )
-    .expect("Failed to get proj dir");
+        .expect("Failed to get proj dir");
     let data_dir = proj_dirs.data_dir();
     let mut native_options = eframe::NativeOptions::default();
     let viewport = build_viewport();
@@ -66,6 +67,7 @@ fn main() -> Result<(), WhisperAppError> {
         WhisperAppController::new(client.clone(), handle.clone(), audio_wrapper, None, sender);
 
     let c_controller = controller.clone();
+    let e_controller = controller.clone();
 
     // Bg thread to join threads spawned by the app.
     let joiner_thread = thread::spawn(move || {
@@ -77,6 +79,13 @@ fn main() -> Result<(), WhisperAppError> {
         native_options,
         Box::new(|cc| Ok(Box::new(WhisperApp::new(cc, controller)))),
     );
+
+    // Alert the joiner_thread that the app has closed.
+    let end_thread = thread::spawn(|| {
+        Ok(String::from(constants::CLOSE_MSG))
+    });
+
+    e_controller.send_thread_handle((WorkerType::ThreadManagement, end_thread)).expect("Thread channel closed.");
 
     let t = joiner_thread.join();
     if let Err(e) = app {

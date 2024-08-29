@@ -3,6 +3,7 @@ use std::{path::PathBuf, thread};
 use egui::{Button, Checkbox, ComboBox, Slider, Ui};
 use whisper_realtime::model::{Model, ModelType};
 
+use crate::ui::widgets::icons::warning_icon;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::widgets::icons::ok_icon,
@@ -14,7 +15,6 @@ use crate::{
         preferences::get_app_theme,
     },
 };
-use crate::ui::widgets::icons::warning_icon;
 
 // I'm not 100% sold on this - It might be worth the heap allocation?
 // TODO: Might also be better to avoid the branching & supply the boolean + callback.

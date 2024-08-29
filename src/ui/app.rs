@@ -120,7 +120,6 @@ impl eframe::App for WhisperApp {
             .show_add_popup(show_add)
             .show(ctx, &mut tab_viewer);
 
-
         self.closed_tabs = closed_tabs;
 
         added_tabs.drain(..).for_each(|(surface, node, tab)| {
@@ -128,7 +127,6 @@ impl eframe::App for WhisperApp {
             self.tree.push_to_focused_leaf(tab);
         });
     }
-
 
     // TODO: Restore once testing finished.
     // fn save(&mut self, storage: &mut dyn Storage) {
