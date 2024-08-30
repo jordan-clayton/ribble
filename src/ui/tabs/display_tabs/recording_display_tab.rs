@@ -1,8 +1,8 @@
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
@@ -38,7 +38,7 @@ pub struct RecordingDisplayTab {
 impl RecordingDisplayTab {
     pub fn new() -> Self {
         Self {
-            title: String::from("Recording"),
+            title: String::from("Visualizer"),
             visualize: Arc::new(AtomicBool::new(true)),
             current: allocate_new_fft_buffer(),
             target: allocate_new_fft_buffer(),
@@ -152,25 +152,26 @@ impl tab_view::TabView for RecordingDisplayTab {
             // Header
             let system_theme = controller.get_system_theme();
             let theme = preferences::get_app_theme(system_theme);
+            let time_scale = Some(constants::RECORDING_ANIMATION_TIMESCALE);
 
             let (icon, msg) = if accepting_speech {
                 (
-                    recording_icon(egui::Rgba::from(theme.red), true),
+                    recording_icon(egui::Rgba::from(theme.red), true, time_scale),
                     "Recording in progress.",
                 )
             } else if recorder_running {
                 (
-                    recording_icon(egui::Rgba::from(theme.green), true),
+                    recording_icon(egui::Rgba::from(theme.green), true, time_scale),
                     "Preparing to record.",
                 )
             } else if mic_occupied {
                 (
-                    recording_icon(egui::Rgba::from(theme.yellow), true),
+                    recording_icon(egui::Rgba::from(theme.yellow), true, time_scale),
                     "Microphone in use.",
                 )
             } else {
                 (
-                    recording_icon(egui::Rgba::from(theme.green), false),
+                    recording_icon(egui::Rgba::from(theme.green), false, time_scale),
                     "Ready to record.",
                 )
             };
@@ -180,8 +181,10 @@ impl tab_view::TabView for RecordingDisplayTab {
                 ui.label(msg);
             });
 
+            ui.separator();
+
             // FFT visualizer
-            fft_visualizer::draw_fft(ui, &current);
+            fft_visualizer::draw_fft(ui, &current, Some(theme));
         });
     }
 
@@ -192,8 +195,7 @@ impl tab_view::TabView for RecordingDisplayTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

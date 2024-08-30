@@ -2,9 +2,12 @@ use std::thread;
 
 use directories::ProjectDirs;
 use eframe;
+use eframe::emath::vec2;
 use egui::ViewportBuilder;
+use egui_extras::install_image_loaders;
 use whisper_realtime::downloader::request::reqwest;
 
+use crate::utils::configs::WorkerType;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::app::WhisperApp,
@@ -15,7 +18,6 @@ use crate::{
         threading::join_threads_loop,
     },
 };
-use crate::utils::configs::WorkerType;
 
 mod controller;
 mod ui;
@@ -27,7 +29,7 @@ fn main() -> Result<(), WhisperAppError> {
         constants::ORGANIZATION,
         constants::APP_ID,
     )
-        .expect("Failed to get proj dir");
+    .expect("Failed to get proj dir");
     let data_dir = proj_dirs.data_dir();
     let mut native_options = eframe::NativeOptions::default();
     let viewport = build_viewport();
@@ -77,15 +79,19 @@ fn main() -> Result<(), WhisperAppError> {
     let app = eframe::run_native(
         constants::APP_ID,
         native_options,
-        Box::new(|cc| Ok(Box::new(WhisperApp::new(cc, controller)))),
+        Box::new(|cc| {
+            // Support for svg.
+            install_image_loaders(&cc.egui_ctx);
+            Ok(Box::new(WhisperApp::new(cc, controller)))
+        }),
     );
 
     // Alert the joiner_thread that the app has closed.
-    let end_thread = thread::spawn(|| {
-        Ok(String::from(constants::CLOSE_MSG))
-    });
+    let end_thread = thread::spawn(|| Ok(String::from(constants::CLOSE_MSG)));
 
-    e_controller.send_thread_handle((WorkerType::ThreadManagement, end_thread)).expect("Thread channel closed.");
+    e_controller
+        .send_thread_handle((WorkerType::ThreadManagement, end_thread))
+        .expect("Thread channel closed.");
 
     let t = joiner_thread.join();
     if let Err(e) = app {
@@ -109,14 +115,21 @@ fn main() -> Result<(), WhisperAppError> {
 
 // TODO: MacOS might require different configs to look more "Apple-y".
 fn build_viewport() -> ViewportBuilder {
-    let mut viewport = ViewportBuilder::default();
-    viewport.app_id = Some(String::from(constants::APP_ID));
-    // TODO: change if using a different title.
-    viewport.title = Some(String::from(constants::APP_ID));
+    // let mut viewport = ViewportBuilder::default();
+    // viewport.app_id = Some(String::from(constants::APP_ID));
+    // // TODO: change if using a different title.
+    // viewport.title = Some(String::from(constants::APP_ID));
+    // viewport.resizable = Some(true);
     // TODO: Add an icon.
     // TODO: add include_bytes() for assets.
     // let icon = eframe::icon_data::from_png_bytes().expect("invalid icon png");
     // let icon = Arc::new(icon);
     // viewport.icon = icon;
-    viewport
+    ViewportBuilder::default()
+        .with_app_id(constants::APP_ID)
+        .with_title(constants::APP_ID)
+        .with_resizable(true)
+        // Default window height.
+        // TODO: make a constant
+        .with_inner_size(vec2(1024.0, 768.0))
 }

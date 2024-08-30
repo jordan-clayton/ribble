@@ -3,7 +3,6 @@ use std::{path::PathBuf, thread};
 use egui::{Button, Checkbox, ComboBox, Slider, Ui};
 use whisper_realtime::model::{Model, ModelType};
 
-use crate::ui::widgets::icons::warning_icon;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::widgets::icons::ok_icon,
@@ -15,9 +14,11 @@ use crate::{
         preferences::get_app_theme,
     },
 };
+use crate::ui::widgets::icons::warning_icon;
 
 // I'm not 100% sold on this - It might be worth the heap allocation?
 // TODO: Might also be better to avoid the branching & supply the boolean + callback.
+// TODO: Possibly use icon-buttons for the open/download?
 pub fn model_row(
     ui: &mut Ui,
     model: &mut ModelType,
@@ -49,10 +50,37 @@ pub fn model_row(
     };
 
     let downloading = controller.is_downloading();
+    let dir = eframe::storage_dir(constants::APP_ID).expect("Failed to get data dir.");
+    let m_model = Model::new_with_type_and_dir(*model, dir);
+    let model_downloaded = m_model.is_downloaded();
 
-    ui.label("Model:").on_hover_ui(|ui| {
-        ui.style_mut().interaction.selectable_labels = true;
-        ui.label("Select the desired model for transcribing");
+    let system_theme = controller.get_system_theme();
+    let theme = get_app_theme(system_theme);
+
+    ui.horizontal(|ui| {
+        ui.label("Model:").on_hover_ui(|ui| {
+            ui.style_mut().interaction.selectable_labels = true;
+            ui.label("Select the desired model for transcribing");
+        });
+
+        if model_downloaded {
+            if !ready {
+                update_ready(true);
+            }
+
+            ui.add(ok_icon(None, Some(theme))).on_hover_ui(|ui| {
+                ui.style_mut().interaction.selectable_labels = true;
+                ui.label("Model found.");
+            });
+        } else {
+            if ready {
+                update_ready(false);
+            }
+            ui.add(warning_icon(None, Some(theme))).on_hover_ui(|ui| {
+                ui.style_mut().interaction.selectable_labels = true;
+                ui.label("Model not found");
+            });
+        }
     });
 
     ui.horizontal(|ui| {
@@ -64,33 +92,10 @@ pub fn model_row(
                 }
             });
 
-        let dir = eframe::storage_dir(constants::APP_ID).expect("Failed to get data dir.");
-        let m_model = Model::new_with_type_and_dir(*model, dir);
-        let model_downloaded = m_model.is_downloaded();
-
-        let system_theme = controller.get_system_theme();
-        let theme = get_app_theme(system_theme);
-        if model_downloaded {
-            if !ready {
-                update_ready(true);
-            }
-
-            ui.add(ok_icon(1.5, Some(theme))).on_hover_ui(|ui| {
-                ui.label("THIS SHOULD BE THE OK ICON");
-            });
-        } else {
-            if ready {
-                update_ready(false);
-            }
-            ui.add(warning_icon(1.5, Some(theme))).on_hover_ui(|ui| {
-                ui.label("THIS SHOULD BE THE WARNING ICON");
-            });
-        }
-
         let model_path_open = m_model.file_path();
 
         if ui
-            .button("Open Model")
+            .button("Open")
             .on_hover_ui(|ui| {
                 ui.style_mut().interaction.selectable_labels = true;
                 ui.label(format!("Open a compatible {}, model.", model.to_string()));
@@ -105,7 +110,7 @@ pub fn model_row(
                 PathBuf::from("/")
             };
             if let Some(p) = rfd::FileDialog::new()
-                .add_filter("ggml model", &["bin"])
+                .add_filter("ggml model (.bin)", &["bin"])
                 .set_directory(dir)
                 .pick_file()
             {
@@ -145,8 +150,6 @@ pub fn model_row(
             controller.start_download(url, file_name, directory)
         }
     });
-
-    ui.end_row();
 }
 
 pub fn n_threads_row(ui: &mut Ui, n_threads: &mut std::ffi::c_int, max_threads: std::ffi::c_int) {
@@ -160,8 +163,6 @@ pub fn n_threads_row(ui: &mut Ui, n_threads: &mut std::ffi::c_int, max_threads: 
         n_threads,
         1..=std::cmp::min(max_threads, constants::MAX_WHISPER_THREADS),
     ));
-
-    ui.end_row();
 }
 
 pub fn use_gpu_row(ui: &mut Ui, use_gpu: &mut bool, gpu_capable: bool) {
@@ -182,8 +183,6 @@ pub fn use_gpu_row(ui: &mut Ui, use_gpu: &mut bool, gpu_capable: bool) {
             };
             ui.label(format!("Hardware acceleration is {}", status));
         });
-
-    ui.end_row();
 }
 
 pub fn set_language_row(ui: &mut Ui, language: &mut Option<String>) {
@@ -203,8 +202,6 @@ pub fn set_language_row(ui: &mut Ui, language: &mut Option<String>) {
                 ui.selectable_value(language, v.clone(), *k);
             }
         });
-
-    ui.end_row();
 }
 
 pub fn set_translate_row(ui: &mut Ui, set_translate: &mut bool) {
@@ -214,6 +211,4 @@ pub fn set_translate_row(ui: &mut Ui, set_translate: &mut bool) {
     });
 
     ui.add(Checkbox::without_text(set_translate));
-
-    ui.end_row();
 }

@@ -3,13 +3,13 @@ use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::VariantArray;
 use whisper_realtime::{configs::Configs, model::ModelType};
 
-use crate::ui::tabs::config_tabs::configs_common;
-use crate::utils::configs::AudioConfigType;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::tab_view,
     utils::{configs::AudioConfigs, threading::get_max_threads},
 };
+use crate::ui::tabs::config_tabs::configs_common;
+use crate::utils::configs::AudioConfigType;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StaticConfigsTab {
@@ -27,7 +27,7 @@ impl StaticConfigsTab {
     pub fn new_with_configs(configs: Configs) -> Self {
         let max_threads = get_max_threads();
         Self {
-            title: String::from("Static Configuration"),
+            title: String::from("Static"),
             static_configs: configs,
             max_threads,
         }
@@ -101,14 +101,19 @@ impl tab_view::TabView for StaticConfigsTab {
                     controller.clone(),
                     available_models.as_slice(),
                 );
+                ui.end_row();
                 // Num_threads
                 configs_common::n_threads_row(ui, n_threads, *max_threads);
+                ui.end_row();
                 let gpu_enabled = controller.gpu_enabled();
                 configs_common::use_gpu_row(ui, use_gpu, gpu_enabled);
+                ui.end_row();
                 // INPUT Language -> Set to auto for language detection
                 configs_common::set_language_row(ui, language);
+                ui.end_row();
                 // Translate (TO ENGLISH)
                 configs_common::set_translate_row(ui, set_translate);
+                ui.end_row();
                 // Reset defaults button.
                 ui.label("Reset To Defaults");
                 if ui.button("Reset").clicked() {
@@ -153,8 +158,7 @@ impl tab_view::TabView for StaticConfigsTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

@@ -32,10 +32,12 @@ pub const MAX_LOW_FREQUENCY: f32 = 300.0;
 pub const MIN_HIGH_FREQUENCY: f32 = 330.0;
 pub const MAX_HIGH_FREQUENCY: f32 = 20000.0;
 pub const MAX_FFT_HEIGHT: f32 = 800.0;
-pub const MIN_FFT_HEIGHT: f32 = 200.0;
-pub const FFT_MAX_HEIGHT_PROPORTION: f32 = 0.95;
+pub const MIN_FFT_HEIGHT: f32 = 30.0;
+pub const FFT_HEIGHT_EXPANSION: f32 = 20.0;
+pub const FFT_MAX_HEIGHT_PROPORTION: f32 = 0.90;
 pub const FFT_MIN_HEIGHT_PROPORTION: f32 = 0.10;
-
+pub const FFT_MAX_WIDTH: f32 = 100.0;
+pub const FFT_MIN_WIDTH: f32 = 8.0;
 pub const FFT_GAIN: f32 = 30.0;
 
 pub const APP_ID: &str = "WhisperGUI";
@@ -48,6 +50,8 @@ pub const CLOSE_MSG: &str = "[APP CLOSE]";
 
 pub const TEMP_FILE: &str = "tmp.wav";
 
+pub const RECORDING_ANIMATION_TIMESCALE: f64 = 2.0;
+
 // TODO: pick an appropriate livelock timeout.
 pub const CHANNEL_TIMEOUT: Duration = Duration::from_millis(10);
 
@@ -55,6 +59,7 @@ pub const SLEEP_DURATION: Duration = Duration::from_millis(1);
 
 pub const FROM_COLOR: egui::Rgba = egui::Rgba::from_rgba_premultiplied(0.0, 0.0, 0.0, 0.7);
 
+pub const DESATURATION_MULTIPLIER: f32 = 0.5;
 pub const MAX_WHISPER_THREADS: std::ffi::c_int = 8;
 
 lazy_static::lazy_static! {

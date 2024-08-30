@@ -1,10 +1,9 @@
 use std::path::PathBuf;
 
 use catppuccin_egui::Theme;
-use egui::{Button, CentralPanel, Grid, Layout, ScrollArea, SidePanel, Ui, WidgetText};
+use egui::{Button, CentralPanel, Frame, Grid, ScrollArea, SidePanel, TopBottomPanel, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
-use crate::utils::{file_mgmt, preferences};
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::{
@@ -16,6 +15,7 @@ use crate::{
         constants,
     },
 };
+use crate::utils::{file_mgmt, preferences};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TranscriptionTab {
@@ -52,24 +52,25 @@ impl TranscriptionTab {
         running: bool,
         ready: bool,
     ) {
+        let time_scale = Some(constants::RECORDING_ANIMATION_TIMESCALE);
         let (icon, msg) = if processing {
             (
-                recording_icon(egui::Rgba::from(theme.red), true),
+                recording_icon(egui::Rgba::from(theme.red), true, time_scale),
                 processing_msg,
             )
         } else if running {
             (
-                recording_icon(egui::Rgba::from(theme.green), true),
+                recording_icon(egui::Rgba::from(theme.green), true, time_scale),
                 "Preparing to transcribe.",
             )
         } else if ready {
             (
-                recording_icon(egui::Rgba::from(theme.green), false),
+                recording_icon(egui::Rgba::from(theme.green), false, time_scale),
                 "Ready to transcribe.",
             )
         } else {
             (
-                recording_icon(egui::Rgba::from(theme.yellow), false),
+                recording_icon(egui::Rgba::from(theme.yellow), false, time_scale),
                 "Not ready.",
             )
         };
@@ -322,6 +323,7 @@ impl tab_view::TabView for TranscriptionTab {
 
         // UPDATE STATE
         // Handle new text.
+        // Switch to while loop.
         let new_text_message = controller.recv_transcription_text();
         if let Ok(message) = new_text_message {
             match message {
@@ -363,14 +365,14 @@ impl tab_view::TabView for TranscriptionTab {
 
         // UPDATE SCREEN
         // Button panel
-        SidePanel::right("transcription_panel").show_inside(ui, |ui| {
-            ui.with_layout(Layout::right_to_left(Default::default()), |ui| {
-                // Toggle button.
-                ui.add(toggle(realtime_mode));
+        SidePanel::right("transcription_settings_panel").show_inside(ui, |ui| {
+            // TODO: remove this and move all functionality to configs tab, this is just for testing..
+            ui.horizontal(|ui| {
                 // Label
                 let label = if *realtime_mode { "Realtime" } else { "Static" };
-
                 ui.label(label);
+                // Toggle button.
+                ui.add(toggle(realtime_mode));
             });
 
             // Scrollable panel section.
@@ -389,7 +391,8 @@ impl tab_view::TabView for TranscriptionTab {
             })
         });
 
-        CentralPanel::default().show_inside(ui, |ui| {
+
+        TopBottomPanel::top("header").resizable(false).show_inside(ui, |ui| {
             // Get the theme.
             let system_theme = controller.get_system_theme();
             let theme = preferences::get_app_theme(system_theme);
@@ -399,6 +402,7 @@ impl tab_view::TabView for TranscriptionTab {
                 ("Transcription in progress.", static_running, static_ready)
             };
 
+
             Self::header(
                 ui,
                 theme,
@@ -407,16 +411,28 @@ impl tab_view::TabView for TranscriptionTab {
                 running,
                 ready,
             );
+            let space = ui.spacing().item_spacing.y;
+            ui.add_space(space);
+        });
 
-            // Transcription
+        // Transcription
+        let total_rows = text_buffer.len();
+        let text_style = egui::TextStyle::Body;
+        let row_height = ui.text_style_height(&text_style);
+        let visuals = ui.visuals();
+        let bg_col = visuals.extreme_bg_color;
+        let transcription_frame = Frame::default().fill(bg_col);
+
+        CentralPanel::default().frame(transcription_frame).show_inside(ui, |ui| {
             ScrollArea::vertical()
                 .auto_shrink(false)
                 .stick_to_bottom(true)
-                .show(ui, |ui| {
-                    for chunk in text_buffer {
-                        ui.monospace(chunk);
+                .show_rows(ui, row_height, total_rows, |ui, row_range| {
+                    ui.visuals_mut().window_fill = bg_col;
+                    for i in row_range {
+                        ui.monospace(&text_buffer[i]);
                     }
-                })
+                });
         });
     }
 
@@ -428,8 +444,7 @@ impl tab_view::TabView for TranscriptionTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

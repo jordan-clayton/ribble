@@ -14,6 +14,7 @@ fn draw_toggle(ui: &mut Ui, on: &mut bool) -> Response {
     if ui.is_rect_visible(rect) {
         let t = ui.ctx().animate_bool_responsive(response.id, *on);
         let visuals = ui.style().interact_selectable(&response, *on);
+
         let rect = rect.expand(visuals.expansion);
         let radius = 0.5 * rect.height();
 

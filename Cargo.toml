@@ -12,7 +12,7 @@ directories = "5.0.1"
 eframe = { version = "0.28.1", features = ["persistence"] }
 egui = { version = "0.28.1", features = ["persistence", "serde", "deadlock_detection"] }
 egui_dock = { version = "0.13.0", features = ["serde"] }
-egui_extras = { version = "0.28.1", features = ["svg", "resvg"] }
+egui_extras = { version = "0.28.1", features = ["svg"] }
 hound = "3.5.1"
 lazy_static = "1.5.0"
 maplit = "1.0.2"

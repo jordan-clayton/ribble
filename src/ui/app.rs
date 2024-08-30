@@ -22,8 +22,6 @@ pub struct WhisperApp {
     controller: WhisperAppController,
 }
 
-// ** TODO, add toasts -> on click should focus the error tab.
-
 impl WhisperApp {
     pub fn new(cc: &eframe::CreationContext<'_>, mut controller: WhisperAppController) -> Self {
         let storage = cc.storage;
@@ -77,7 +75,7 @@ impl WhisperApp {
 
         let [top, _] = surface.split_below(NodeIndex::root(), 0.7, vec![pd, ed]);
 
-        let [_, _] = surface.split_right(top, 0.7, vec![rc, st, rec]);
+        let [_, _] = surface.split_right(top, 0.6, vec![rc, st, rec]);
 
         Self {
             tree,
