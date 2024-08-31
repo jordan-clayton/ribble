@@ -170,7 +170,7 @@ impl tab_view::TabView for RecordingConfigsTab {
                         });
 
                         ui.add_enabled_ui(*filter, |ui| {
-                            ui.add(Slider::new(f_higher, constants::MIN_HIGH_FREQUENCY..=constants::MAX_HIGH_FREQUENCY).suffix("Hz"));
+                            ui.add(Slider::new(f_higher, constants::MIN_F_HIGHER..=constants::MAX_F_HIGHER).suffix("Hz"));
                         });
                         ui.end_row();
 
@@ -182,7 +182,7 @@ impl tab_view::TabView for RecordingConfigsTab {
                             });
                         });
                         ui.add_enabled_ui(*filter, |ui| {
-                            ui.add(Slider::new(f_lower, constants::MIN_LOW_FREQUENCY..=constants::MAX_LOW_FREQUENCY).suffix("Hz"));
+                            ui.add(Slider::new(f_lower, constants::MIN_F_LOWER..=constants::MAX_F_LOWER).suffix("Hz"));
                         });
                         ui.end_row();
 

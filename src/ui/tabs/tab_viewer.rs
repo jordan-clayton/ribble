@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use eframe::epaint::text::TextWrapMode;
 use egui::{Id, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
@@ -65,8 +66,7 @@ impl egui_dock::TabViewer for WhisperTabViewer<'_> {
     // TODO: fix sizing
     fn add_popup(&mut self, ui: &mut Ui, surface: SurfaceIndex, node: NodeIndex) {
         let closed_tabs: Vec<String> = self.closed_tabs.keys().cloned().collect();
-        ui.style_mut().visuals.button_frame = false;
-
+        ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
         for key in closed_tabs {
             if ui.button(&key).clicked() {
                 let tab = self

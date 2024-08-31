@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use egui::{ScrollArea, Ui, WidgetText};
+use egui::{CentralPanel, Frame, ScrollArea, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
 use crate::{
@@ -44,34 +44,34 @@ impl tab_view::TabView for ErrorConsoleDisplayTab {
     fn ui(&mut self, ui: &mut Ui, controller: &mut WhisperAppController) {
         let Self {
             title: _,
-            console_queue: errors,
+            console_queue: console_messages,
         } = self;
 
         // Get errors
+        // TODO: make a while loop
         let new_error = controller.recv_console_message();
-        let mut len = errors.len();
+        let mut len = console_messages.len();
         if let Ok(message) = new_error {
-            errors.push_back(message);
+            console_messages.push_back(message);
             len += 1;
 
             if len > constants::DEFAULT_CONSOLE_HISTORY_SIZE {
-                errors.pop_front();
+                console_messages.pop_front();
                 len -= 1;
             }
         }
 
-        ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
-            // Print errors.
-            let style = ui.style_mut();
-            let bg_color = style.visuals.extreme_bg_color;
-            style.visuals.panel_fill = bg_color;
-
-            for (i, error) in errors.range(..).enumerate() {
-                ui.monospace(error.to_string());
-                if i < len - 1 {
+        let visuals = ui.visuals();
+        let bg_col = visuals.extreme_bg_color;
+        let frame = Frame::default().fill(bg_col);
+        CentralPanel::default().frame(frame).show_inside(ui, |ui| {
+            // TODO: determine whether to just use this approach with the iterator.
+            ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
+                for message in console_messages.range(..) {
+                    ui.monospace(message.to_string());
                     ui.add_space(constants::BLANK_SEPARATOR);
                 }
-            }
+            });
         });
     }
 
@@ -82,8 +82,7 @@ impl tab_view::TabView for ErrorConsoleDisplayTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

@@ -22,6 +22,7 @@ pub struct TranscriptionTab {
     title: String,
     #[serde(skip)]
     text_buffer: Vec<String>,
+    // TODO: remove
     realtime_mode: bool,
 
     // Default to false
@@ -29,6 +30,7 @@ pub struct TranscriptionTab {
     processing_speech: bool,
     // Possibly just use a file path.
     #[serde(skip)]
+    // TODO: Migrate this to the static configs tab
     audio_file: Option<PathBuf>,
 }
 
@@ -323,9 +325,7 @@ impl tab_view::TabView for TranscriptionTab {
 
         // UPDATE STATE
         // Handle new text.
-        // Switch to while loop.
-        let new_text_message = controller.recv_transcription_text();
-        if let Ok(message) = new_text_message {
+        while let Ok(message) = controller.recv_transcription_text() {
             match message {
                 Ok(t) => {
                     // Special case: [CLEAR TRANSCRIPTION]
@@ -416,21 +416,18 @@ impl tab_view::TabView for TranscriptionTab {
         });
 
         // Transcription
-        let total_rows = text_buffer.len();
-        let text_style = egui::TextStyle::Body;
-        let row_height = ui.text_style_height(&text_style);
         let visuals = ui.visuals();
         let bg_col = visuals.extreme_bg_color;
         let transcription_frame = Frame::default().fill(bg_col);
 
+        // TODO: look into Complex layouts if necessary
         CentralPanel::default().frame(transcription_frame).show_inside(ui, |ui| {
             ScrollArea::vertical()
                 .auto_shrink(false)
                 .stick_to_bottom(true)
-                .show_rows(ui, row_height, total_rows, |ui, row_range| {
-                    ui.visuals_mut().window_fill = bg_col;
-                    for i in row_range {
-                        ui.monospace(&text_buffer[i]);
+                .show(ui, |ui| {
+                    for segment in text_buffer {
+                        ui.monospace(segment);
                     }
                 });
         });

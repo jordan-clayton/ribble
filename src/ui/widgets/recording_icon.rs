@@ -1,10 +1,9 @@
 use egui::{
-    emath::easing::quadratic_out, lerp, vec2, Color32, Response, Rgba, Sense, Stroke, Ui, Widget,
+    Color32, emath::easing::quadratic_out, lerp, Response, Rgba, Sense, Stroke, Ui, vec2, Widget,
 };
 
 use crate::utils::constants;
 
-// TODO: possibly add speed for cosine
 fn draw_recording_icon(
     ui: &mut Ui,
     color: Rgba,

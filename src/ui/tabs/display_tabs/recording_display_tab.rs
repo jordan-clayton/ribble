@@ -6,22 +6,25 @@ use std::{
     },
 };
 
-use egui::{Button, CentralPanel, Grid, SidePanel, Ui, WidgetText};
+use egui::{Button, CentralPanel, Frame, Grid, Sense, SidePanel, TopBottomPanel, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
+use sdl2::log::log;
 
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::{
         tabs::tab_view,
-        widgets::{fft_visualizer, recording_icon::recording_icon},
+        widgets::recording_icon::recording_icon,
     },
-    utils::{constants, preferences, recording},
+    utils::{audio_analysis, constants, preferences},
 };
+use crate::ui::widgets::fft_visualizer::draw_fft;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RecordingDisplayTab {
     title: String,
     // For determining whether to run/display the fft.
+    // TODO: store this state in the controller.
     visualize: Arc<AtomicBool>,
     #[serde(skip)]
     #[serde(default = "allocate_new_fft_buffer")]
@@ -95,8 +98,13 @@ impl tab_view::TabView for RecordingDisplayTab {
         // Get the frame time.
         let dt = ui.ctx().input(|i| i.stable_dt);
         // Smooth the current position towards tgt
-        recording::smoothing(current, target, dt);
+        audio_analysis::smoothing(current, target, dt);
 
+        let system_theme = controller.get_system_theme();
+        let theme = preferences::get_app_theme(system_theme);
+        let time_scale = Some(constants::RECORDING_ANIMATION_TIMESCALE);
+
+        // TODO - Migrate to configs panel.
         // Button panel
         SidePanel::right("recording_panel").show_inside(ui, |ui| {
             ui.add_enabled_ui(!mic_occupied, |ui| {
@@ -147,13 +155,7 @@ impl tab_view::TabView for RecordingDisplayTab {
             });
         });
 
-        CentralPanel::default().show_inside(ui, |ui| {
-            // Visualization.
-            // Header
-            let system_theme = controller.get_system_theme();
-            let theme = preferences::get_app_theme(system_theme);
-            let time_scale = Some(constants::RECORDING_ANIMATION_TIMESCALE);
-
+        TopBottomPanel::top("header").resizable(false).show_inside(ui, |ui| {
             let (icon, msg) = if accepting_speech {
                 (
                     recording_icon(egui::Rgba::from(theme.red), true, time_scale),
@@ -180,15 +182,27 @@ impl tab_view::TabView for RecordingDisplayTab {
                 ui.add(icon);
                 ui.label(msg);
             });
-
-            ui.separator();
-
-            // FFT visualizer
-            fft_visualizer::draw_fft(ui, &current, Some(theme));
+            let space = ui.spacing().item_spacing.y;
+            ui.add_space(space);
         });
+
+        let visuals = ui.visuals();
+        let bg_col = visuals.extreme_bg_color;
+        let frame = Frame::default().fill(bg_col);
+
+        let resp = CentralPanel::default().frame(frame).show_inside(ui, |ui| {
+            // TODO: add header once Atomic Visualizer
+            draw_fft(ui, &current, Some(theme));
+        });
+
+        let response = resp.response.interact(Sense::click());
+        if response.clicked() {
+            // TODO: (add and) Rotate the AtomicVisualizerType
+            log(&"HUZZAH! CLICK RECEIVED");
+        }
     }
 
-    // TODO: determine if actually useful.
+    // TODO: use this to switch the type of visualization
     fn context_menu(
         &mut self,
         _ui: &mut Ui,

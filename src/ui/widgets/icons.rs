@@ -1,6 +1,6 @@
 use catppuccin_egui::Theme;
 use eframe::epaint::Color32;
-use egui::{include_image, vec2, Image, ImageSource, Response, Sense, Ui, Widget};
+use egui::{Image, ImageSource, include_image, Response, Sense, Ui, vec2, Widget};
 
 // NOTE: egui caches image textures by default and will not evict if the image scaling changes.
 // If ever needing to scale icons larger than 1x, an eviction implementation will be required.
@@ -34,7 +34,6 @@ fn draw_ok_icon(ui: &mut Ui, scale: Option<f32>, theme: Option<Theme>) -> Respon
     draw_icon(ui, scale, ok_icon, color)
 }
 
-// TODO: make scale optional.
 pub fn ok_icon(scale: Option<f32>, theme: Option<Theme>) -> impl Widget {
     move |ui: &mut Ui| draw_ok_icon(ui, scale, theme)
 }

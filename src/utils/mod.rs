@@ -5,6 +5,6 @@ pub(crate) mod errors;
 pub(crate) mod file_mgmt;
 pub(crate) mod preferences;
 pub(crate) mod progress;
-pub(crate) mod recording;
+pub(crate) mod audio_analysis;
 pub(crate) mod sdl_audio_wrapper;
 pub(crate) mod threading;

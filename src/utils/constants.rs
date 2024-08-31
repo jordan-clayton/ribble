@@ -23,14 +23,16 @@ pub const MAX_VAD_PROBABILITY: f32 = 0.9;
 // TODO: SETTLE ON PROPER VALUES
 pub const FRAME_CONVERGENCE_ITERATIONS: usize = 1000;
 pub const FRAME_CONVERGENCE_TOLERANCE: usize = 2;
-pub const DEFAULT_F_LOWER: f32 = 100f32;
-pub const DEFAULT_F_HIGHER: f32 = 4000f32;
 pub const NUM_BUCKETS: usize = 32;
 pub const SMOOTH_FACTOR: f32 = 8.0;
-pub const MIN_LOW_FREQUENCY: f32 = 25.0;
-pub const MAX_LOW_FREQUENCY: f32 = 300.0;
-pub const MIN_HIGH_FREQUENCY: f32 = 330.0;
-pub const MAX_HIGH_FREQUENCY: f32 = 20000.0;
+
+// Human speech is roughly 80-85Hz.
+pub const DEFAULT_F_LOWER: f32 = 25f32;
+pub const DEFAULT_F_HIGHER: f32 = 4000f32;
+pub const MIN_F_LOWER: f32 = 25.0;
+pub const MAX_F_LOWER: f32 = 100.0;
+pub const MIN_F_HIGHER: f32 = 330.0;
+pub const MAX_F_HIGHER: f32 = 20000.0;
 pub const MAX_FFT_HEIGHT: f32 = 800.0;
 pub const MIN_FFT_HEIGHT: f32 = 30.0;
 pub const FFT_HEIGHT_EXPANSION: f32 = 20.0;

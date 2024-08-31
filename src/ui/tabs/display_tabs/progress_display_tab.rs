@@ -63,9 +63,7 @@ impl tab_view::TabView for ProgressDisplayTab {
         let Self { title: _, jobs } = self;
 
         // Get any new progress.
-        let message = controller.recv_progress();
-
-        if let Ok(progress) = message {
+        while let Ok(progress) = controller.recv_progress() {
             jobs.insert(progress);
         }
 
@@ -97,8 +95,7 @@ impl tab_view::TabView for ProgressDisplayTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

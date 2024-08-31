@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+atomic_enum = "0.3.0"
 biquad = "0.4.2"
 bson = "2.11.0"
 catppuccin-egui = { version = "5.2.0", default-features = false, features = ["egui28"] }

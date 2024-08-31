@@ -2,7 +2,6 @@ use catppuccin_egui::{MOCHA, Theme};
 use eframe::epaint::Hsva;
 use egui::{lerp, Pos2, Rgba, Sense, Stroke, Ui, vec2};
 use egui::emath::easing::{cubic_out, exponential_in};
-use sdl2::log::log;
 
 use crate::utils::constants;
 use crate::utils::constants::FFT_HEIGHT_EXPANSION;
@@ -74,9 +73,6 @@ fn fft_bar(ui: &mut Ui, color: Rgba, amp: f32, mouse_position: &Pos2) {
     col_hsv.s = col_hsv.s * constants::DESATURATION_MULTIPLIER;
 
     let low_color: Rgba = col_hsv.into();
-
-    #[cfg(debug_assertions)]
-    log(&format!("low: {:?}, high: {:?}", low_color, high_color));
 
     let adjusted_cell_height = lerp(min_cell_height..=max_cell_height, amp);
     let color_t = cubic_out(amp);

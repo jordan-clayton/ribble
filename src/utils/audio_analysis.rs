@@ -3,6 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use atomic_enum::atomic_enum;
 use biquad::{Biquad, Coefficients, DirectForm2Transposed, Q_BUTTERWORTH_F32, ToHertz, Type};
 use lazy_static::lazy_static;
 use realfft::{
@@ -19,6 +20,17 @@ use crate::utils::errors::{WhisperAppError, WhisperAppErrorType};
 lazy_static! {
     static ref FFT_PLANNER: Mutex<RealFftPlanner<f32>> = Mutex::new(RealFftPlanner::<f32>::new());
 }
+
+// TODO: add an arc'd AnalysisType to the controller for FFTAnalysis visualizer when running
+// realtime + recording 
+#[atomic_enum]
+#[derive(PartialEq)]
+enum AnalysisType {
+    Waveform = 0,
+    Power,
+    SpectrumDensity,
+}
+
 
 fn apply_gain(samples: &mut [f32], gain: f32) {
     for sample in samples.iter_mut() {

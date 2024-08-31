@@ -1,17 +1,17 @@
-use std::any::TypeId;
-use std::path::Path;
 use std::{
     any::Any,
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex, TryLockError,
+        Arc,
+        atomic::{AtomicBool, Ordering}, Mutex, TryLockError,
     },
     thread::{self, JoinHandle},
 };
+use std::any::TypeId;
+use std::path::Path;
 
 use crossbeam::channel::{
-    bounded, unbounded, Receiver, RecvError, SendError, Sender, TryRecvError,
+    bounded, Receiver, RecvError, Sender, SendError, TryRecvError, unbounded,
 };
 use hound::{Sample, SampleFormat, WavSpec};
 #[cfg(feature = "cuda")]
@@ -19,9 +19,6 @@ use nvml_wrapper::{cuda_driver_version_major, cuda_driver_version_minor};
 use realfft::num_traits::{Bounded, FromPrimitive, NumCast, Zero};
 use sdl2::audio::AudioSpecDesired;
 use tokio::runtime::Handle;
-use whisper_realtime::transcriber::static_transcriber::{
-    StaticTranscriber, SupportedAudioSample, SupportedChannels,
-};
 use whisper_realtime::{
     downloader::{
         download::AsyncDownload,
@@ -31,19 +28,16 @@ use whisper_realtime::{
     microphone,
     transcriber::{realtime_transcriber::RealtimeTranscriber, transcriber::Transcriber},
 };
-
-use crate::controller::utils::transcriber_utilities::init_microphone;
-use crate::utils::configs::{RecorderConfigs, RecordingFormat};
-use crate::utils::file_mgmt::{decode_audio, get_audio_reader};
-use crate::utils::recording::{
-    bandpass_filter, f_central, frequency_analysis, from_f32_normalized, to_f32_normalized,
+use whisper_realtime::transcriber::static_transcriber::{
+    StaticTranscriber, SupportedAudioSample, SupportedChannels,
 };
+
 use crate::{
     controller::utils::transcriber_utilities::{
         init_audio_ring_buffer, init_model, init_realtime_microphone, init_whisper_ctx,
     },
     utils::{
-        configs::{AudioConfigType, AudioConfigs, WorkerType},
+        configs::{AudioConfigs, AudioConfigType, WorkerType},
         console_message::{ConsoleMessage, ConsoleMessageType},
         constants,
         errors::{WhisperAppError, WhisperAppErrorType},
@@ -55,6 +49,12 @@ use crate::{
         sdl_audio_wrapper::SdlAudioWrapper,
     },
 };
+use crate::controller::utils::transcriber_utilities::init_microphone;
+use crate::utils::audio_analysis::{
+    bandpass_filter, f_central, frequency_analysis, from_f32_normalized, to_f32_normalized,
+};
+use crate::utils::configs::{RecorderConfigs, RecordingFormat};
+use crate::utils::file_mgmt::{decode_audio, get_audio_reader};
 
 // TODO: Remaining impls;
 
@@ -764,17 +764,17 @@ fn get_requested_configs(
 
 fn recording_impl<
     T: Default
-        + Clone
-        + Copy
-        + FromPrimitive
-        + NumCast
-        + Bounded
-        + Zero
-        + sdl2::audio::AudioFormatNum
-        + Sample
-        + Sync
-        + Send
-        + 'static,
+    + Clone
+    + Copy
+    + FromPrimitive
+    + NumCast
+    + Bounded
+    + Zero
+    + sdl2::audio::AudioFormatNum
+    + Sample
+    + Sync
+    + Send
+    + 'static,
 >(
     controller: WhisperAppController,
     run_fft: Arc<AtomicBool>,
