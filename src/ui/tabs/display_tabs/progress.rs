@@ -9,13 +9,13 @@ use crate::{
 };
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct ProgressDisplayTab {
+pub struct ProgressTab {
     title: String,
     #[serde(skip)]
     jobs: HashSet<Progress>,
 }
 
-impl ProgressDisplayTab {
+impl ProgressTab {
     pub fn new() -> Self {
         let jobs = HashSet::new();
         Self {
@@ -45,13 +45,13 @@ impl ProgressDisplayTab {
     }
 }
 
-impl Default for ProgressDisplayTab {
+impl Default for ProgressTab {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl tab_view::TabView for ProgressDisplayTab {
+impl tab_view::TabView for ProgressTab {
     fn id(&mut self) -> String {
         self.title.clone()
     }
@@ -88,15 +88,13 @@ impl tab_view::TabView for ProgressDisplayTab {
         }
     }
 
-    // TODO: Determine if actually required.
     fn context_menu(
         &mut self,
         _ui: &mut Ui,
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

@@ -33,18 +33,15 @@ pub fn model_row(
 
     ui.horizontal(|ui| {
         ui.label("Model:").on_hover_ui(|ui| {
-            ui.style_mut().interaction.selectable_labels = true;
             ui.label("Select the desired model for transcribing");
         });
 
         if downloaded {
             ui.add(ok_icon(None, theme)).on_hover_ui(|ui| {
-                ui.style_mut().interaction.selectable_labels = true;
                 ui.label("Model found.");
             });
         } else {
             ui.add(warning_icon(None, theme)).on_hover_ui(|ui| {
-                ui.style_mut().interaction.selectable_labels = true;
                 ui.label("Model not found");
             });
         }
@@ -62,7 +59,6 @@ pub fn model_row(
         if ui
             .button("Open")
             .on_hover_ui(|ui| {
-                ui.style_mut().interaction.selectable_labels = true;
                 ui.label(format!("Open a compatible {}, model.", model.to_string()));
             })
             .clicked()
@@ -104,7 +100,6 @@ pub fn model_row(
         if ui
             .add_enabled(!downloading, Button::new("Download"))
             .on_hover_ui(|ui| {
-                ui.style_mut().interaction.selectable_labels = true;
                 ui.label(format!("Download compatible {} model", model.to_string()));
             })
             .clicked()
@@ -119,7 +114,6 @@ pub fn model_row(
 
 pub fn n_threads_row(ui: &mut Ui, n_threads: &mut std::ffi::c_int, max_threads: std::ffi::c_int) {
     ui.label("Threads:").on_hover_ui(|ui| {
-        ui.style_mut().interaction.selectable_labels = true;
         ui.label("Select the number of threads to allocate for transcription");
         ui.label(format!("Recommended: {}", std::cmp::min(7, max_threads)));
     });
@@ -133,14 +127,12 @@ pub fn n_threads_row(ui: &mut Ui, n_threads: &mut std::ffi::c_int, max_threads: 
 pub fn use_gpu_row(ui: &mut Ui, use_gpu: &mut bool, gpu_capable: bool) {
     *use_gpu = *use_gpu & gpu_capable;
     ui.label("Hardware Accelerated (GPU):").on_hover_ui(|ui| {
-        ui.style_mut().interaction.selectable_labels = true;
         ui.label(
             "Enable hardware acceleration (if supported). REQUIRED to use large models in realtime mode.",
         );
     });
     ui.add_enabled(gpu_capable, Checkbox::without_text(use_gpu))
         .on_hover_ui(|ui| {
-            ui.style_mut().interaction.selectable_labels = true;
             let status = if gpu_capable {
                 "supported"
             } else {
@@ -152,7 +144,6 @@ pub fn use_gpu_row(ui: &mut Ui, use_gpu: &mut bool, gpu_capable: bool) {
 
 pub fn set_language_row(ui: &mut Ui, language: &mut Option<String>) {
     ui.label("Language:").on_hover_ui(|ui| {
-        ui.style_mut().interaction.selectable_labels = true;
         ui.label("Select input language. Set to Auto for auto-detection");
     });
 
@@ -171,7 +162,6 @@ pub fn set_language_row(ui: &mut Ui, language: &mut Option<String>) {
 
 pub fn set_translate_row(ui: &mut Ui, set_translate: &mut bool) {
     ui.label("Translate").on_hover_ui(|ui| {
-        ui.style_mut().interaction.selectable_labels = true;
         ui.label("Translate transcription (to English ONLY)");
     });
 

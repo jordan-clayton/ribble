@@ -54,9 +54,6 @@ pub const TEMP_FILE: &str = "tmp.wav";
 
 pub const RECORDING_ANIMATION_TIMESCALE: f64 = 2.0;
 
-// TODO: pick an appropriate livelock timeout.
-pub const CHANNEL_TIMEOUT: Duration = Duration::from_millis(10);
-
 pub const SLEEP_DURATION: Duration = Duration::from_millis(1);
 
 pub const FROM_COLOR: egui::Rgba = egui::Rgba::from_rgba_premultiplied(0.0, 0.0, 0.0, 0.7);

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use egui::{Button, CentralPanel, Grid, TopBottomPanel, Ui, WidgetText};
+use egui::{Button, Grid, Label, RichText, ScrollArea, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use sdl2::log::log;
 use strum::VariantArray;
@@ -10,7 +10,7 @@ use whisper_realtime::model::Model;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::tab_view,
-    utils::{recorder_configs::AudioConfigs, threading::get_max_threads},
+    utils::threading::get_max_threads,
 };
 use crate::ui::tabs::controller_tabs::controller_common;
 use crate::ui::widgets::icons::{ok_icon, warning_icon};
@@ -18,7 +18,7 @@ use crate::utils::{constants, file_mgmt};
 use crate::utils::preferences::get_app_theme;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct StaticConfigsTab {
+pub struct StaticTab {
     title: String,
     static_configs: Configs,
     #[serde(skip)]
@@ -28,7 +28,7 @@ pub struct StaticConfigsTab {
     audio_path: Option<PathBuf>,
 }
 
-impl StaticConfigsTab {
+impl StaticTab {
     pub fn new() -> Self {
         Self::default()
     }
@@ -43,14 +43,14 @@ impl StaticConfigsTab {
     }
 }
 
-impl Default for StaticConfigsTab {
+impl Default for StaticTab {
     fn default() -> Self {
         let configs = Configs::default();
         Self::new_with_configs(configs)
     }
 }
 
-impl tab_view::TabView for StaticConfigsTab {
+impl tab_view::TabView for StaticTab {
     fn id(&mut self) -> String {
         self.title.clone()
     }
@@ -90,13 +90,6 @@ impl tab_view::TabView for StaticConfigsTab {
         } = static_configs;
 
         // Check for config-copy requests
-        let req = controller.recv_static_configs_req();
-        if let Ok(_) = req {
-            controller
-                .send_configs(AudioConfigs::Static(c_configs))
-                .expect("Configs channel closed.");
-        }
-
         let (has_file, file_path) = if audio_path.is_some() {
             let path = audio_path.clone().unwrap();
             let valid_file = path.exists() & path.is_file();
@@ -114,101 +107,93 @@ impl tab_view::TabView for StaticConfigsTab {
         let m_model = Model::new_with_type_and_dir(*model, data_dir);
         let downloaded = m_model.is_downloaded();
         let is_ready = downloaded & has_file;
-        controller.update_static_ready(is_ready);
+        controller.set_static_ready(is_ready);
 
         let static_running = controller.static_running();
         let static_ready = controller.static_ready();
         let available_models: Vec<ModelType> = ModelType::VARIANTS.to_vec();
         let system_theme = controller.get_system_theme();
-        // TODO: pass this to the controller_common model row function.
         let theme = get_app_theme(system_theme);
 
 
         let file_name = file_path.file_name();
 
+        ScrollArea::vertical().show(ui, |ui| {
+            ui.add_enabled_ui(!static_running, |ui| {
+                ui.heading("Configuration");
+                Grid::new("static_configs_grid")
+                    .striped(true)
+                    .show(ui, |ui| {
+                        // MODEL ROW, see configs common.
+                        // Contains dropdown to select model type, to open a downloaded model + download a model.
+                        controller_common::model_row(
+                            ui,
+                            model,
+                            &m_model,
+                            downloaded,
+                            controller.clone(),
+                            available_models.as_slice(),
+                            Some(theme),
+                        );
+                        ui.end_row();
+                        // Num_threads
+                        controller_common::n_threads_row(ui, n_threads, *max_threads);
+                        ui.end_row();
+                        let gpu_enabled = controller.gpu_enabled();
+                        controller_common::use_gpu_row(ui, use_gpu, gpu_enabled);
+                        ui.end_row();
+                        // INPUT Language -> Set to auto for language detection
+                        controller_common::set_language_row(ui, language);
+                        ui.end_row();
+                        // Translate (TO ENGLISH)
+                        controller_common::set_translate_row(ui, set_translate);
+                        ui.end_row();
+                        // Reset defaults button.
+                        ui.label("Reset To Defaults");
+                        if ui.button("Reset").clicked() {
+                            let default = Configs::default();
+                            let Configs {
+                                n_threads: default_n_threads,
+                                set_translate: default_set_translate,
+                                language: default_language,
+                                use_gpu: default_use_gpu,
+                                model: default_model,
+                                realtime_timeout: _,
+                                audio_sample_ms: _,
+                                vad_sample_ms: _,
+                                phrase_timeout: _,
+                                voice_probability_threshold: _,
+                                naive_vad_freq_threshold: _,
+                                naive_vad_energy_threshold: _,
+                                naive_window_len: _,
+                                naive_window_step: _,
+                                print_special: _,
+                                print_progress: _,
+                                print_realtime: _,
+                                print_timestamps: _,
+                            } = default;
 
-        TopBottomPanel::top("static_configs_panel")
-            .resizable(true)
-            .show_inside(ui, |ui| {
-                ui.add_enabled_ui(!static_running, |ui| {
-                    ui.heading("Configuration");
-                    Grid::new("static_configs_grid")
-                        .striped(true)
-                        .show(ui, |ui| {
-                            // MODEL ROW, see configs common.
-                            // Contains dropdown to select model type, to open a downloaded model + download a model.
-                            // TODO: refactor this -> Don't deal with fn pointers.
-                            // TODO: Also, pass the theme.
-                            controller_common::model_row(
-                                ui,
-                                model,
-                                &m_model,
-                                downloaded,
-                                controller.clone(),
-                                available_models.as_slice(),
-                                Some(theme),
-                            );
-                            ui.end_row();
-                            // Num_threads
-                            controller_common::n_threads_row(ui, n_threads, *max_threads);
-                            ui.end_row();
-                            let gpu_enabled = controller.gpu_enabled();
-                            controller_common::use_gpu_row(ui, use_gpu, gpu_enabled);
-                            ui.end_row();
-                            // INPUT Language -> Set to auto for language detection
-                            controller_common::set_language_row(ui, language);
-                            ui.end_row();
-                            // Translate (TO ENGLISH)
-                            controller_common::set_translate_row(ui, set_translate);
-                            ui.end_row();
-                            // Reset defaults button.
-                            ui.label("Reset To Defaults");
-                            if ui.button("Reset").clicked() {
-                                let default = Configs::default();
-                                let Configs {
-                                    n_threads: default_n_threads,
-                                    set_translate: default_set_translate,
-                                    language: default_language,
-                                    use_gpu: default_use_gpu,
-                                    model: default_model,
-                                    realtime_timeout: _,
-                                    audio_sample_ms: _,
-                                    vad_sample_ms: _,
-                                    phrase_timeout: _,
-                                    voice_probability_threshold: _,
-                                    naive_vad_freq_threshold: _,
-                                    naive_vad_energy_threshold: _,
-                                    naive_window_len: _,
-                                    naive_window_step: _,
-                                    print_special: _,
-                                    print_progress: _,
-                                    print_realtime: _,
-                                    print_timestamps: _,
-                                } = default;
-
-                                *n_threads = default_n_threads;
-                                *set_translate = default_set_translate;
-                                *language = default_language;
-                                *use_gpu = default_use_gpu;
-                                *model = default_model;
-                            }
-                            ui.end_row();
-                        });
-                    ui.add_space(constants::BLANK_SEPARATOR);
-                });
+                            *n_threads = default_n_threads;
+                            *set_translate = default_set_translate;
+                            *language = default_language;
+                            *use_gpu = default_use_gpu;
+                            *model = default_model;
+                        }
+                        ui.end_row();
+                    });
+                ui.add_space(constants::BLANK_SEPARATOR);
             });
-        CentralPanel::default().show_inside(ui, |ui| {
+            ui.separator();
             let mic_occupied = controller.is_working() ^ static_running;
             ui.add_enabled_ui(!mic_occupied, |ui| {
                 // Transcription section
-                ui.heading("Transcription");
+                ui.add_enabled(static_ready, Label::new(RichText::new("Transcription").heading()));
                 ui.vertical_centered_justified(|ui| {
                     if ui
                         .add_enabled(!static_running && static_ready, Button::new("Start"))
                         .clicked()
                     {
-                        // TODO: refactor
-                        // controller.start_static_transcription();
+                        controller.start_static_transcription(file_path.as_path(), c_configs);
                     }
 
                     ui.add_space(constants::BLANK_SEPARATOR);
@@ -224,7 +209,7 @@ impl tab_view::TabView for StaticConfigsTab {
             });
             ui.separator();
 
-            ui.heading("Audio");
+            ui.heading("Audio File");
             ui.vertical_centered_justified(|ui| {
                 if ui.add_enabled(!static_running, Button::new("Open")).clicked() {
                     // Open File dialog at HOME directory, fallback to root.
@@ -273,9 +258,9 @@ impl tab_view::TabView for StaticConfigsTab {
             ui.separator();
             // Saving
             let realtime_running = controller.realtime_running();
-            ui.heading("Saving");
-            ui.vertical_centered_justified(|ui| {
-                ui.add_enabled_ui(!static_running && !realtime_running, |ui| {
+            ui.add_enabled_ui(!static_running && !realtime_running, |ui| {
+                ui.heading("Saving");
+                ui.vertical_centered_justified(|ui| {
                     if ui.add(Button::new("Save Transcription")).clicked() {
                         log(&"Start save routine".to_string());
                     }
@@ -285,13 +270,10 @@ impl tab_view::TabView for StaticConfigsTab {
                     }
                 });
             });
-
-            ui.add_space(constants::BLANK_SEPARATOR);
         });
     }
 
     // Right-click tab -> What should be shown.
-    // TODO: Determine whether necessary to implement
     fn context_menu(
         &mut self,
         _ui: &mut Ui,

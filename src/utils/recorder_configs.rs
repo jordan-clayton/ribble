@@ -2,37 +2,6 @@ use strum::{Display, EnumIter};
 
 use crate::utils::constants;
 
-// TODO: remove
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub enum AudioConfigs {
-    Realtime(whisper_realtime::configs::Configs),
-    Static(whisper_realtime::configs::Configs),
-    Recording(RecorderConfigs),
-}
-
-// TODO: remove
-impl AudioConfigs {
-    pub fn is_realtime(&self) -> bool {
-        matches!(*self, AudioConfigs::Realtime(_))
-    }
-
-    pub fn is_static(&self) -> bool {
-        matches!(*self, AudioConfigs::Static(_))
-    }
-
-    pub fn is_recording(&self) -> bool {
-        matches!(*self, AudioConfigs::Recording(_))
-    }
-}
-
-// TODO: remove
-#[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum AudioConfigType {
-    Realtime,
-    Static,
-    Recording,
-}
-
 #[derive(
     Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter,
 )]

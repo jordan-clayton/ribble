@@ -1,59 +1,50 @@
-use std::{
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-};
-
-use egui::{Button, CentralPanel, Frame, Grid, Sense, SidePanel, TopBottomPanel, Ui, WidgetText};
+use eframe::epaint::text::TextWrapMode;
+use egui::{CentralPanel, FontId, Frame, RichText, Sense, TextStyle, TopBottomPanel, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
-use sdl2::log::log;
+use strum::IntoEnumIterator;
 
-use crate::ui::widgets::fft_visualizer::draw_fft;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::{tabs::tab_view, widgets::recording_icon::recording_icon},
     utils::{audio_analysis, constants, preferences},
 };
+use crate::ui::widgets::fft_visualizer::draw_fft;
+use crate::utils::audio_analysis::AnalysisType;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct RecordingDisplayTab {
+pub struct VisualizerTab {
     title: String,
-    // For determining whether to run/display the fft.
-    // TODO: store this state in the controller.
-    visualize: Arc<AtomicBool>,
     #[serde(skip)]
     #[serde(default = "allocate_new_fft_buffer")]
     current: [f32; constants::NUM_BUCKETS],
     #[serde(skip)]
     #[serde(default = "allocate_new_fft_buffer")]
     target: [f32; constants::NUM_BUCKETS],
-
     // This is to avoid unnecessary calls to clear the array.
     #[serde(skip)]
     target_cleared: bool,
+    pub visualize: bool,
 }
 
-impl RecordingDisplayTab {
+impl VisualizerTab {
     pub fn new() -> Self {
         Self {
             title: String::from("Visualizer"),
-            visualize: Arc::new(AtomicBool::new(true)),
             current: allocate_new_fft_buffer(),
             target: allocate_new_fft_buffer(),
             target_cleared: false,
+            visualize: true,
         }
     }
 }
 
-impl Default for RecordingDisplayTab {
+impl Default for VisualizerTab {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl tab_view::TabView for RecordingDisplayTab {
+impl tab_view::TabView for VisualizerTab {
     fn id(&mut self) -> String {
         self.title.clone()
     }
@@ -61,26 +52,22 @@ impl tab_view::TabView for RecordingDisplayTab {
         WidgetText::from(&self.title)
     }
 
-    // Split view:  Visualizer | Buttons: Output path, Visualizer toggle, Start and stop recording, etc.
     fn ui(&mut self, ui: &mut Ui, controller: &mut WhisperAppController) {
         let Self {
             title: _,
-            visualize,
             current,
             target,
             target_cleared,
+            visualize,
         } = self;
 
-        let mut run_visualizer = visualize.load(Ordering::Acquire);
-        // TODO: figure this out - either msg or similar.
+        controller.set_run_visualizer(*visualize);
         let mut accepting_speech = false;
+        let realtime_running = controller.realtime_running();
         let recorder_running = controller.recorder_running();
-        let save_recording_ready = controller.save_recording_ready();
+        let mic_running = realtime_running || recorder_running;
 
-        // Check whether mic is occupied by another process.
-        let mic_occupied = controller.audio_running() ^ recorder_running;
-
-        if run_visualizer && recorder_running {
+        if mic_running {
             *target_cleared = false;
             // Update to the latest fft data.
             controller.read_fft_buffer(target);
@@ -101,57 +88,7 @@ impl tab_view::TabView for RecordingDisplayTab {
         let theme = preferences::get_app_theme(system_theme);
         let time_scale = Some(constants::RECORDING_ANIMATION_TIMESCALE);
 
-        // TODO - Migrate to configs panel.
-        // Button panel
-        SidePanel::right("recording_panel").show_inside(ui, |ui| {
-            ui.add_enabled_ui(!mic_occupied, |ui| {
-                Grid::new("inner_recording_panel").striped(true).show(ui, |ui| {
-                    // Start recording button
-                    if ui.add_enabled(!recorder_running, Button::new("Start Recording")).clicked() {
-                        controller.start_recording(visualize.clone(), &ui.ctx().clone());
-                        // TODO: remove once proper implemented
-                        accepting_speech = true;
-                    }
-
-                    ui.end_row();
-
-                    // Stop recording button
-                    if ui.add_enabled(recorder_running, Button::new("Stop Recording")).clicked() {
-                        controller.stop_recording();
-                    }
-
-                    ui.end_row();
-
-                    // Save recording button.
-                    if ui.add_enabled(save_recording_ready, Button::new("Save")).clicked() {
-                        // Open File dialog at HOME directory, fallback to root.
-                        let base_dirs = directories::BaseDirs::new();
-                        let dir = if let Some(dir) = base_dirs {
-                            dir.home_dir().to_path_buf()
-                        } else {
-                            PathBuf::from("/")
-                        };
-
-                        if let Some(p) = rfd::FileDialog::new()
-                            .add_filter("wave", &["wav"])
-                            .set_directory(dir).save_file() {
-                            controller.save_audio_recording(&p);
-                        }
-                    }
-                    ui.end_row();
-
-                    // Run visual toggle
-                    if ui.checkbox(&mut run_visualizer, "Run visualizer").on_hover_ui(|ui| {
-                        ui.style_mut().interaction.selectable_labels = true;
-                        ui.label("Click to toggle the frequency waveform visualizer. Disable to improve performance.");
-                    }).clicked() {
-                        visualize.store(run_visualizer, Ordering::Release);
-                    }
-                    ui.end_row();
-                });
-            });
-        });
-
+        // TODO: refactor this -> atomic enum for state + which audio_worker
         TopBottomPanel::top("header")
             .resizable(false)
             .show_inside(ui, |ui| {
@@ -160,15 +97,10 @@ impl tab_view::TabView for RecordingDisplayTab {
                         recording_icon(egui::Rgba::from(theme.red), true, time_scale),
                         "Recording in progress.",
                     )
-                } else if recorder_running {
+                } else if mic_running {
                     (
                         recording_icon(egui::Rgba::from(theme.green), true, time_scale),
                         "Preparing to record.",
-                    )
-                } else if mic_occupied {
-                    (
-                        recording_icon(egui::Rgba::from(theme.yellow), true, time_scale),
-                        "Microphone in use.",
                     )
                 } else {
                     (
@@ -190,26 +122,38 @@ impl tab_view::TabView for RecordingDisplayTab {
         let frame = Frame::default().fill(bg_col);
 
         let resp = CentralPanel::default().frame(frame).show_inside(ui, |ui| {
-            // TODO: add header once Atomic Visualizer
+            let analysis_type = controller.get_analysis_type();
+            ui.add_space(constants::BLANK_SEPARATOR);
+            let header_style = TextStyle::Heading;
+            let header_size = ui.text_style_height(&header_style);
+            ui.label(RichText::new(analysis_type.to_string()).font(FontId::monospace(header_size)));
             draw_fft(ui, &current, Some(theme));
         });
 
         let response = resp.response.interact(Sense::click());
+        response.context_menu(|ui| {
+            ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
+            let visualization_functions = AnalysisType::iter();
+            let mut current = controller.get_analysis_type();
+            for visual in visualization_functions {
+                if ui.selectable_value(&mut current, visual, visual.to_string()).clicked() {
+                    controller.set_analysis_type(visual);
+                    ui.close_menu();
+                }
+            }
+        });
         if response.clicked() {
-            // TODO: (add and) Rotate the AtomicVisualizerType
-            log(&"HUZZAH! CLICK RECEIVED");
+            controller.rotate_analysis_type();
         }
     }
 
-    // TODO: use this to switch the type of visualization
     fn context_menu(
         &mut self,
         _ui: &mut Ui,
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use catppuccin_egui::Theme;
 use egui::Visuals;
-use egui_dock::{DockArea, DockState, NodeIndex, Style};
+use egui_dock::{DockArea, DockState, NodeIndex, Style, SurfaceIndex, TabIndex};
 
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
@@ -12,7 +12,7 @@ use crate::{
             console, progress, transcription,
             visualizer,
         },
-        tab_viewer, whisper_tab,
+        tab_viewer,
     },
     utils::preferences,
 };
@@ -20,8 +20,8 @@ use crate::ui::tabs::whisper_tab::WhisperTab;
 
 pub struct WhisperApp {
     // These need to be serialized
-    tree: DockState<whisper_tab::WhisperTab>,
-    closed_tabs: HashMap<String, whisper_tab::WhisperTab>,
+    tree: DockState<WhisperTab>,
+    closed_tabs: HashMap<String, WhisperTab>,
     controller: WhisperAppController,
 }
 
@@ -52,27 +52,27 @@ impl WhisperApp {
     fn default_layout(controller: WhisperAppController) -> Self {
         let closed_tabs = HashMap::new();
 
-        let td = WhisperTab::TranscriptionDisplay(
+        let td = WhisperTab::Transcription(
             transcription::TranscriptionTab::default(),
         );
-        let rd = whisper_tab::WhisperTab::RecordingDisplay(
-            visualizer::RecordingDisplayTab::default(),
+        let rd = WhisperTab::Visualizer(
+            visualizer::VisualizerTab::default(),
         );
-        let pd = whisper_tab::WhisperTab::ProgressDisplay(
-            progress::ProgressDisplayTab::default(),
+        let pd = WhisperTab::Progress(
+            progress::ProgressTab::default(),
         );
-        let ed = whisper_tab::WhisperTab::ErrorDisplay(
-            console::ErrorConsoleDisplayTab::default(),
+        let ed = WhisperTab::Console(
+            console::ConsoleTab::default(),
         );
-        let rc = whisper_tab::WhisperTab::RealtimeConfigs(
-            realtime::RealtimeConfigsTab::default(),
+        let rc = WhisperTab::Realtime(
+            realtime::RealtimeTab::default(),
         );
         let st =
-            whisper_tab::WhisperTab::StaticConfigs(r#static::StaticConfigsTab::default());
-        let rec = whisper_tab::WhisperTab::RecordingConfigs(
-            recording::RecordingConfigsTab::default(),
+            WhisperTab::Static(r#static::StaticTab::default());
+        let rec = WhisperTab::Recording(
+            recording::RecordingTab::default(),
         );
-        let mut tree: DockState<whisper_tab::WhisperTab> = DockState::new(vec![td, rd]);
+        let mut tree: DockState<WhisperTab> = DockState::new(vec![td, rd]);
 
         let surface = tree.main_surface_mut();
 
@@ -108,7 +108,50 @@ impl eframe::App for WhisperApp {
             ctx.request_repaint();
         }
 
-        // let mut closed_tabs = clone_closed_tabs(&self.closed_tabs);
+        // Tab focus.
+        let mut focus_tabs: Vec<(SurfaceIndex, NodeIndex, TabIndex)> = vec![];
+        let mut missing_tabs: Vec<String> = vec![];
+        while let Ok(focus_tab) = self.controller.recv_focus_tab() {
+            let mut found = false;
+            let surfaces = self.tree.iter_surfaces();
+            for (surface_index, surface) in surfaces.enumerate() {
+                let tree = surface.node_tree();
+                if tree.is_none() {
+                    continue;
+                }
+                let tree = tree.unwrap();
+
+                for (node_index, node) in tree.iter().enumerate() {
+                    let tabs = node.tabs();
+                    if tabs.is_none() {
+                        continue;
+                    }
+                    let tabs = tabs.unwrap();
+                    for (tab_index, tab) in tabs.iter().enumerate() {
+                        if tab.matches(focus_tab) {
+                            focus_tabs.push((surface_index.into(), node_index.into(), tab_index.into()));
+                            found = true;
+                        }
+                    }
+                }
+            }
+
+            if !found {
+                missing_tabs.push(focus_tab.id())
+            }
+        }
+
+        for location in focus_tabs {
+            self.tree.set_active_tab(location);
+        }
+
+        for key in missing_tabs {
+            let tab = self.closed_tabs.remove(&key);
+            if let Some(t) = tab {
+                self.tree.push_to_focused_leaf(t);
+            }
+        }
+
         let mut closed_tabs = self.closed_tabs.clone();
         let show_add = !closed_tabs.is_empty();
         let mut added_tabs = vec![];
@@ -133,24 +176,6 @@ impl eframe::App for WhisperApp {
             self.tree.set_focused_node_and_surface((surface, node));
             self.tree.push_to_focused_leaf(tab);
         });
-
-        // If switching to static
-        // TODO: SWAP THIS FLAG.
-        // if self.controller.save_recording_ready() {
-        //     let st = StaticConfigs(StaticConfigsTab::default());
-        //     // Find the tab.
-        //     let tab_location = self.tree.find_tab(&st);
-        //     if let Some(location) = tab_location {
-        //         self.tree.set_active_tab(location);
-        //     } else {
-        //         // This shouldn't ever happen - closed tabs are stored.
-        //         // In the event the tab is somehow lost from the tree, make a new one.
-        //         self.tree.push_to_focused_leaf(st);
-        //     }
-        //
-        //     // TODO: once flag
-        //     // Set the flag.
-        // }
     }
 
     // TODO: Restore once testing finished.
@@ -170,3 +195,4 @@ impl eframe::App for WhisperApp {
 fn tweak_visuals(visuals: &mut Visuals, theme: Theme) {
     visuals.faint_bg_color = theme.mantle
 }
+

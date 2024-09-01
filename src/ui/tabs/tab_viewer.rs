@@ -60,6 +60,9 @@ impl egui_dock::TabViewer for WhisperTabViewer<'_> {
 
     fn on_close(&mut self, tab: &mut Self::Tab) -> bool {
         self.closed_tabs.insert(tab.id(), tab.clone());
+        if let WhisperTab::Visualizer(_) = tab {
+            self.controller.set_run_visualizer(false);
+        }
         true
     }
 

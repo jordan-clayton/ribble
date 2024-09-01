@@ -1,4 +1,6 @@
-use egui::{Checkbox, ComboBox, Grid, ScrollArea, Slider, Ui, WidgetText};
+use std::path::PathBuf;
+
+use egui::{Button, Checkbox, ComboBox, Grid, ScrollArea, Slider, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::IntoEnumIterator;
 
@@ -7,38 +9,38 @@ use crate::{
     utils::{
         constants,
         recorder_configs::{
-            AudioConfigs, BufferSize, Channel, RecorderConfigs, RecordingFormat, SampleRate,
+            BufferSize, Channel, RecorderConfigs, RecordingFormat, SampleRate,
         },
     },
 };
 use crate::ui::tabs::tab_view;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct RecordingConfigsTab {
+pub struct RecordingTab {
     title: String,
     recorder_configs: RecorderConfigs,
 }
 
-impl RecordingConfigsTab {
+impl RecordingTab {
     pub fn new() -> Self {
         Self::default()
     }
     pub fn new_with_configs(configs: RecorderConfigs) -> Self {
         Self {
-            title: String::from("Recording Configuration"),
+            title: String::from("Recording"),
             recorder_configs: configs,
         }
     }
 }
 
-impl Default for RecordingConfigsTab {
+impl Default for RecordingTab {
     fn default() -> Self {
         let configs = RecorderConfigs::default();
         Self::new_with_configs(configs)
     }
 }
 
-impl tab_view::TabView for RecordingConfigsTab {
+impl tab_view::TabView for RecordingTab {
     fn id(&mut self) -> String {
         self.title.clone()
     }
@@ -64,26 +66,18 @@ impl tab_view::TabView for RecordingConfigsTab {
             f_higher,
         } = recorder_configs;
 
-        // Check for config-copy requests.
-        let req = controller.recv_recording_configs_req();
-        if let Ok(_) = req {
-            controller
-                .send_configs(AudioConfigs::Recording(c_configs))
-                .expect("Configs channel closed.");
-        }
-
         let recorder_running = controller.recorder_running();
+        let save_recording_ready = controller.save_recording_ready();
 
         ScrollArea::vertical().show(ui, |ui| {
             ui.add_enabled_ui(!recorder_running, |ui| {
-                ui.label("Configuration");
+                ui.heading("Configuration");
                 Grid::new("recording_configs")
                     .striped(true)
                     .show(ui, |ui| {
 
                         // SAMPLE RATE
                         ui.label("Sample rate:").on_hover_ui(|ui| {
-                            ui.style_mut().interaction.selectable_labels = true;
                             ui.label("Set the desired sample rate (Hz). Note: this must be supported by your audio device, or it will fall back to default.");
                         });
                         let sample_rates = SampleRate::iter();
@@ -102,7 +96,6 @@ impl tab_view::TabView for RecordingConfigsTab {
                         ui.end_row();
                         // BUFFER SIZE
                         ui.label("Buffer size:").on_hover_ui(|ui| {
-                            ui.style_mut().interaction.selectable_labels = true;
                             ui.label("Set the desired audio frame size. Large buffer sizes may introduce lag. Recommended: Medium (1024) for Mono, Large(2048) for Stereo");
                         });
 
@@ -122,7 +115,6 @@ impl tab_view::TabView for RecordingConfigsTab {
                         ui.end_row();
                         // CHANNEL
                         ui.label("Channels").on_hover_ui(|ui| {
-                            ui.style_mut().interaction.selectable_labels = true;
                             ui.label("Select the number of audio channels. Must be supported by your device, or this will fall back to system defaults.");
                         });
                         let channels = Channel::iter();
@@ -135,7 +127,6 @@ impl tab_view::TabView for RecordingConfigsTab {
 
                         // RECORDING FORMAT
                         ui.label("Audio Format").on_hover_ui(|ui| {
-                            ui.style_mut().interaction.selectable_labels = true;
                             ui.label("Select WAV audio format. Must be supported by your device, or this will fallback to system defaults.");
                         });
 
@@ -151,8 +142,7 @@ impl tab_view::TabView for RecordingConfigsTab {
                         ui.end_row();
 
                         // RUN BANDPASS FILTER
-                        ui.label("Filter:").on_hover_ui(|ui| {
-                            ui.style_mut().interaction.selectable_labels = true;
+                        ui.label("Bandpass Filter:").on_hover_ui(|ui| {
                             ui.label("Run a bandpass filter to clean up recording?");
                         });
                         ui.add(Checkbox::without_text(filter));
@@ -162,7 +152,6 @@ impl tab_view::TabView for RecordingConfigsTab {
                         ui.add_enabled_ui(*filter, |ui| {
                             // High Threshold
                             ui.label("High frequency cutoff:").on_hover_ui(|ui| {
-                                ui.style_mut().interaction.selectable_labels = true;
                                 ui.label("Frequencies higher than this threshold will be filtered out.");
                             });
                         });
@@ -175,7 +164,6 @@ impl tab_view::TabView for RecordingConfigsTab {
                         // Low Threshold
                         ui.add_enabled_ui(*filter, |ui| {
                             ui.label("Low frequency cutoff:").on_hover_ui(|ui| {
-                                ui.style_mut().interaction.selectable_labels = true;
                                 ui.label("Frequencies lower than this threshold will be filtered out.");
                             });
                         });
@@ -201,14 +189,52 @@ impl tab_view::TabView for RecordingConfigsTab {
                         }
                         ui.end_row();
                     });
-                ui.separator();
-                // BUTTONS.
-                // Likely columns?
+                ui.add_space(constants::BLANK_SEPARATOR);
+            });
+            let mic_occupied = controller.is_working() ^ recorder_running;
+            ui.separator();
+            ui.add_enabled_ui(!mic_occupied, |ui| {
+                ui.heading("Recording");
+                ui.vertical_centered_justified(|ui| {
+                    if ui.add_enabled(!recorder_running, Button::new("Start Recording")).clicked() {
+                        // TODO: refactor visualizer toggle into controller.
+                        // TODO: refactor start_recording
+                    }
+
+                    ui.add_space(constants::BLANK_SEPARATOR);
+
+                    if ui.add_enabled(recorder_running, Button::new("Stop Recording")).clicked() {
+                        controller.stop_recording();
+                    }
+                });
+                ui.add_space(constants::BLANK_SEPARATOR);
+            });
+            ui.separator();
+            ui.add_enabled_ui(save_recording_ready, |ui| {
+                ui.heading("Saving");
+                ui.vertical_centered_justified(|ui| {
+                    // Save button
+                    if ui.button("Save").clicked() {
+                        // Open File dialog at HOME directory, fallback to root.
+                        let base_dirs = directories::BaseDirs::new();
+                        let dir = if let Some(dir) = base_dirs {
+                            dir.home_dir().to_path_buf()
+                        } else {
+                            PathBuf::from("/")
+                        };
+
+                        if let Some(p) = rfd::FileDialog::new()
+                            .add_filter("wave", &["wav"])
+                            .set_directory(dir).save_file() {
+                            controller.save_audio_recording(&p);
+                        }
+                    }
+                    ui.add_space(constants::BLANK_SEPARATOR);
+                });
             });
         });
     }
 
-    // TODO: determine if this is required.
     fn context_menu(
         &mut self,
         _ui: &mut Ui,

@@ -10,14 +10,14 @@ use crate::{
 };
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct ErrorConsoleDisplayTab {
+pub struct ConsoleTab {
     title: String,
     #[serde(default = "console_history")]
     #[serde(skip)]
     console_queue: VecDeque<ConsoleMessage>,
 }
 
-impl ErrorConsoleDisplayTab {
+impl ConsoleTab {
     pub fn new() -> Self {
         let errors = console_history();
         Self {
@@ -27,13 +27,13 @@ impl ErrorConsoleDisplayTab {
     }
 }
 
-impl Default for ErrorConsoleDisplayTab {
+impl Default for ConsoleTab {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl tab_view::TabView for ErrorConsoleDisplayTab {
+impl tab_view::TabView for ConsoleTab {
     fn id(&mut self) -> String {
         self.title.clone()
     }
@@ -72,7 +72,6 @@ impl tab_view::TabView for ErrorConsoleDisplayTab {
         });
     }
 
-    // TODO: determine whether needed
     fn context_menu(
         &mut self,
         _ui: &mut Ui,

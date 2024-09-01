@@ -5,42 +5,100 @@ use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::{
         controller_tabs::{
-            r#static::StaticConfigsTab, realtime::RealtimeConfigsTab,
-            recording::RecordingConfigsTab,
+            r#static::StaticTab, realtime::RealtimeTab,
+            recording::RecordingTab,
         },
         display_tabs::{
-            console::ErrorConsoleDisplayTab, progress::ProgressDisplayTab,
+            console::ConsoleTab, progress::ProgressTab,
             transcription::TranscriptionTab,
-            visualizer::RecordingDisplayTab,
+            visualizer::VisualizerTab,
         },
         tab_view::TabView,
     },
 };
 
-// This is a concession made to keep the implementation as decoupled as possible.
-// Generics are not possible due to the sized type bound required for egui_dock::TabViewer
-// Each member of WhisperTab must implement TabView, a port of the egui_dock::TabViewer interface
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub enum WhisperTab {
-    RealtimeConfigs(RealtimeConfigsTab),
-    StaticConfigs(StaticConfigsTab),
-    RecordingConfigs(RecordingConfigsTab),
-    TranscriptionDisplay(TranscriptionTab),
-    RecordingDisplay(RecordingDisplayTab),
-    ProgressDisplay(ProgressDisplayTab),
-    ErrorDisplay(ErrorConsoleDisplayTab),
+    Realtime(RealtimeTab),
+    Static(StaticTab),
+    Recording(RecordingTab),
+    Transcription(TranscriptionTab),
+    Visualizer(VisualizerTab),
+    Progress(ProgressTab),
+    Console(ConsoleTab),
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub enum FocusTab {
+    Realtime,
+    Static,
+    Recording,
+    Transcription,
+    Visualizer,
+    Progress,
+    Console,
+}
+
+impl FocusTab {
+    pub fn id(&self) -> String {
+        match self {
+            FocusTab::Realtime => { String::from("Realtime") }
+            FocusTab::Static => { String::from("Static") }
+            FocusTab::Recording => {
+                String::from("Recording")
+            }
+            FocusTab::Transcription => {
+                String::from("Transcription")
+            }
+            FocusTab::Visualizer => {
+                String::from("Visualizer")
+            }
+            FocusTab::Progress => {
+                String::from("Progress")
+            }
+            FocusTab::Console => {
+                String::from("Progress")
+            }
+        }
+    }
 }
 
 impl WhisperTab {
     fn decay(&mut self) -> &mut dyn TabView {
         match self {
-            WhisperTab::RealtimeConfigs(rc) => rc,
-            WhisperTab::StaticConfigs(sc) => sc,
-            WhisperTab::RecordingConfigs(rec) => rec,
-            WhisperTab::TranscriptionDisplay(td) => td,
-            WhisperTab::RecordingDisplay(rd) => rd,
-            WhisperTab::ProgressDisplay(pd) => pd,
-            WhisperTab::ErrorDisplay(ed) => ed,
+            WhisperTab::Realtime(rc) => rc,
+            WhisperTab::Static(sc) => sc,
+            WhisperTab::Recording(rec) => rec,
+            WhisperTab::Transcription(td) => td,
+            WhisperTab::Visualizer(rd) => rd,
+            WhisperTab::Progress(pd) => pd,
+            WhisperTab::Console(ed) => ed,
+        }
+    }
+
+    pub fn matches(&self, tab_type: FocusTab) -> bool {
+        match self {
+            WhisperTab::Realtime(_) => {
+                tab_type == FocusTab::Realtime
+            }
+            WhisperTab::Static(_) => {
+                tab_type == FocusTab::Static
+            }
+            WhisperTab::Recording(_) => {
+                tab_type == FocusTab::Recording
+            }
+            WhisperTab::Transcription(_) => {
+                tab_type == FocusTab::Transcription
+            }
+            WhisperTab::Visualizer(_) => {
+                tab_type == FocusTab::Visualizer
+            }
+            WhisperTab::Progress(_) => {
+                tab_type == FocusTab::Progress
+            }
+            WhisperTab::Console(_) => {
+                tab_type == FocusTab::Console
+            }
         }
     }
 }

@@ -4,15 +4,16 @@ use std::{
 };
 
 use atomic_enum::atomic_enum;
-use biquad::{Biquad, Coefficients, DirectForm2Transposed, ToHertz, Type, Q_BUTTERWORTH_F32};
+use biquad::{Biquad, Coefficients, DirectForm2Transposed, Q_BUTTERWORTH_F32, ToHertz, Type};
 use lazy_static::lazy_static;
-use realfft::num_complex::ComplexFloat;
-use realfft::num_traits::Bounded;
 use realfft::{
     num_complex::Complex32,
     num_traits::{FromPrimitive, NumCast, ToPrimitive, Zero},
     RealFftPlanner, RealToComplex,
 };
+use realfft::num_complex::ComplexFloat;
+use realfft::num_traits::Bounded;
+use strum::{Display, EnumIter};
 
 use crate::utils::constants;
 use crate::utils::errors::{WhisperAppError, WhisperAppErrorType};
@@ -21,14 +22,43 @@ lazy_static! {
     static ref FFT_PLANNER: Mutex<RealFftPlanner<f32>> = Mutex::new(RealFftPlanner::<f32>::new());
 }
 
-// TODO: add an arc'd AnalysisType to the controller for FFTAnalysis visualizer when running
-// realtime + recording
 #[atomic_enum]
-#[derive(PartialEq)]
-enum AnalysisType {
+#[derive(PartialEq, EnumIter, Display)]
+pub enum AnalysisType {
     Waveform = 0,
     Power,
+    #[strum(to_string = "Spectrum Density")]
     SpectrumDensity,
+}
+
+impl AnalysisType {
+    pub fn rotate_clockwise(&self) -> Self {
+        match self {
+            AnalysisType::Waveform => {
+                AnalysisType::Power
+            }
+            AnalysisType::Power => {
+                AnalysisType::SpectrumDensity
+            }
+            AnalysisType::SpectrumDensity => {
+                AnalysisType::Waveform
+            }
+        }
+    }
+
+    pub fn rotate_counterclockwise(&self) -> Self {
+        match self {
+            AnalysisType::Waveform => {
+                AnalysisType::SpectrumDensity
+            }
+            AnalysisType::Power => {
+                AnalysisType::Waveform
+            }
+            AnalysisType::SpectrumDensity => {
+                AnalysisType::Power
+            }
+        }
+    }
 }
 
 fn apply_gain(samples: &mut [f32], gain: f32) {
@@ -181,7 +211,7 @@ pub fn power_analysis(samples: &[f32], result: &mut [f32; constants::NUM_BUCKETS
         None,
         None,
     )
-    .expect("Failed to build frames");
+        .expect("Failed to build frames");
 
     // Init FFT
     let mut planner = FFT_PLANNER.lock().expect("Failed to get FFT Planner mutex");

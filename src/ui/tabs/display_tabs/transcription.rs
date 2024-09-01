@@ -111,7 +111,6 @@ impl tab_view::TabView for TranscriptionTab {
         let static_running = controller.static_running();
         let static_ready = controller.static_ready();
 
-        // TODO: refactor to rwloc
         // UPDATE STATE
         // Handle new text.
         while let Ok(message) = controller.recv_transcription_text() {
@@ -197,7 +196,6 @@ impl tab_view::TabView for TranscriptionTab {
     }
 
     // Right-click tab -> context actions for text operations
-    // TODO: Determine if necessary.
     fn context_menu(
         &mut self,
         _ui: &mut Ui,
