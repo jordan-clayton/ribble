@@ -7,7 +7,8 @@ use egui::ViewportBuilder;
 use egui_extras::install_image_loaders;
 use whisper_realtime::downloader::request::reqwest;
 
-use crate::utils::configs::WorkerType;
+use utils::workers::WorkerType;
+
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::app::WhisperApp,
@@ -29,7 +30,7 @@ fn main() -> Result<(), WhisperAppError> {
         constants::ORGANIZATION,
         constants::APP_ID,
     )
-    .expect("Failed to get proj dir");
+        .expect("Failed to get proj dir");
     let data_dir = proj_dirs.data_dir();
     let mut native_options = eframe::NativeOptions::default();
     let viewport = build_viewport();

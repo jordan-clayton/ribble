@@ -2,9 +2,9 @@ use std::any::Any;
 use std::thread::JoinHandle;
 
 use crate::controller::whisper_app_controller::WhisperAppController;
-use crate::utils::configs::WorkerType;
 use crate::utils::console_message::{ConsoleMessage, ConsoleMessageType};
 use crate::utils::constants;
+use crate::utils::workers::WorkerType;
 
 pub fn get_max_threads() -> std::ffi::c_int {
     match std::thread::available_parallelism() {
@@ -46,7 +46,7 @@ pub fn join_threads_loop(
                         break;
                     }
                 }
-
+                // TODO: refactor -> Send console message with metadata to print to console.
                 if worker == WorkerType::Realtime || worker == WorkerType::Static {
                     // Transcription thread -> send to transcription window.
                     let sender = controller.transcription_text_sender();

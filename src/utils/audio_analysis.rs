@@ -4,15 +4,15 @@ use std::{
 };
 
 use atomic_enum::atomic_enum;
-use biquad::{Biquad, Coefficients, DirectForm2Transposed, Q_BUTTERWORTH_F32, ToHertz, Type};
+use biquad::{Biquad, Coefficients, DirectForm2Transposed, ToHertz, Type, Q_BUTTERWORTH_F32};
 use lazy_static::lazy_static;
+use realfft::num_complex::ComplexFloat;
+use realfft::num_traits::Bounded;
 use realfft::{
     num_complex::Complex32,
     num_traits::{FromPrimitive, NumCast, ToPrimitive, Zero},
     RealFftPlanner, RealToComplex,
 };
-use realfft::num_complex::ComplexFloat;
-use realfft::num_traits::Bounded;
 
 use crate::utils::constants;
 use crate::utils::errors::{WhisperAppError, WhisperAppErrorType};
@@ -22,7 +22,7 @@ lazy_static! {
 }
 
 // TODO: add an arc'd AnalysisType to the controller for FFTAnalysis visualizer when running
-// realtime + recording 
+// realtime + recording
 #[atomic_enum]
 #[derive(PartialEq)]
 enum AnalysisType {
@@ -30,7 +30,6 @@ enum AnalysisType {
     Power,
     SpectrumDensity,
 }
-
 
 fn apply_gain(samples: &mut [f32], gain: f32) {
     for sample in samples.iter_mut() {
@@ -182,7 +181,7 @@ pub fn power_analysis(samples: &[f32], result: &mut [f32; constants::NUM_BUCKETS
         None,
         None,
     )
-        .expect("Failed to build frames");
+    .expect("Failed to build frames");
 
     // Init FFT
     let mut planner = FFT_PLANNER.lock().expect("Failed to get FFT Planner mutex");

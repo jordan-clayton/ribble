@@ -1,7 +1,7 @@
-use catppuccin_egui::{MOCHA, Theme};
+use catppuccin_egui::{Theme, MOCHA};
 use eframe::epaint::Hsva;
-use egui::{lerp, Pos2, Rgba, Sense, Stroke, Ui, vec2};
 use egui::emath::easing::{cubic_out, exponential_in};
+use egui::{lerp, vec2, Pos2, Rgba, Sense, Stroke, Ui};
 
 use crate::utils::constants;
 use crate::utils::constants::FFT_HEIGHT_EXPANSION;
@@ -10,10 +10,19 @@ use crate::utils::constants::FFT_HEIGHT_EXPANSION;
 pub fn draw_fft(ui: &mut Ui, data: &[f32; constants::NUM_BUCKETS], theme: Option<Theme>) {
     let theme = theme.unwrap_or(MOCHA);
     let gradient_stops: Vec<Rgba> = vec![
-        theme.mauve.into(), theme.pink.into(), theme.flamingo.into(), theme.maroon.into(),
-        theme.peach.into(), theme.yellow.into(), theme.green.into(), theme.teal.into(), theme.sky.into(), theme.sapphire.into(), theme.blue.into(), theme.lavender.into(),
+        theme.mauve.into(),
+        theme.pink.into(),
+        theme.flamingo.into(),
+        theme.maroon.into(),
+        theme.peach.into(),
+        theme.yellow.into(),
+        theme.green.into(),
+        theme.teal.into(),
+        theme.sky.into(),
+        theme.sapphire.into(),
+        theme.blue.into(),
+        theme.lavender.into(),
     ];
-
 
     let mouse_state = ui.ctx().input(|i| i.pointer.clone());
     let pos = mouse_state.latest_pos().unwrap_or_default();
@@ -40,15 +49,22 @@ pub fn draw_fft(ui: &mut Ui, data: &[f32; constants::NUM_BUCKETS], theme: Option
     // let all_bars = 0.0 <= expected_column_width;
     let all_bars = minimum_total_spacing >= spacing_threshold;
 
-    let num_columns = if all_bars { constants::NUM_BUCKETS } else { max_num_columns };
+    let num_columns = if all_bars {
+        constants::NUM_BUCKETS
+    } else {
+        max_num_columns
+    };
 
     // Linearly interpolate and map to buckets.
     let r = gradient_stops[grad_index]..=gradient_stops[grad_next];
 
-    let gradient = (0..num_columns).into_iter().map(|i| {
-        let t = i as f32 / num_columns as f32;
-        lerp(r.clone(), t)
-    }).collect::<Vec<_>>();
+    let gradient = (0..num_columns)
+        .into_iter()
+        .map(|i| {
+            let t = i as f32 / num_columns as f32;
+            lerp(r.clone(), t)
+        })
+        .collect::<Vec<_>>();
 
     ui.horizontal_centered(|ui| {
         ui.columns(num_columns, |cols| {
@@ -63,8 +79,10 @@ pub fn draw_fft(ui: &mut Ui, data: &[f32; constants::NUM_BUCKETS], theme: Option
 
 fn fft_bar(ui: &mut Ui, color: Rgba, amp: f32, mouse_position: &Pos2) {
     let available_size = ui.available_size();
-    let max_cell_height = (available_size.y * constants::FFT_MAX_HEIGHT_PROPORTION).min(constants::MAX_FFT_HEIGHT);
-    let min_cell_height = (available_size.y * constants::FFT_MIN_HEIGHT_PROPORTION).max(constants::MIN_FFT_HEIGHT);
+    let max_cell_height =
+        (available_size.y * constants::FFT_MAX_HEIGHT_PROPORTION).min(constants::MAX_FFT_HEIGHT);
+    let min_cell_height =
+        (available_size.y * constants::FFT_MIN_HEIGHT_PROPORTION).max(constants::MIN_FFT_HEIGHT);
 
     let high_color: Rgba = color;
 
@@ -79,11 +97,13 @@ fn fft_bar(ui: &mut Ui, color: Rgba, amp: f32, mouse_position: &Pos2) {
     let color = lerp(low_color..=high_color, color_t);
 
     // Cell is between 10 and 100 px thick (atm);
-    let cell_width = available_size.x.min(constants::FFT_MAX_WIDTH).max(constants::FFT_MIN_WIDTH);
+    let cell_width = available_size
+        .x
+        .min(constants::FFT_MAX_WIDTH)
+        .max(constants::FFT_MIN_WIDTH);
     let desired_size = vec2(cell_width, adjusted_cell_height);
     let (rect, _) = ui.allocate_exact_size(desired_size, Sense::hover());
     let spacing = ui.spacing().item_spacing * 3.0;
-
 
     if ui.is_rect_visible(rect) {
         let hit_test = rect.expand2(spacing);

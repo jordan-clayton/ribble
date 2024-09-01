@@ -1,4 +1,4 @@
-pub(crate) mod console_display_tab;
-pub(crate) mod progress_display_tab;
-pub(crate) mod recording_display_tab;
-pub(crate) mod transcription_display_tab;
+pub(crate) mod console;
+pub(crate) mod progress;
+pub(crate) mod visualizer;
+pub(crate) mod transcription;

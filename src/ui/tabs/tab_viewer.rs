@@ -63,7 +63,6 @@ impl egui_dock::TabViewer for WhisperTabViewer<'_> {
         true
     }
 
-    // TODO: fix sizing
     fn add_popup(&mut self, ui: &mut Ui, surface: SurfaceIndex, node: NodeIndex) {
         let closed_tabs: Vec<String> = self.closed_tabs.keys().cloned().collect();
         ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
@@ -80,5 +79,9 @@ impl egui_dock::TabViewer for WhisperTabViewer<'_> {
 
     fn allowed_in_windows(&self, tab: &mut Self::Tab) -> bool {
         tab.allowed_in_windows()
+    }
+
+    fn scroll_bars(&self, _tab: &Self::Tab) -> [bool; 2] {
+        [false, false]
     }
 }

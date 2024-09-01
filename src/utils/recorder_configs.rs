@@ -2,23 +2,7 @@ use strum::{Display, EnumIter};
 
 use crate::utils::constants;
 
-#[derive(Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter)]
-pub enum LoadingState {
-    NotLoaded,
-    Loading,
-    Loaded,
-}
-
-#[derive(Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter)]
-pub enum WorkerType {
-    Downloading,
-    Saving,
-    Realtime,
-    Static,
-    Recording,
-    ThreadManagement,
-}
-
+// TODO: remove
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum AudioConfigs {
     Realtime(whisper_realtime::configs::Configs),
@@ -26,6 +10,7 @@ pub enum AudioConfigs {
     Recording(RecorderConfigs),
 }
 
+// TODO: remove
 impl AudioConfigs {
     pub fn is_realtime(&self) -> bool {
         matches!(*self, AudioConfigs::Realtime(_))
@@ -40,6 +25,7 @@ impl AudioConfigs {
     }
 }
 
+// TODO: remove
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum AudioConfigType {
     Realtime,

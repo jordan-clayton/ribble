@@ -37,7 +37,6 @@ use crate::{
         init_audio_ring_buffer, init_model, init_realtime_microphone, init_whisper_ctx,
     },
     utils::{
-        configs::{AudioConfigs, AudioConfigType, WorkerType},
         console_message::{ConsoleMessage, ConsoleMessageType},
         constants,
         errors::{WhisperAppError, WhisperAppErrorType},
@@ -46,6 +45,7 @@ use crate::{
             write_audio_sample,
         },
         progress::Progress,
+        recorder_configs::{AudioConfigs, AudioConfigType},
         sdl_audio_wrapper::SdlAudioWrapper,
     },
 };
@@ -53,8 +53,9 @@ use crate::controller::utils::transcriber_utilities::init_microphone;
 use crate::utils::audio_analysis::{
     bandpass_filter, f_central, frequency_analysis, from_f32_normalized, to_f32_normalized,
 };
-use crate::utils::configs::{RecorderConfigs, RecordingFormat};
 use crate::utils::file_mgmt::{decode_audio, get_audio_reader};
+use crate::utils::recorder_configs::{RecorderConfigs, RecordingFormat};
+use crate::utils::workers::WorkerType;
 
 // TODO: Remaining impls;
 
@@ -92,11 +93,12 @@ impl WhisperAppController {
         self.0.gpu_support.load(Ordering::Relaxed)
     }
 
+    // TODO: trylock
     pub fn get_system_theme(&self) -> Option<eframe::Theme> {
         self.0
             .system_theme
             .lock()
-            .expect("Failed to get mutex")
+            .expect("Mutex poisoned")
             .clone()
     }
 
@@ -243,17 +245,14 @@ impl WhisperAppController {
         self.0.transcription_text_sender.clone()
     }
 
+    // TODO: Remove & handle internally.
     pub fn recv_transcription_text(
         &self,
     ) -> Result<Result<(String, bool), WhisperRealtimeError>, TryRecvError> {
         self.0.transcription_text_receiver.try_recv()
     }
 
-    // pub fn write_fft_buffer(&self, new_fft: &[f32; constants::NUM_BUCKETS]) {
-    //     let mut guard = self.0.fft_buffer.lock().unwrap();
-    //     guard.copy_from_slice(new_fft);
-    // }
-
+    // TODO: refactor to RW lock.
     pub fn read_fft_buffer(&self, dest: &mut [f32; constants::NUM_BUCKETS]) {
         let guard = self.0.fft_buffer.try_lock();
         match guard {
@@ -268,6 +267,9 @@ impl WhisperAppController {
             }
         }
     }
+
+    // TODO: finish.
+    pub fn read_transcription_buffer(&self, dest: &mut Vec<String>) {}
 
     pub fn send_thread_handle(
         &self,

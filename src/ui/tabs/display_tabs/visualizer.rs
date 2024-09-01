@@ -1,8 +1,8 @@
 use std::{
     path::PathBuf,
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
 };
 
@@ -10,15 +10,12 @@ use egui::{Button, CentralPanel, Frame, Grid, Sense, SidePanel, TopBottomPanel, 
 use egui_dock::{NodeIndex, SurfaceIndex};
 use sdl2::log::log;
 
+use crate::ui::widgets::fft_visualizer::draw_fft;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
-    ui::{
-        tabs::tab_view,
-        widgets::recording_icon::recording_icon,
-    },
+    ui::{tabs::tab_view, widgets::recording_icon::recording_icon},
     utils::{audio_analysis, constants, preferences},
 };
-use crate::ui::widgets::fft_visualizer::draw_fft;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RecordingDisplayTab {
@@ -155,36 +152,38 @@ impl tab_view::TabView for RecordingDisplayTab {
             });
         });
 
-        TopBottomPanel::top("header").resizable(false).show_inside(ui, |ui| {
-            let (icon, msg) = if accepting_speech {
-                (
-                    recording_icon(egui::Rgba::from(theme.red), true, time_scale),
-                    "Recording in progress.",
-                )
-            } else if recorder_running {
-                (
-                    recording_icon(egui::Rgba::from(theme.green), true, time_scale),
-                    "Preparing to record.",
-                )
-            } else if mic_occupied {
-                (
-                    recording_icon(egui::Rgba::from(theme.yellow), true, time_scale),
-                    "Microphone in use.",
-                )
-            } else {
-                (
-                    recording_icon(egui::Rgba::from(theme.green), false, time_scale),
-                    "Ready to record.",
-                )
-            };
+        TopBottomPanel::top("header")
+            .resizable(false)
+            .show_inside(ui, |ui| {
+                let (icon, msg) = if accepting_speech {
+                    (
+                        recording_icon(egui::Rgba::from(theme.red), true, time_scale),
+                        "Recording in progress.",
+                    )
+                } else if recorder_running {
+                    (
+                        recording_icon(egui::Rgba::from(theme.green), true, time_scale),
+                        "Preparing to record.",
+                    )
+                } else if mic_occupied {
+                    (
+                        recording_icon(egui::Rgba::from(theme.yellow), true, time_scale),
+                        "Microphone in use.",
+                    )
+                } else {
+                    (
+                        recording_icon(egui::Rgba::from(theme.green), false, time_scale),
+                        "Ready to record.",
+                    )
+                };
 
-            ui.horizontal(|ui| {
-                ui.add(icon);
-                ui.label(msg);
+                ui.horizontal(|ui| {
+                    ui.add(icon);
+                    ui.label(msg);
+                });
+                let space = ui.spacing().item_spacing.y;
+                ui.add_space(space);
             });
-            let space = ui.spacing().item_spacing.y;
-            ui.add_space(space);
-        });
 
         let visuals = ui.visuals();
         let bg_col = visuals.extreme_bg_color;
@@ -209,7 +208,8 @@ impl tab_view::TabView for RecordingDisplayTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

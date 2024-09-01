@@ -48,10 +48,8 @@ impl tab_view::TabView for ErrorConsoleDisplayTab {
         } = self;
 
         // Get errors
-        // TODO: make a while loop
-        let new_error = controller.recv_console_message();
         let mut len = console_messages.len();
-        if let Ok(message) = new_error {
+        while let Ok(message) = controller.recv_console_message() {
             console_messages.push_back(message);
             len += 1;
 
@@ -65,7 +63,6 @@ impl tab_view::TabView for ErrorConsoleDisplayTab {
         let bg_col = visuals.extreme_bg_color;
         let frame = Frame::default().fill(bg_col);
         CentralPanel::default().frame(frame).show_inside(ui, |ui| {
-            // TODO: determine whether to just use this approach with the iterator.
             ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
                 for message in console_messages.range(..) {
                     ui.monospace(message.to_string());

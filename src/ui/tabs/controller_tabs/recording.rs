@@ -5,10 +5,10 @@ use strum::IntoEnumIterator;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     utils::{
-        configs::{
+        constants,
+        recorder_configs::{
             AudioConfigs, BufferSize, Channel, RecorderConfigs, RecordingFormat, SampleRate,
         },
-        constants,
     },
 };
 use crate::ui::tabs::tab_view;
@@ -72,11 +72,9 @@ impl tab_view::TabView for RecordingConfigsTab {
                 .expect("Configs channel closed.");
         }
 
-        // *** flag for enabled
         let recorder_running = controller.recorder_running();
 
         ScrollArea::vertical().show(ui, |ui| {
-            // Grid of configs + button for default.
             ui.add_enabled_ui(!recorder_running, |ui| {
                 ui.label("Configuration");
                 Grid::new("recording_configs")

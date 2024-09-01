@@ -1,5 +1,5 @@
 use egui::{
-    Color32, emath::easing::quadratic_out, lerp, Response, Rgba, Sense, Stroke, Ui, vec2, Widget,
+    emath::easing::quadratic_out, lerp, vec2, Color32, Response, Rgba, Sense, Stroke, Ui, Widget,
 };
 
 use crate::utils::constants;

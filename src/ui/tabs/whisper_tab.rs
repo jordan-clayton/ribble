@@ -4,14 +4,14 @@ use egui_dock::{NodeIndex, SurfaceIndex};
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::{
-        config_tabs::{
-            realtime_configs_tab::RealtimeConfigsTab, recording_configs_tab::RecordingConfigsTab,
-            static_configs_tab::StaticConfigsTab,
+        controller_tabs::{
+            r#static::StaticConfigsTab, realtime::RealtimeConfigsTab,
+            recording::RecordingConfigsTab,
         },
         display_tabs::{
-            console_display_tab::ErrorConsoleDisplayTab, progress_display_tab::ProgressDisplayTab,
-            recording_display_tab::RecordingDisplayTab,
-            transcription_display_tab::TranscriptionTab,
+            console::ErrorConsoleDisplayTab, progress::ProgressDisplayTab,
+            transcription::TranscriptionTab,
+            visualizer::RecordingDisplayTab,
         },
         tab_view::TabView,
     },

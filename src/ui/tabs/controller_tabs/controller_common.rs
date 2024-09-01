@@ -1,5 +1,6 @@
 use std::{path::PathBuf, thread};
 
+use catppuccin_egui::Theme;
 use egui::{Button, Checkbox, ComboBox, Slider, Ui};
 use whisper_realtime::model::{Model, ModelType};
 
@@ -7,55 +8,28 @@ use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::widgets::icons::ok_icon,
     utils::{
-        configs::{AudioConfigType, WorkerType},
-        constants,
-        errors::{WhisperAppError, WhisperAppErrorType},
-        file_mgmt::copy_data,
-        preferences::get_app_theme,
+        constants
+        ,
+        file_mgmt::copy_data
+
+        ,
     },
 };
 use crate::ui::widgets::icons::warning_icon;
+use crate::utils::workers::WorkerType;
 
-// I'm not 100% sold on this - It might be worth the heap allocation?
-// TODO: Might also be better to avoid the branching & supply the boolean + callback.
-// TODO: Possibly use icon-buttons for the open/download?
 pub fn model_row(
     ui: &mut Ui,
     model: &mut ModelType,
-    configs_type: AudioConfigType,
+    m_model: &Model,
+    downloaded: bool,
     controller: WhisperAppController,
     available_models: &[ModelType],
+    theme: Option<Theme>,
 ) {
-    let c_controller = controller.clone();
-    let (ready, update_ready) = match configs_type {
-        AudioConfigType::Realtime => {
-            let ready = controller.realtime_ready();
-            let f = move |r| c_controller.update_realtime_ready(r);
-            let f: Box<dyn Fn(bool)> = Box::new(f);
-            (ready, f)
-        }
-        AudioConfigType::Static => {
-            let ready = controller.static_ready();
-            let f = move |r| c_controller.update_static_ready(r);
-            let f: Box<dyn Fn(bool)> = Box::new(f);
-            (ready, f)
-        }
-        _ => {
-            let err = WhisperAppError::new(
-                WhisperAppErrorType::ParameterError,
-                String::from("Invalid config type passed to model ui builder"),
-            );
-            panic!("{}", err);
-        }
-    };
-
     let downloading = controller.is_downloading();
-    let dir = eframe::storage_dir(constants::APP_ID).expect("Failed to get data dir.");
-    let m_model = Model::new_with_type_and_dir(*model, dir);
-    let model_downloaded = m_model.is_downloaded();
 
-    let system_theme = controller.get_system_theme();
-    let theme = get_app_theme(system_theme);
+    let model_path = m_model.file_path();
 
     ui.horizontal(|ui| {
         ui.label("Model:").on_hover_ui(|ui| {
@@ -63,20 +37,13 @@ pub fn model_row(
             ui.label("Select the desired model for transcribing");
         });
 
-        if model_downloaded {
-            if !ready {
-                update_ready(true);
-            }
-
-            ui.add(ok_icon(None, Some(theme))).on_hover_ui(|ui| {
+        if downloaded {
+            ui.add(ok_icon(None, theme)).on_hover_ui(|ui| {
                 ui.style_mut().interaction.selectable_labels = true;
                 ui.label("Model found.");
             });
         } else {
-            if ready {
-                update_ready(false);
-            }
-            ui.add(warning_icon(None, Some(theme))).on_hover_ui(|ui| {
+            ui.add(warning_icon(None, theme)).on_hover_ui(|ui| {
                 ui.style_mut().interaction.selectable_labels = true;
                 ui.label("Model not found");
             });
@@ -91,8 +58,6 @@ pub fn model_row(
                     ui.selectable_value(model, *m, m.to_string());
                 }
             });
-
-        let model_path_open = m_model.file_path();
 
         if ui
             .button("Open")
@@ -115,7 +80,7 @@ pub fn model_row(
                 .pick_file()
             {
                 let from = p.clone();
-                let to = model_path_open.clone();
+                let to = model_path.to_path_buf();
                 let copy_thread = thread::spawn(move || {
                     let success = copy_data(&from, &to);
                     match success {

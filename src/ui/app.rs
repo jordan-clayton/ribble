@@ -1,19 +1,22 @@
 use std::collections::HashMap;
 
+use catppuccin_egui::Theme;
+use egui::Visuals;
 use egui_dock::{DockArea, DockState, NodeIndex, Style};
 
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::{
-        config_tabs::{realtime_configs_tab, recording_configs_tab, static_configs_tab},
+        controller_tabs::{r#static, realtime, recording},
         display_tabs::{
-            console_display_tab, progress_display_tab, recording_display_tab,
-            transcription_display_tab,
+            console, progress, transcription,
+            visualizer,
         },
         tab_viewer, whisper_tab,
     },
     utils::preferences,
 };
+use crate::ui::tabs::whisper_tab::WhisperTab;
 
 pub struct WhisperApp {
     // These need to be serialized
@@ -49,25 +52,25 @@ impl WhisperApp {
     fn default_layout(controller: WhisperAppController) -> Self {
         let closed_tabs = HashMap::new();
 
-        let td = whisper_tab::WhisperTab::TranscriptionDisplay(
-            transcription_display_tab::TranscriptionTab::default(),
+        let td = WhisperTab::TranscriptionDisplay(
+            transcription::TranscriptionTab::default(),
         );
         let rd = whisper_tab::WhisperTab::RecordingDisplay(
-            recording_display_tab::RecordingDisplayTab::default(),
+            visualizer::RecordingDisplayTab::default(),
         );
         let pd = whisper_tab::WhisperTab::ProgressDisplay(
-            progress_display_tab::ProgressDisplayTab::default(),
+            progress::ProgressDisplayTab::default(),
         );
         let ed = whisper_tab::WhisperTab::ErrorDisplay(
-            console_display_tab::ErrorConsoleDisplayTab::default(),
+            console::ErrorConsoleDisplayTab::default(),
         );
         let rc = whisper_tab::WhisperTab::RealtimeConfigs(
-            realtime_configs_tab::RealtimeConfigsTab::default(),
+            realtime::RealtimeConfigsTab::default(),
         );
         let st =
-            whisper_tab::WhisperTab::StaticConfigs(static_configs_tab::StaticConfigsTab::default());
+            whisper_tab::WhisperTab::StaticConfigs(r#static::StaticConfigsTab::default());
         let rec = whisper_tab::WhisperTab::RecordingConfigs(
-            recording_configs_tab::RecordingConfigsTab::default(),
+            recording::RecordingConfigsTab::default(),
         );
         let mut tree: DockState<whisper_tab::WhisperTab> = DockState::new(vec![td, rd]);
 
@@ -93,6 +96,12 @@ impl eframe::App for WhisperApp {
         let theme = preferences::get_app_theme(system_theme);
 
         catppuccin_egui::set_theme(ctx, theme);
+
+        // Catppuccin uses the same color for faint_bg and inactive widgets.
+        // This causes issues with striped layouts.
+        let mut visuals = ctx.style().visuals.clone();
+        tweak_visuals(&mut visuals, theme);
+        ctx.set_visuals(visuals);
 
         // Repaint continuously when running a worker.
         if self.controller.is_working() {
@@ -124,6 +133,24 @@ impl eframe::App for WhisperApp {
             self.tree.set_focused_node_and_surface((surface, node));
             self.tree.push_to_focused_leaf(tab);
         });
+
+        // If switching to static
+        // TODO: SWAP THIS FLAG.
+        // if self.controller.save_recording_ready() {
+        //     let st = StaticConfigs(StaticConfigsTab::default());
+        //     // Find the tab.
+        //     let tab_location = self.tree.find_tab(&st);
+        //     if let Some(location) = tab_location {
+        //         self.tree.set_active_tab(location);
+        //     } else {
+        //         // This shouldn't ever happen - closed tabs are stored.
+        //         // In the event the tab is somehow lost from the tree, make a new one.
+        //         self.tree.push_to_focused_leaf(st);
+        //     }
+        //
+        //     // TODO: once flag
+        //     // Set the flag.
+        // }
     }
 
     // TODO: Restore once testing finished.
@@ -135,4 +162,11 @@ impl eframe::App for WhisperApp {
     fn persist_egui_memory(&self) -> bool {
         false
     }
+}
+
+// This is a fix to deal with surface0 being used for both widgets
+// and faint_bg_color. Sliders and checkboxes get lost when using
+// striped layouts.
+fn tweak_visuals(visuals: &mut Visuals, theme: Theme) {
+    visuals.faint_bg_color = theme.mantle
 }
