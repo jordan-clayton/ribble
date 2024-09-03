@@ -131,21 +131,28 @@ impl tab_view::TabView for RealtimeTab {
                             ui.label("Set realtime timeout? Set to 0 to disable");
                         });
 
-                        let mut rt_timeout = *realtime_timeout as u64;
+                        let mut rt_timeout = *realtime_timeout as u64 / 1000;
 
+                        // MAX_REALTIME_TIMEOUT is in seconds.
+                        // TODO: test the step-by + drag velocity
                         ui.horizontal(|ui| {
-                            if ui.add(Slider::new(&mut rt_timeout, 0..=constants::MAX_REALTIME_TIMEOUT as u64)
-                                // Step by seconds: TODO: consider changing as needed
-                                .step_by(1000f64))
+                            if ui.add(Slider::new(&mut rt_timeout, 0..=constants::MAX_REALTIME_TIMEOUT)
+                                .step_by(1.0)
+                                .drag_value_speed(1.0)
+                            )
                                 .changed() {
-                                *realtime_timeout = rt_timeout as u128;
+                                *realtime_timeout = (rt_timeout * 1000) as u128;
+                                #[cfg(debug_assertions)]
+                                log(&format!("realtime_timeout: {}", realtime_timeout));
                             };
 
                             ui.label({
-                                let h = *realtime_timeout / (60 * 60);
-                                let m = (*realtime_timeout / 60) % 60;
-                                let s = *realtime_timeout % 60;
-                                format!("{h:02}H : {m:02}M : {s:02}S:")
+                                let millis = *realtime_timeout;
+                                let seconds = millis / 1000;
+                                let h = seconds / (60 * 60);
+                                let m = (seconds / 60) % 60;
+                                let s = seconds % 60;
+                                format!("{h:02}h : {m:02}m : {s:02}s")
                             });
                         });
                         ui.end_row();
@@ -155,53 +162,53 @@ impl tab_view::TabView for RealtimeTab {
                             ui.label("Realtime audio is processed in chunks, (in ms). Tweak this value to improve transcription accuracy. Recommended: 10s / 10000ms");
                         });
 
-                        // NOTE: THIS CODING IS CURRENTLY DUPLICATED FOR PHRASE TIMEOUT. REQUIREMENTS MAY CHANGE & FACTORING OUT HAS LITTLE UTILITY AT THIS TIME.
-                        ui.horizontal(|ui| {
-                            ui.add(Slider::new(audio_sample_ms, constants::MIN_AUDIO_CHUNK_SIZE..=constants::MAX_AUDIO_CHUNK_SIZE)
-                                .step_by(100f64));
-                            ui.label({
-                                // TODO: if precision is weird, use f64
-                                let s = (*audio_sample_ms as f32) / 1000f32;
-                                format!("{s:.3} seconds")
-                            })
-                        });
+                        let mut sample_ms = *audio_sample_ms as f32 / 1000.0;
+                        if ui.add(Slider::new(&mut sample_ms, constants::MIN_AUDIO_CHUNK_SIZE..=constants::MAX_AUDIO_CHUNK_SIZE)
+                            .step_by(0.5).suffix("s")).changed() {
+                            *audio_sample_ms = (sample_ms * 1000.0) as usize;
+
+                            #[cfg(debug_assertions)]
+                            log(&format!("audio_sample_ms: {}", audio_sample_ms));
+                        }
                         ui.end_row();
 
-                        // Phrase timeout (in ms) Min: 2s? Max: 10s?
-                        ui.label("Phrase Timeout Size").on_hover_ui(|ui| {
-                            ui.label("Phrase timeout is the estimated length of time per sentence. Tweak this value to improve accuracy and reduce accidental output duplication. Recommended: 3s / 3000ms");
+                        let mut slider_phrase_timeout = *phrase_timeout as f32 / 1000.0;
+
+                        ui.label("Phrase Timeout").on_hover_ui(|ui| {
+                            ui.label("Estimated length of time per sentence/phrase. Tweak this value to improve accuracy and reduce accidental output duplication. Recommended: 3s");
                         });
-                        ui.horizontal(|ui| {
-                            ui.add(Slider::new(phrase_timeout, constants::MAX_PHRASE_TIMEOUT..=constants::MAX_PHRASE_TIMEOUT)
-                                .step_by(100f64));
-                            ui.label({
-                                let s = (*phrase_timeout as f32) / 1000f32;
-                                format!("{s:.3} seconds")
-                            })
-                        });
+                        if ui.add(Slider::new(&mut slider_phrase_timeout, constants::MIN_PHRASE_TIMEOUT..=constants::MAX_PHRASE_TIMEOUT)
+                            .step_by(0.5).suffix("s")).changed() {
+                            *phrase_timeout = (slider_phrase_timeout * 1000.0) as usize;
+                            #[cfg(debug_assertions)]
+                            log(&format!("phrase_timeout: {}", phrase_timeout));
+                        }
                         ui.end_row();
-                        // Voice Activity Detection chunk size (in ms)
+
+                        // Voice Activity Detection chunk size (UI in Seconds), internally ms.
                         ui.label("Voice Activity Sample Size").on_hover_ui(|ui| {
-                            ui.label("Voice activity is processed in small sample chunks. Tweak this value to improve detection accuracy. Recommended: 300ms");
+                            ui.label("Voice activity is processed in small sample chunks. Tweak this value to improve detection accuracy. Recommended: 0.3s");
                         });
+
+                        let mut vad_sec = *vad_sample_ms as f32 / 1000.0;
+
                         ui.horizontal(|ui| {
-                            ui.add(Slider::new(vad_sample_ms, constants::MIN_VAD_SAMPLE_MS..=constants::MAX_VAD_SAMPLE_MS).step_by(10f64));
-                            ui.label({
-                                let ms = (*vad_sample_ms as f32) / 1000f32;
-                                format!("{ms:04} ms")
-                            })
+                            if ui.add(Slider::new(&mut vad_sec, constants::MIN_VAD_SEC..=constants::MAX_VAD_SEC).step_by(0.05).suffix("s")).changed() {
+                                *vad_sample_ms = (vad_sec * 1000.0) as usize;
+                                #[cfg(debug_assertions)]
+                                log(&format!("vad_ms: {}", vad_sample_ms));
+                            }
                         });
                         ui.end_row();
                         // Voice Activity probability threshold
                         // Label
-                        ui.label("Voice Detection Probability").on_hover_ui(|ui| {
+                        ui.label("VAD Probability Threshold").on_hover_ui(|ui| {
                             ui.label("Set the minimum probability threshold for detecting speech. Tweak to improve detection accuracy. Recommended: 65%-80%");
                         });
-                        // This is represented in percentages to be slightly more intuitive.
                         ui.add(Slider::new(voice_probability_threshold, constants::MIN_VAD_PROBABILITY..=constants::MAX_VAD_PROBABILITY)
                             .custom_formatter(|n, _| {
                                 let p = n * 100f64;
-                                format!("{p:.20}")
+                                format!("{p:0.2}")
                             }).suffix("%")
                             .custom_parser(|s| {
                                 let str = s.chars().filter(|c| c.is_numeric() || *c == '.').collect::<String>();

@@ -9,13 +9,16 @@ pub const BLANK_SEPARATOR: f32 = 8.0;
 pub const DEFAULT_CONSOLE_HISTORY_SIZE: usize = 35;
 
 // 2 hours, in ms.
-pub const MAX_REALTIME_TIMEOUT: u128 = Duration::new(7200, 0).as_millis();
+pub const MAX_REALTIME_TIMEOUT: u64 = (Duration::new(7200, 0).as_millis() / 1000) as u64;
 
-pub const MIN_AUDIO_CHUNK_SIZE: usize = 2000;
-pub const MAX_AUDIO_CHUNK_SIZE: usize = 30000;
-pub const MAX_PHRASE_TIMEOUT: usize = 10000;
-pub const MIN_VAD_SAMPLE_MS: usize = 100;
-pub const MAX_VAD_SAMPLE_MS: usize = 1000;
+// NOTE: these are in seconds due to slider scaling.
+pub const MIN_AUDIO_CHUNK_SIZE: f32 = 2.0;
+pub const MAX_AUDIO_CHUNK_SIZE: f32 = 30.0;
+pub const MIN_PHRASE_TIMEOUT: f32 = 0.5;
+pub const MAX_PHRASE_TIMEOUT: f32 = 10.0;
+
+pub const MIN_VAD_SEC: f32 = 0.1;
+pub const MAX_VAD_SEC: f32 = 1.0;
 pub const MIN_VAD_PROBABILITY: f32 = 0.5;
 pub const MAX_VAD_PROBABILITY: f32 = 0.9;
 
