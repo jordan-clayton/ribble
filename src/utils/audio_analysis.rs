@@ -167,12 +167,15 @@ pub fn normalized_waveform(samples: &[f32], result: &mut [f32; constants::NUM_BU
         "Insufficient samples length: {}",
         len
     );
+
+    let mut audio_samples = samples.to_vec();
     let chunk_size = (len / constants::NUM_BUCKETS).max(1);
-    let mut max_amp = 0.0;
-    let mut wave_form: Vec<f32> = samples
-        .chunks(chunk_size)
+    let mut max_amp = 1.0;
+    let mut wave_form: Vec<f32> = audio_samples
+        .chunks_mut(chunk_size)
         .map(|c| {
-            let avg_amp = c.iter().sum::<f32>() / c.len() as f32;
+            apply_gain(c, constants::WAVEFORM_GAIN);
+            let avg_amp = (c.iter().sum::<f32>() / c.len() as f32).abs();
             if avg_amp > max_amp {
                 max_amp = avg_amp;
             }
@@ -192,7 +195,7 @@ pub fn normalized_waveform(samples: &[f32], result: &mut [f32; constants::NUM_BU
 
     debug_assert!(
         wave_form.iter().all(|n| *n >= 0.0 && *n <= 1.0),
-        "Failed to normalize"
+        "Failed to normalize {:?}", &wave_form
     );
 
     result.copy_from_slice(&wave_form);
@@ -219,7 +222,7 @@ pub fn power_analysis(samples: &[f32], result: &mut [f32; constants::NUM_BUCKETS
     let mut input = fft.make_input_vec();
     let mut output = fft.make_output_vec();
 
-    let mut max_amp = 0.0;
+    let mut max_amp = 1.0;
     let mut power_samples: Vec<f32> = frames
         .iter_mut()
         .map(|frame| {
@@ -240,7 +243,7 @@ pub fn power_analysis(samples: &[f32], result: &mut [f32; constants::NUM_BUCKETS
         .collect();
 
     for amp in power_samples.iter_mut() {
-        *amp = *amp / max_amp;
+        *amp = (*amp / max_amp).max(0.0);
     }
 
     debug_assert!(
@@ -271,6 +274,9 @@ pub fn frequency_analysis(
     let mut input = fft.make_input_vec();
     let mut output = fft.make_output_vec();
 
+    let mut max_amp = 1.0;
+
+    // TODO: Determine whether gain is necessary here. Seems more accurate without.
     for frame in frames.iter_mut() {
         process_fft(frame, fft.clone(), &mut input, &mut output);
 
@@ -281,6 +287,7 @@ pub fn frequency_analysis(
         let log_min = min_freq.log10();
         let log_max = max_freq.log10();
         let log_range = log_max - log_min;
+
 
         // Compute edges
         let bucket_edges: Vec<f64> = (0..constants::NUM_BUCKETS + 1)
@@ -297,16 +304,17 @@ pub fn frequency_analysis(
             for j in 0..constants::NUM_BUCKETS {
                 if freq >= bucket_edges[j] && freq < bucket_edges[j + 1] {
                     result[j] += value.norm_sqr();
+                    if result[j] > max_amp {
+                        max_amp = result[j];
+                    }
                 }
             }
         }
     }
 
-    // Normalize.
-    let max = result.iter().fold(1.0, |acc: f32, n| acc.max(*n));
 
     for res in result.iter_mut() {
-        *res = *res / max;
+        *res = *res / max_amp;
     }
 
     debug_assert!(

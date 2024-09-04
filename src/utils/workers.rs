@@ -8,6 +8,7 @@ pub enum WorkerType {
     Realtime,
     Static,
     Recording,
+    IO,
     ThreadManagement,
 }
 

@@ -13,6 +13,7 @@ pub fn get_max_threads() -> std::ffi::c_int {
     }
 }
 
+// TODO: revisit once proper error handling.
 pub fn join_threads_loop(
     msg_queue: crossbeam::channel::Receiver<(
         WorkerType,
@@ -46,20 +47,9 @@ pub fn join_threads_loop(
                         break;
                     }
                 }
-                // TODO: refactor -> Send console message with metadata to print to console.
-                if worker == WorkerType::Realtime || worker == WorkerType::Static {
-                    // Transcription thread -> send to transcription window.
-                    let sender = controller.transcription_text_sender();
-                    sender
-                        .send(Ok((String::from(constants::CLEAR_MSG), true)))
-                        .expect("Transcription Channel Closed");
-                    sender
-                        .send(Ok((res, true)))
-                        .expect("Transcription Channel Closed");
-                } else {
-                    let msg = ConsoleMessage::new(ConsoleMessageType::Status, res);
-                    send_console_msg(msg, controller.clone());
-                }
+
+                let msg = ConsoleMessage::new(ConsoleMessageType::Status, res);
+                send_console_msg(msg, controller.clone());
             }
             // Channel has closed.
             Err(_) => {
@@ -69,6 +59,8 @@ pub fn join_threads_loop(
     }
 }
 
+// TODO: figure out a way to handle without panicking.
+// Possibly a flag/MSG to catch in the Update loop.
 fn send_console_msg(msg: ConsoleMessage, controller: WhisperAppController) {
     controller
         .send_console_message(msg)

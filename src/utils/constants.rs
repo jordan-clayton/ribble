@@ -44,13 +44,15 @@ pub const FFT_MIN_HEIGHT_PROPORTION: f32 = 0.10;
 pub const FFT_MAX_WIDTH: f32 = 100.0;
 pub const FFT_MIN_WIDTH: f32 = 8.0;
 pub const FFT_GAIN: f32 = 30.0;
+pub const WAVEFORM_GAIN: f32 = FFT_GAIN / 2.0;
 
 pub const APP_ID: &str = "WhisperGUI";
 pub const QUALIFIER: &str = "com";
 pub const ORGANIZATION: &str = "Jordan";
 
 pub const CLEAR_MSG: &str = "[CLEAR]";
-pub const GO_MSG: &str = "[START SPEAKING]";
+pub const GO_MSG: &str = "[START SPEAKING]\n";
+pub const STOP_MSG: &str = "\n[END TRANSCRIPTION]\n";
 pub const CLOSE_MSG: &str = "[APP CLOSE]";
 
 pub const TEMP_FILE: &str = "tmp.wav";

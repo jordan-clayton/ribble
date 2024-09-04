@@ -7,8 +7,8 @@ use std::{
 use hound::{Sample, WavReader, WavSpec, WavWriter};
 use symphonia::{
     core::{
-        audio::{Layout, SampleBuffer},
-        codecs::{Decoder, DecoderOptions, CODEC_TYPE_NULL},
+        audio::SampleBuffer,
+        codecs::{CODEC_TYPE_NULL, Decoder, DecoderOptions},
         errors::Error,
         formats::{FormatOptions, FormatReader},
         io::MediaSourceStream,
@@ -140,15 +140,6 @@ pub fn get_audio_reader(
         return Err(error);
     }
 
-    let decoder = decoder;
-    if let Err(e) = decoder.as_ref() {
-        let error = WhisperAppError::new(
-            WhisperAppErrorType::ParameterError,
-            format!("Failed to get audio decoder. Error: {}", e),
-        );
-        return Err(error);
-    }
-
     let decoder = decoder.unwrap();
 
     let track_id = track.id;
@@ -165,32 +156,6 @@ pub fn decode_audio(
 ) -> Result<Vec<f32>, WhisperAppError> {
     let mut samples = vec![];
     let mut sample_buf = None;
-    let channel_layout = decoder.codec_params().channel_layout;
-    if channel_layout.is_none() {
-        let error = WhisperAppError::new(
-            WhisperAppErrorType::ParameterError,
-            String::from("Decoder failed to get channel layout"),
-        );
-        return Err(error);
-    }
-    let channel_layout = channel_layout.unwrap();
-
-    let in_mono = match channel_layout {
-        Layout::Mono => Ok(true),
-        Layout::Stereo => Ok(false),
-        _ => {
-            let error = WhisperAppError::new(
-                WhisperAppErrorType::ParameterError,
-                String::from("Invalid channel format"),
-            );
-            Err(error)
-        }
-    };
-
-    if let Err(e) = in_mono.as_ref() {
-        return Err(e.clone());
-    }
-    let in_mono = in_mono.unwrap();
 
     loop {
         let packet = match reader.next_packet() {
@@ -231,6 +196,10 @@ pub fn decode_audio(
         // Decode the packet into audio samples.
         match decoder.decode(&packet) {
             Ok(audio_buf) => {
+                let num_channels = audio_buf.spec().channels.iter().count();
+
+                let in_mono = num_channels == 1;
+
                 if sample_buf.is_none() {
                     let spec = *audio_buf.spec();
                     let duration = audio_buf.capacity() as u64;

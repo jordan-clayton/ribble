@@ -84,6 +84,11 @@ impl tab_view::TabView for VisualizerTab {
         // Smooth the current position towards tgt
         audio_analysis::smoothing(current, target, dt);
 
+        // Force a repaint if the amplitudes are not zero.
+        if current.iter().any(|f| (*f - 0.0) >= f32::EPSILON) {
+            ui.ctx().request_repaint();
+        }
+
         let system_theme = controller.get_system_theme();
         let theme = preferences::get_app_theme(system_theme);
         let time_scale = Some(constants::RECORDING_ANIMATION_TIMESCALE);

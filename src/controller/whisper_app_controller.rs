@@ -1,3 +1,4 @@
+// TODO: clean up imports.
 use std::{
     any::Any,
     path::PathBuf,
@@ -11,6 +12,7 @@ use std::any::TypeId;
 use std::path::Path;
 use std::sync::RwLock;
 
+use arboard::Clipboard;
 use crossbeam::channel::{
     bounded, Receiver, RecvError, Sender, SendError, TryRecvError, unbounded,
 };
@@ -19,6 +21,7 @@ use hound::{Sample, SampleFormat, WavSpec};
 use nvml_wrapper::{cuda_driver_version_major, cuda_driver_version_minor};
 use realfft::num_traits::{Bounded, FromPrimitive, NumCast, Zero};
 use sdl2::audio::AudioSpecDesired;
+use sdl2::log::log;
 use tokio::runtime::Handle;
 use whisper_realtime::{
     downloader::{
@@ -50,9 +53,11 @@ use crate::{
         sdl_audio_wrapper::SdlAudioWrapper,
     },
 };
+// TODO: nest imports
 use crate::controller::utils::transcriber_utilities::init_microphone;
 use crate::ui::tabs::whisper_tab::FocusTab;
-use crate::utils::audio_analysis::{AnalysisType, AtomicAnalysisType, bandpass_filter, f_central, frequency_analysis, from_f32_normalized, to_f32_normalized};
+use crate::utils::audio_analysis::{AnalysisType, AtomicAnalysisType, bandpass_filter, f_central, frequency_analysis, from_f32_normalized, normalized_waveform, power_analysis, to_f32_normalized};
+use crate::utils::errors::{WhisperAppError, WhisperAppErrorType};
 use crate::utils::file_mgmt::{decode_audio, get_audio_reader};
 use crate::utils::recorder_configs::{RecorderConfigs, RecordingFormat};
 use crate::utils::workers::WorkerType;
@@ -252,14 +257,7 @@ impl WhisperAppController {
         self.0.transcription_text_sender.clone()
     }
 
-    // TODO: Remove & handle internally.
-    pub fn recv_transcription_text(
-        &self,
-    ) -> Result<Result<(String, bool), WhisperRealtimeError>, TryRecvError> {
-        self.0.transcription_text_receiver.try_recv()
-    }
 
-    // TODO: refactor to RW lock.
     pub fn read_fft_buffer(&self, dest: &mut [f32; constants::NUM_BUCKETS]) {
         let guard = self.0.visualizer_buffer.try_read();
         match guard {
@@ -269,8 +267,8 @@ impl WhisperAppController {
             Err(TryLockError::WouldBlock) => {
                 return;
             }
-            Err(_) => {
-                // TODO: proper error handling.
+            Err(_g) => {
+                // TODO: proper error handling -> this is recoverable.
                 panic!("Visualizer RwLock poisoned.");
             }
         }
@@ -288,9 +286,8 @@ impl WhisperAppController {
             Err(TryLockError::WouldBlock) => {
                 return;
             }
-            Err(_) => {
-                // RwLock is poisoned -> App should close
-                // TODO: proper error handling.
+            Err(_g) => {
+                // TODO: proper error handling -> this is recoverable.
                 panic!("Transcription RwLock poisoned.");
             }
         }
@@ -303,7 +300,7 @@ impl WhisperAppController {
         self.0.thread_handle_sender.send(thread)
     }
 
-    // TODO: focus transcription tab.
+    // TODO: add focus-to-transcription tab.
     pub fn start_realtime_transcription(&mut self, configs: whisper_realtime::configs::Configs) {
         let job_name = "Realtime Setup";
 
@@ -315,6 +312,7 @@ impl WhisperAppController {
         // Update state
         self.0.realtime_running.store(true, Ordering::Release);
         self.0.save_recording_ready.store(false, Ordering::Release);
+
 
         // UPDATE PROGRESS BAR
         let progress = Progress::new(String::from(job_name), 17, 100);
@@ -345,13 +343,6 @@ impl WhisperAppController {
 
             let rt_configs = Arc::new(configs);
 
-            // Clear the transcription buffer.
-            c_controller
-                .0
-                .transcription_text_sender
-                .send(Ok((String::from(constants::CLEAR_MSG), true)))
-                .expect("Transcription channel closed");
-
             // UPDATE PROGRESS BAR
             let progress = Progress::new(String::from(job_name), 100, 100);
             c_controller
@@ -369,7 +360,6 @@ impl WhisperAppController {
             .expect("Thread channel closed");
     }
 
-    // TODO: focus transcription tab.
     pub fn start_static_transcription(&self, audio_file: &Path, configs: whisper_realtime::configs::Configs) {
         let job_name = "Static Setup";
         let audio_file = audio_file.to_path_buf();
@@ -405,13 +395,6 @@ impl WhisperAppController {
 
             // Wrap for static transcriber.
             let st_configs = Arc::new(configs);
-
-            // Clear the transcription buffer.
-            c_controller
-                .0
-                .transcription_text_sender
-                .send(Ok((String::from(constants::CLEAR_MSG), true)))
-                .expect("Transcription channel closed");
 
             // Load the file & decode.
             let audio_reader = get_audio_reader(audio_file);
@@ -505,7 +488,7 @@ impl WhisperAppController {
         let controller = self.clone();
 
         let rec_thread = thread::spawn(move || {
-            run_recording(controller.clone(), configs);
+            run_recording(controller, configs);
 
             Ok(String::from("Finished Recording."))
         });
@@ -592,21 +575,70 @@ impl WhisperAppController {
             .expect("Thread channel closed.");
     }
 
-    // TODO: Finish this.
-    pub fn copy_to_clipboard(&self, transcription: &[String]) {}
+    // TODO: check if stack-allocation is expensive && whether to store.
+    // TODO: this may also not be worth the overhead to do on a thread; it might be fast enough to do on the GUI thread.
+    // TODO: proper error handling.
+    pub fn copy_to_clipboard(&self) {
+        let controller = self.clone();
+        let copy_thread = thread::spawn(move || {
+            let mut clipboard = Clipboard::new().unwrap();
+            let transcription_buffer = controller.0.transcription_buffer.read();
+            let transcription_text = match transcription_buffer {
+                Ok(text_buffer) => {
+                    text_buffer.join("\n")
+                }
+                Err(poison) => {
+                    let text_buffer = poison.into_inner();
+                    text_buffer.join("\n")
+                }
+            };
+
+            let text_len = transcription_text.len();
+
+            let result = clipboard.set_text(transcription_text);
+            match result {
+                Ok(_) => {
+                    Ok(format!("Copied {} bytes to clipboard.", text_len))
+                }
+                Err(e) => {
+                    // Wrap in App error
+                    let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Failed to copy to clipboard. Error: {}", e.to_string()));
+                    // TODO: remove box once error refactor.
+                    let err: Box<dyn Any + Send> = Box::new(err);
+                    Err(err)
+                }
+            }
+        });
+
+        let worker = (WorkerType::IO, copy_thread);
+        self.send_thread_handle(worker).expect("Thread channel closed");
+    }
 
     // TODO: refactor to handle data internally.
-    pub fn save_transcription(&self, output_path: &PathBuf, transcription: &[String]) {
+    pub fn save_transcription(&self, output_path: &PathBuf) {
         let p = output_path.clone();
-        let transcription_text = transcription.join("\n");
         let c_controller = self.clone();
         let save_thread = thread::spawn(move || {
+            let transcription_text = {
+                let transcription_buffer = c_controller.0.transcription_buffer.read();
+                match transcription_buffer {
+                    Ok(text_buffer) => {
+                        text_buffer.join("\n")
+                    }
+                    Err(poison) => {
+                        let text_buffer = poison.into_inner();
+                        text_buffer.join("\n")
+                    }
+                }
+            };
+
             let job_name = format!("Saving: {:?}", p.file_name());
             let total_size = transcription_text.len();
 
             let file_name = p.file_stem().expect("Invalid filename");
             let directory = p.parent().expect("Failed to get saving directory");
             let directory = directory.as_os_str();
+
 
             let progress_callback = move |n: usize| {
                 let progress = Progress::new(job_name.clone(), n, total_size);
@@ -653,7 +685,7 @@ fn recording_impl<
     f_central: f32,
 ) {
     let c_controller_write = controller.clone();
-    let c_controller_fft = controller.clone();
+    let c_controller_visualizer_thread = controller.clone();
     let audio_subsystem = &controller.0.audio_wrapper.audio_subsystem;
 
     let (sender, receiver) = channel;
@@ -672,19 +704,20 @@ fn recording_impl<
     let data_dir = eframe::storage_dir(constants::APP_ID).expect("Failed to get data dir");
     let mut writer = get_tmp_file_writer(data_dir.as_path(), &spec).expect("Failed to open writer");
 
-    // FFT channel.
-    let (fft_s, fft_r) = bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
+    // Visualizer channel.
+    let (visualizer_s, visualizer_r) = bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
+
+    // Focus the visualizer.
+    controller.send_focus_tab(FocusTab::Visualizer).expect("Focus tab channel closed");
 
     mic.resume();
-    // TODO: add some way to flag the gui.
+    // TODO: Set the state enum.
 
     let _ = thread::scope(|s| {
         let _write_thread = s.spawn(|| {
             loop {
                 if !c_controller_write
-                    .0
-                    .recorder_running
-                    .load(Ordering::Acquire)
+                    .recorder_running()
                 {
                     writer.finalize().expect("Failed to close writer.");
                     c_controller_write
@@ -707,63 +740,114 @@ fn recording_impl<
                     from_f32_normalized(&float_audio, &mut output);
                 }
 
-                // Propagate the data to the fft
+                // Propagate the data to the visualizer
                 if c_controller_write.0.run_visualizer.load(Ordering::Acquire) {
-                    let fft_propagation = fft_s.send(output.clone());
-                    assert!(fft_propagation.is_ok(), "FFT Channel Closed");
+                    let visualizer_propagation = visualizer_s.send(output.clone());
+                    assert!(visualizer_propagation.is_ok(), "Visualizer Channel Closed");
                 }
 
                 write_audio_sample(&output, &mut writer, None::<fn(usize)>);
             }
+
+            log(&String::from("Recorder: writing thread done."));
         });
 
-        let _fft_thread = s.spawn(|| {
-            loop {
-                if !c_controller_fft.0.recorder_running.load(Ordering::Acquire) {
-                    break;
-                }
+        let _visualizer_thread = s.spawn(|| {
+            while c_controller_visualizer_thread.recorder_running() {
+                let new_audio = visualizer_r.recv();
+                if let Ok(output) = new_audio {
+                    // TODO: test this -> It might be just as fast/free to cast_to_f32 safely
+                    if TypeId::of::<T>() == TypeId::of::<f32>() {
+                        let o = unsafe {
+                            let mut out = std::mem::ManuallyDrop::new(output);
+                            Vec::from_raw_parts(out.as_mut_ptr() as *mut f32, out.len(), out.capacity())
+                        };
 
-                let output = fft_r.recv();
-                match output {
-                    Ok(o) => {
-                        // TODO: test this -> It might be just as fast/free to cast_to_f32 safely
-                        if TypeId::of::<T>() == TypeId::of::<f32>() {
-                            let o = unsafe {
-                                let mut out = std::mem::ManuallyDrop::new(o);
-                                Vec::from_raw_parts(out.as_mut_ptr() as *mut f32, out.len(), out.capacity())
-                            };
-                            let mut guard = c_controller_fft
-                                .0
-                                .visualizer_buffer
-                                .write()
-                                .expect("Poisoned visualizer buffer");
-                            frequency_analysis(&o, &mut guard, sample_rate as f64);
-                            debug_assert!(
-                                guard.iter().all(|n| *n >= 0.0 && *n <= 1.0),
-                                "Failed to normalize"
-                            )
-                        } else {
-                            let len = o.len();
-                            let mut fft_data = vec![0.0; len];
-                            to_f32_normalized(&o, &mut fft_data);
-
-                            let mut guard = c_controller_fft
-                                .0
-                                .visualizer_buffer
-                                .write()
-                                .expect("Poisoned fft buffer");
-                            frequency_analysis(&fft_data, &mut guard, sample_rate as f64);
-                            debug_assert!(
-                                guard.iter().all(|n| *n >= 0.0 && *n <= 1.0),
-                                "Failed to normalize"
-                            );
+                        match c_controller_visualizer_thread.get_analysis_type() {
+                            AnalysisType::Waveform => {
+                                let mut guard = c_controller_visualizer_thread
+                                    .0
+                                    .visualizer_buffer
+                                    .write()
+                                    .expect("Poisoned visualizer buffer");
+                                normalized_waveform(&o, &mut guard);
+                                debug_assert!(
+                                    guard.iter().all(|n| *n >= 0.0 && *n <= 1.0),
+                                    "Failed to normalize."
+                                );
+                            }
+                            AnalysisType::Power => {
+                                let mut guard = c_controller_visualizer_thread
+                                    .0
+                                    .visualizer_buffer
+                                    .write()
+                                    .expect("Poisoned visualizer buffer");
+                                power_analysis(&o, &mut guard);
+                                debug_assert!(
+                                    guard.iter().all(|n| *n >= 0.0 && *n <= 1.0),
+                                    "Failed to normalize."
+                                );
+                            }
+                            AnalysisType::SpectrumDensity => {
+                                let mut guard = c_controller_visualizer_thread
+                                    .0
+                                    .visualizer_buffer
+                                    .write()
+                                    .expect("Poisoned visualizer buffer");
+                                frequency_analysis(&o, &mut guard, sample_rate as f64);
+                                debug_assert!(
+                                    guard.iter().all(|n| *n >= 0.0 && *n <= 1.0),
+                                    "Failed to normalize."
+                                );
+                            }
                         }
-                    }
-                    Err(_) => {
-                        break;
+                    } else {
+                        let len = output.len();
+                        let mut visualizer_data = vec![0.0; len];
+                        to_f32_normalized(&output, &mut visualizer_data);
+
+                        match c_controller_visualizer_thread.get_analysis_type() {
+                            AnalysisType::Waveform => {
+                                let mut guard = c_controller_visualizer_thread
+                                    .0
+                                    .visualizer_buffer
+                                    .write()
+                                    .expect("Poisoned fft buffer");
+                                normalized_waveform(&visualizer_data, &mut guard);
+                                debug_assert!(
+                                    guard.iter().all(|n| *n >= 0.0 && *n <= 1.0),
+                                    "Failed to normalize"
+                                );
+                            }
+                            AnalysisType::Power => {
+                                let mut guard = c_controller_visualizer_thread
+                                    .0
+                                    .visualizer_buffer
+                                    .write()
+                                    .expect("Poisoned fft buffer");
+                                power_analysis(&visualizer_data, &mut guard);
+                                debug_assert!(
+                                    guard.iter().all(|n| *n >= 0.0 && *n <= 1.0),
+                                    "Failed to normalize"
+                                );
+                            }
+                            AnalysisType::SpectrumDensity => {
+                                let mut guard = c_controller_visualizer_thread
+                                    .0
+                                    .visualizer_buffer
+                                    .write()
+                                    .expect("Poisoned fft buffer");
+                                frequency_analysis(&visualizer_data, &mut guard, sample_rate as f64);
+                                debug_assert!(
+                                    guard.iter().all(|n| *n >= 0.0 && *n <= 1.0),
+                                    "Failed to normalize"
+                                );
+                            }
+                        }
                     }
                 }
             }
+            log(&String::from("Recorder: visualizing thread done."));
         });
     });
 
@@ -847,16 +931,21 @@ fn run_recording(
     }
 }
 
+// TODO: refactor threading: Visualizer + Writer do not return -> likely msg queue not yet dropped.
 // TODO: add a progress job to this setup.
-// TODO: refactor to add the visualizer buffer
-// TODO: refactor to internally store the transcription
 fn run_realtime_audio_transcription(
     controller: WhisperAppController,
     configs: Arc<whisper_realtime::configs::Configs>,
 ) -> Result<String, Box<dyn Any + Send>> {
+    // Clear the text buffer.
+    clear_transcription_buffer(controller.clone());
+
     // Clone the controller
-    let c_controller_audio = controller.clone();
-    let c_controller_write = controller.clone();
+    let c_controller_audio_thread = controller.clone();
+    let c_controller_write_thread = controller.clone();
+    let c_controller_visualizer_thread = controller.clone();
+    let c_controller_transcription_reader_thread = controller.clone();
+
 
     // Init model.
     let model = init_model(configs.clone());
@@ -873,9 +962,13 @@ fn run_realtime_audio_transcription(
     // Text sender
     let c_text_sender = controller.0.transcription_text_sender.clone();
     // Recording sender for writing to tmp file
-    let (s, r) = bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
-    let audio_write_sender: Sender<Vec<f32>> = s.clone();
-    let audio_write_receiver = r.clone();
+    let (s_writer, r_writer) = bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
+    let audio_write_sender: Sender<Vec<f32>> = s_writer.clone();
+    let audio_write_receiver = r_writer.clone();
+    // Audio sender for transcription visualizer
+    let (s_visualizer, r_visualizer) = bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
+    let audio_visualizer_sender: Sender<Vec<f32>> = s_visualizer.clone();
+    let audio_visualizer_receiver = r_visualizer.clone();
 
     // State Flags - This should likely be refactored.
     let c_realtime_is_ready = controller.0.realtime_ready.clone();
@@ -886,6 +979,7 @@ fn run_realtime_audio_transcription(
         controller.0.record_audio_f32_sender.clone(),
     );
     let audio_spec = Arc::new(mic_stream.spec().clone());
+    let sample_rate = audio_spec.freq as f64;
     let c_audio_spec = audio_spec.clone();
     let c_mic_stream = mic_stream.clone();
 
@@ -893,12 +987,39 @@ fn run_realtime_audio_transcription(
     let ctx = init_whisper_ctx(c_model.clone(), c_configs.use_gpu);
     let mut state = ctx.create_state().expect("Failed to create WhisperState");
 
-    // TODO: set up a channel for the fft buffer.
+    controller.send_focus_tab(FocusTab::Transcription).expect("Focus tab channel closed");
 
+    // TODO: refactor panics.
     let transcription = thread::scope(|s| {
-        let c_realtime_is_running_audio_read_thread = c_realtime_is_running.clone();
-        let c_realtime_is_running_write_thread = c_realtime_is_running.clone();
         c_mic_stream.resume();
+        let c_realtime_is_running_transcription_reader_thread = c_realtime_is_running.clone();
+        let _visualizer_thread = s.spawn(move || {
+            while c_controller_visualizer_thread.realtime_running() {
+                let audio = audio_visualizer_receiver.recv();
+                if let Ok(output) = audio {
+                    if output.is_empty() {
+                        break;
+                    }
+                    match c_controller_visualizer_thread.get_analysis_type() {
+                        AnalysisType::Waveform => {
+                            let mut guard = c_controller_visualizer_thread.0.visualizer_buffer.write().expect("Visualizer RwLock Poisoned");
+                            normalized_waveform(&output, &mut guard);
+                        }
+                        AnalysisType::Power => {
+                            // Power analysis
+                            let mut guard = c_controller_visualizer_thread.0.visualizer_buffer.write().expect("Visualizer RwLock Poisoned");
+                            power_analysis(&output, &mut guard);
+                        }
+                        AnalysisType::SpectrumDensity => {
+                            // Spectrum analysis
+                            let mut guard = c_controller_visualizer_thread.0.visualizer_buffer.write().expect("Visualizer RwLock Poisoned");
+                            frequency_analysis(&output, &mut guard, sample_rate);
+                        }
+                    }
+                }
+            }
+            log(&"Visualizer closed properly");
+        });
 
         let _write_thread = s.spawn(move || {
             let channels = c_audio_spec.channels as u16;
@@ -910,39 +1031,38 @@ fn run_realtime_audio_transcription(
                 sample_format: SampleFormat::Float,
             };
 
-            // TODO: these need to reset the running flag before panicking.
             let data_dir = eframe::storage_dir(constants::APP_ID).expect("Failed to get data dir");
             let mut writer =
                 get_tmp_file_writer(data_dir.as_path(), &spec).expect("Failed to open writer.");
 
-            loop {
-                if !c_realtime_is_running_write_thread.load(Ordering::Acquire) {
-                    writer.finalize().expect("Failed to close writer.");
-                    // Update state - can save recording.
-                    c_controller_write
-                        .0
-                        .save_recording_ready
-                        .store(true, Ordering::Release);
-
-                    break;
+            while c_controller_write_thread.realtime_running() {
+                let audio = audio_write_receiver.recv();
+                if let Ok(output) = audio {
+                    write_audio_sample(&output, &mut writer, None::<fn(usize)>);
                 }
-                let output = audio_write_receiver.recv();
-                assert!(output.is_ok(), "F32 Audio Channel Closed");
-                let output = output.unwrap();
-                write_audio_sample(&output, &mut writer, None::<fn(usize)>);
             }
 
-            // CLEAR THE MSG QUEUE -> This runs a loop until the channel is empty.
-            c_controller_write.clear_audio_f32();
+            writer.finalize().expect("Failed to close writer.");
+            // Update state - can save recording.
+            c_controller_write_thread
+                .0
+                .save_recording_ready
+                .store(true, Ordering::Release);
+
+            log(&"Writer closed properly");
         });
 
         let _audio_thread = s.spawn(move || {
             loop {
-                if !c_realtime_is_running_audio_read_thread.load(Ordering::Acquire) {
+                if !c_controller_audio_thread.realtime_running() {
+                    // Pump the Visualizer thread with a zero-length vector to signal "Done"
+                    // Loop will break on next iteration.
+                    let visualize_propagation = audio_visualizer_sender.send(vec![]);
+                    debug_assert!(visualize_propagation.is_ok(), "F32 Visualizer Channel closed");
                     break;
                 }
 
-                let output = c_controller_audio.receive_audio_f32();
+                let output = c_controller_audio_thread.receive_audio_f32();
                 assert!(output.is_ok(), "Realtime Audio Channel closed");
 
                 let mut audio_data = output.unwrap();
@@ -952,14 +1072,96 @@ fn run_realtime_audio_transcription(
 
                 // Propagate the data to the writing thread.
                 let write_propagation = audio_write_sender.send(audio_data.clone());
-                assert!(write_propagation.is_ok(), "F32 Write Channel closed");
+
+                if c_controller_audio_thread.run_visualizer() {
+                    let visualize_propagation = audio_visualizer_sender.send(audio_data.clone());
+                    debug_assert!(visualize_propagation.is_ok(), "F32 Visualizer Channel closed");
+                }
+                debug_assert!(write_propagation.is_ok(), "F32 Visualizer Channel closed");
             }
 
             // CLEAR THE MSG QUEUE -> this runs a loop to eat msgs until the channel is fully cleared
             // or has no producers.
-            c_controller_audio.clear_audio_f32();
+            c_controller_audio_thread.clear_audio_f32();
+
+            // Closed properly
+            log(&"Audio reader thread closed properly");
         });
-        let transcription_thread = s
+
+        let _transcription_reader_thread = s.spawn(move || {
+            while c_controller_transcription_reader_thread.realtime_running() {
+                let text = c_controller_transcription_reader_thread.0.transcription_text_receiver.recv();
+                match text {
+                    Ok(result) => {
+                        match result {
+                            Ok(text_packet) => {
+                                if text_packet.0 == constants::GO_MSG {
+                                    // TODO: SET THE STATE ENUM FROM PROGRESS TO -GO-
+                                    continue;
+                                }
+
+                                if text_packet.0 == constants::STOP_MSG {
+                                    continue;
+                                }
+
+                                // Consume newlines
+                                if text_packet.0 == "\n" {
+                                    continue;
+                                }
+
+                                let guard = c_controller_transcription_reader_thread.0.transcription_buffer.write();
+                                match guard {
+                                    Ok(mut text_buffer) => {
+                                        if text_packet.1 {
+                                            text_buffer.push(text_packet.0);
+                                        } else {
+                                            let last_entry_index = text_buffer.len() - 1;
+                                            text_buffer[last_entry_index] = text_packet.0;
+                                        }
+                                    }
+                                    Err(poison) => {
+                                        // Mutex is poisoned.  TODO: proper handling.
+                                        let mut text_buffer = poison.into_inner();
+                                        if text_packet.1 {
+                                            text_buffer.push(text_packet.0)
+                                        } else {
+                                            let last_entry_index = text_buffer.len() - 1;
+                                            text_buffer[last_entry_index] = text_packet.0;
+                                        }
+                                    }
+                                }
+                            }
+                            Err(_e) => {
+                                // TODO: error msg.
+                                c_realtime_is_running_transcription_reader_thread.store(false, Ordering::Release);
+                            }
+                        }
+                    }
+                    Err(_e) => {
+                        // TODO: error msg - transcription channel is closed.
+                        c_realtime_is_running_transcription_reader_thread.store(false, Ordering::Release);
+                        break;
+                    }
+                }
+            }
+
+            // Clear the text channel
+            while let Ok(t) = c_controller_transcription_reader_thread.0.transcription_text_receiver.try_recv() {
+                match t {
+                    Ok(t) => {
+                        log(&t.0)
+                    }
+                    Err(e) => {
+                        log(&e.to_string())
+                    }
+                }
+                continue;
+            };
+
+            // Closed properly
+            log(&"Transcription reader thread closed properly");
+        });
+        let transcription_runner_thread = s
             .spawn(move || {
                 let mut transcriber = RealtimeTranscriber::new_with_configs(
                     c_audio_transcriber,
@@ -969,24 +1171,42 @@ fn run_realtime_audio_transcription(
                     c_configs.clone(),
                     None,
                 );
+
                 let output = transcriber.process_audio(&mut state, None::<fn(i32)>);
+                // Closed properly
+                log(&"Transcription runner thread closed properly");
                 output
             })
             .join();
-        transcription_thread
+        transcription_runner_thread
     });
 
     c_mic_stream.pause();
-    transcription
+    match transcription {
+        Ok(t) => {
+            let mut guard = controller.0.transcription_buffer.write().expect("RwLock Poisoned");
+            guard.clear();
+            guard.push(t);
+            Ok(String::from("Transcription Complete"))
+        }
+        Err(e) => {
+            // TODO: write an app error to propagate
+            Err(e)
+        }
+    }
 }
 
 // TODO: add progress job.
-// TODO: refactor to internally store the transcription
 fn run_static_audio_transcription(
     audio: Vec<f32>,
     controller: WhisperAppController,
     configs: Arc<whisper_realtime::configs::Configs>,
 ) -> Result<String, Box<dyn Any + Send>> {
+    // Clear the text buffer.
+    clear_transcription_buffer(controller.clone());
+
+    let c_controller_runner_thread = controller.clone();
+    let c_controller_reader_thread = controller.clone();
     let model = init_model(configs.clone());
     let audio = SupportedAudioSample::F32(audio);
     let audio = Arc::new(Mutex::new(audio));
@@ -998,15 +1218,12 @@ fn run_static_audio_transcription(
     // Init Whisper.
     let ctx = init_whisper_ctx(model.clone(), configs.use_gpu);
     let mut state = ctx.create_state().expect("Failed to create WhisperState");
-    let mut transcriber =
-        StaticTranscriber::new_with_configs(audio, data_sender, configs, channels);
 
     // Progress callback.
     let p_controller = controller.clone();
     let transcriber_job_name = "Transcribing Audio";
     let total_size = 100;
 
-    // NTS: possibly move memory.
     let progress_callback = move |n: i32| {
         let progress = Progress::new(String::from(transcriber_job_name), n as usize, total_size);
         p_controller
@@ -1015,15 +1232,119 @@ fn run_static_audio_transcription(
     };
 
     let progress_callback = Some(progress_callback);
+    // Focus transcription tab
+    controller.send_focus_tab(FocusTab::Transcription).expect("Transcription channel closed");
 
-    let transcription = transcriber.process_audio(&mut state, progress_callback);
-    Ok(transcription)
+    let transcription_thread = thread::scope(|s| {
+        let transcription_runner_thread = s.spawn(move || {
+            let mut transcriber =
+                StaticTranscriber::new_with_configs(audio, data_sender, configs, channels);
+            let output = transcriber.process_audio(&mut state, progress_callback);
+            // TODO: check library for whether set internally.
+            c_controller_runner_thread.0.static_running.store(false, Ordering::Release);
+            log(&String::from("Transcription runner finished"));
+            output
+        }).join();
+
+        // Transcription reader thread.
+        let _reader_thread = s.spawn(move || {
+            while c_controller_reader_thread.static_running() {
+                let text = c_controller_reader_thread.0.transcription_text_receiver.recv();
+                match text {
+                    Ok(result) => {
+                        match result {
+                            Ok(text_packet) => {
+                                if text_packet.0 == constants::GO_MSG {
+                                    // TODO: SET STATE ENUM FROM PROGRESS TO GO
+                                    continue;
+                                }
+
+                                let guard = c_controller_reader_thread.0.transcription_buffer.write();
+                                match guard {
+                                    Ok(mut text_buffer) => {
+                                        if text_packet.1 {
+                                            text_buffer.push(text_packet.0)
+                                        } else {
+                                            let last_entry_index = text_buffer.len() - 1;
+                                            text_buffer[last_entry_index] = text_packet.0;
+                                        }
+                                    }
+                                    Err(poison) => {
+                                        let mut text_buffer = poison.into_inner();
+                                        if text_packet.1 {
+                                            text_buffer.push(text_packet.0);
+                                        } else {
+                                            let last_entry_index = text_buffer.len() - 1;
+                                            text_buffer[last_entry_index] = text_packet.0;
+                                        }
+                                    }
+                                }
+                            }
+                            Err(_e) => {
+                                // TODO: send error msg
+                                c_controller_reader_thread.0.static_running.store(false, Ordering::Release);
+                            }
+                        }
+                    }
+                    Err(_e) => {
+                        // TODO: proper error -> transcription channel closed.
+                        // Might be able to recover by re-initializing the controller.
+                        c_controller_reader_thread.0.static_running.store(false, Ordering::Release);
+                    }
+                }
+            }
+
+            // TODO: factor out.
+            // Clear the text channel
+            while let Ok(t) = c_controller_reader_thread.0.transcription_text_receiver.try_recv() {
+                match t {
+                    Ok(t) => {
+                        log(&t.0)
+                    }
+                    Err(e) => {
+                        log(&e.to_string())
+                    }
+                }
+                continue;
+            };
+            log(&String::from("Transcription reader finished"));
+        });
+        transcription_runner_thread
+    });
+
+    match transcription_thread {
+        Ok(t) => {
+            let mut guard = controller.0.transcription_buffer.write().expect("RwLock poisoned");
+            guard.clear();
+            guard.push(t);
+            Ok(String::from("Transcription Complete"))
+        }
+        Err(e) => {
+            // TODO: Proper error
+            Err(e)
+        }
+    }
 }
 
+fn clear_transcription_buffer(controller: WhisperAppController)
+{
+    let guard = controller.0.transcription_buffer.write();
+    match guard {
+        Ok(mut text_buffer) => {
+            text_buffer.clear();
+            log(&format!("Text buffer should be length 0, length: {}", text_buffer.len()))
+        }
+        Err(poison) => {
+            let mut text_buffer = poison.into_inner();
+            text_buffer.clear();
+        }
+    }
+}
+
+
+// TODO: JoinHandle errors should be WhisperAppErrors.
 type WhisperAppThread = (WorkerType, JoinHandle<Result<String, Box<dyn Any + Send>>>);
 
-// TODO: refactor & remove configs msg queues. Config windows don't paint if not seen leading to timeouts.
-// TODO: add Atomic Enum for fft visualization types.
 #[derive(Debug)]
 struct WhisperAppContext {
     // GPU AVAILABLE

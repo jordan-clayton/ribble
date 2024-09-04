@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use egui::{Button, Grid, Label, RichText, ScrollArea, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
-use sdl2::log::log;
 use strum::VariantArray;
 use whisper_realtime::{configs::Configs, model::ModelType};
 use whisper_realtime::model::Model;
@@ -261,12 +260,27 @@ impl tab_view::TabView for StaticTab {
             ui.add_enabled_ui(!static_running && !realtime_running, |ui| {
                 ui.heading("Saving");
                 ui.vertical_centered_justified(|ui| {
+                    // TODO: factor out to common.
                     if ui.add(Button::new("Save Transcription")).clicked() {
-                        log(&"Start save routine".to_string());
+                        // Open File dialog at HOME directory, fallback to root.
+                        let base_dirs = directories::BaseDirs::new();
+                        let dir = if let Some(dir) = base_dirs {
+                            dir.home_dir().to_path_buf()
+                        } else {
+                            PathBuf::from("/")
+                        };
+
+                        if let Some(p) = rfd::FileDialog::new()
+                            .add_filter("text (.txt)", &["txt"])
+                            .set_directory(dir)
+                            .save_file()
+                        {
+                            controller.save_transcription(&p);
+                        }
                     }
                     ui.add_space(constants::BLANK_SEPARATOR);
                     if ui.add(Button::new("Copy to Clipboard")).clicked() {
-                        log(&"Start clipboard routine".to_string());
+                        controller.copy_to_clipboard();
                     }
                 });
             });

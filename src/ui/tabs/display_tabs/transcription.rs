@@ -10,10 +10,7 @@ use crate::{
         tabs::tab_view,
         widgets::recording_icon::recording_icon,
     },
-    utils::{
-        console_message::{ConsoleMessage, ConsoleMessageType},
-        constants,
-    },
+    utils::constants,
 };
 use crate::utils::preferences;
 
@@ -111,38 +108,8 @@ impl tab_view::TabView for TranscriptionTab {
         let static_running = controller.static_running();
         let static_ready = controller.static_ready();
 
-        // UPDATE STATE
-        // Handle new text.
-        while let Ok(message) = controller.recv_transcription_text() {
-            match message {
-                Ok(t) => {
-                    // Special case: [CLEAR TRANSCRIPTION]
-                    let text = t.0;
-                    if &text == constants::CLEAR_MSG {
-                        text_buffer.clear();
-                    }
-                    // Special case: [START SPEAKING]
-                    // Set the speech flag.
-                    else if &text == constants::GO_MSG {
-                        *processing_speech = true;
-                    } else {
-                        // Append to the text buffer.
-                        if t.1 {
-                            text_buffer.push(text);
-                        } else {
-                            let last = text_buffer.len() - 1;
-                            text_buffer[last] = text;
-                        }
-                    }
-                }
-                Err(e) => {
-                    let msg = ConsoleMessage::new(ConsoleMessageType::Error, e.to_string());
-                    controller
-                        .send_console_message(msg)
-                        .expect("Error channel closed");
-                }
-            }
-        }
+        // Update state.
+        controller.read_transcription_buffer(text_buffer);
 
         // Keep processing_speech state consistent with the state of the transcription worker.
         *processing_speech = if *realtime_mode {

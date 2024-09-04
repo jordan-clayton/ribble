@@ -197,8 +197,7 @@ impl tab_view::TabView for RecordingTab {
                 ui.heading("Recording");
                 ui.vertical_centered_justified(|ui| {
                     if ui.add_enabled(!recorder_running, Button::new("Start Recording")).clicked() {
-                        // TODO: refactor visualizer toggle into controller.
-                        // TODO: refactor start_recording
+                        controller.start_recording(c_configs);
                     }
 
                     ui.add_space(constants::BLANK_SEPARATOR);
