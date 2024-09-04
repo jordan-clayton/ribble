@@ -4,19 +4,16 @@ use catppuccin_egui::Theme;
 use egui::Visuals;
 use egui_dock::{DockArea, DockState, NodeIndex, Style, SurfaceIndex, TabIndex};
 
+use crate::ui::tabs::whisper_tab::WhisperTab;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::{
         controller_tabs::{r#static, realtime, recording},
-        display_tabs::{
-            console, progress, transcription,
-            visualizer,
-        },
+        display_tabs::{console, progress, transcription, visualizer},
         tab_viewer,
     },
     utils::preferences,
 };
-use crate::ui::tabs::whisper_tab::WhisperTab;
 
 pub struct WhisperApp {
     // These need to be serialized
@@ -52,26 +49,13 @@ impl WhisperApp {
     fn default_layout(controller: WhisperAppController) -> Self {
         let closed_tabs = HashMap::new();
 
-        let td = WhisperTab::Transcription(
-            transcription::TranscriptionTab::default(),
-        );
-        let rd = WhisperTab::Visualizer(
-            visualizer::VisualizerTab::default(),
-        );
-        let pd = WhisperTab::Progress(
-            progress::ProgressTab::default(),
-        );
-        let ed = WhisperTab::Console(
-            console::ConsoleTab::default(),
-        );
-        let rc = WhisperTab::Realtime(
-            realtime::RealtimeTab::default(),
-        );
-        let st =
-            WhisperTab::Static(r#static::StaticTab::default());
-        let rec = WhisperTab::Recording(
-            recording::RecordingTab::default(),
-        );
+        let td = WhisperTab::Transcription(transcription::TranscriptionTab::default());
+        let rd = WhisperTab::Visualizer(visualizer::VisualizerTab::default());
+        let pd = WhisperTab::Progress(progress::ProgressTab::default());
+        let ed = WhisperTab::Console(console::ConsoleTab::default());
+        let rc = WhisperTab::Realtime(realtime::RealtimeTab::default());
+        let st = WhisperTab::Static(r#static::StaticTab::default());
+        let rec = WhisperTab::Recording(recording::RecordingTab::default());
         let mut tree: DockState<WhisperTab> = DockState::new(vec![td, rd]);
 
         let surface = tree.main_surface_mut();
@@ -129,7 +113,11 @@ impl eframe::App for WhisperApp {
                     let tabs = tabs.unwrap();
                     for (tab_index, tab) in tabs.iter().enumerate() {
                         if tab.matches(focus_tab) {
-                            focus_tabs.push((surface_index.into(), node_index.into(), tab_index.into()));
+                            focus_tabs.push((
+                                surface_index.into(),
+                                node_index.into(),
+                                tab_index.into(),
+                            ));
                             found = true;
                         }
                     }
@@ -195,4 +183,3 @@ impl eframe::App for WhisperApp {
 fn tweak_visuals(visuals: &mut Visuals, theme: Theme) {
     visuals.faint_bg_color = theme.mantle
 }
-

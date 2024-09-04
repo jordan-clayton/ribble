@@ -30,7 +30,7 @@ fn main() -> Result<(), WhisperAppError> {
         constants::ORGANIZATION,
         constants::APP_ID,
     )
-        .expect("Failed to get proj dir");
+    .expect("Failed to get proj dir");
     let data_dir = proj_dirs.data_dir();
     let mut native_options = eframe::NativeOptions::default();
     let viewport = build_viewport();

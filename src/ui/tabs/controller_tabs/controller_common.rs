@@ -4,19 +4,13 @@ use catppuccin_egui::Theme;
 use egui::{Button, Checkbox, ComboBox, Slider, Ui};
 use whisper_realtime::model::{Model, ModelType};
 
+use crate::ui::widgets::icons::warning_icon;
+use crate::utils::workers::WorkerType;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::widgets::icons::ok_icon,
-    utils::{
-        constants
-        ,
-        file_mgmt::copy_data
-
-        ,
-    },
+    utils::{constants, file_mgmt::copy_data},
 };
-use crate::ui::widgets::icons::warning_icon;
-use crate::utils::workers::WorkerType;
 
 pub fn model_row(
     ui: &mut Ui,

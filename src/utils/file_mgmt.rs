@@ -8,7 +8,7 @@ use hound::{Sample, WavReader, WavSpec, WavWriter};
 use symphonia::{
     core::{
         audio::SampleBuffer,
-        codecs::{CODEC_TYPE_NULL, Decoder, DecoderOptions},
+        codecs::{Decoder, DecoderOptions, CODEC_TYPE_NULL},
         errors::Error,
         formats::{FormatOptions, FormatReader},
         io::MediaSourceStream,

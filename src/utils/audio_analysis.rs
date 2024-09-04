@@ -4,15 +4,15 @@ use std::{
 };
 
 use atomic_enum::atomic_enum;
-use biquad::{Biquad, Coefficients, DirectForm2Transposed, Q_BUTTERWORTH_F32, ToHertz, Type};
+use biquad::{Biquad, Coefficients, DirectForm2Transposed, ToHertz, Type, Q_BUTTERWORTH_F32};
 use lazy_static::lazy_static;
+use realfft::num_complex::ComplexFloat;
+use realfft::num_traits::Bounded;
 use realfft::{
     num_complex::Complex32,
     num_traits::{FromPrimitive, NumCast, ToPrimitive, Zero},
     RealFftPlanner, RealToComplex,
 };
-use realfft::num_complex::ComplexFloat;
-use realfft::num_traits::Bounded;
 use strum::{Display, EnumIter};
 
 use crate::utils::constants;
@@ -34,29 +34,17 @@ pub enum AnalysisType {
 impl AnalysisType {
     pub fn rotate_clockwise(&self) -> Self {
         match self {
-            AnalysisType::Waveform => {
-                AnalysisType::Power
-            }
-            AnalysisType::Power => {
-                AnalysisType::SpectrumDensity
-            }
-            AnalysisType::SpectrumDensity => {
-                AnalysisType::Waveform
-            }
+            AnalysisType::Waveform => AnalysisType::Power,
+            AnalysisType::Power => AnalysisType::SpectrumDensity,
+            AnalysisType::SpectrumDensity => AnalysisType::Waveform,
         }
     }
 
     pub fn rotate_counterclockwise(&self) -> Self {
         match self {
-            AnalysisType::Waveform => {
-                AnalysisType::SpectrumDensity
-            }
-            AnalysisType::Power => {
-                AnalysisType::Waveform
-            }
-            AnalysisType::SpectrumDensity => {
-                AnalysisType::Power
-            }
+            AnalysisType::Waveform => AnalysisType::SpectrumDensity,
+            AnalysisType::Power => AnalysisType::Waveform,
+            AnalysisType::SpectrumDensity => AnalysisType::Power,
         }
     }
 }
@@ -195,7 +183,8 @@ pub fn normalized_waveform(samples: &[f32], result: &mut [f32; constants::NUM_BU
 
     debug_assert!(
         wave_form.iter().all(|n| *n >= 0.0 && *n <= 1.0),
-        "Failed to normalize {:?}", &wave_form
+        "Failed to normalize {:?}",
+        &wave_form
     );
 
     result.copy_from_slice(&wave_form);
@@ -214,7 +203,7 @@ pub fn power_analysis(samples: &[f32], result: &mut [f32; constants::NUM_BUCKETS
         None,
         None,
     )
-        .expect("Failed to build frames");
+    .expect("Failed to build frames");
 
     // Init FFT
     let mut planner = FFT_PLANNER.lock().expect("Failed to get FFT Planner mutex");
@@ -288,7 +277,6 @@ pub fn frequency_analysis(
         let log_max = max_freq.log10();
         let log_range = log_max - log_min;
 
-
         // Compute edges
         let bucket_edges: Vec<f64> = (0..constants::NUM_BUCKETS + 1)
             .map(|n| 10.0.powf(log_min + log_range * (n as f64) / (constants::NUM_BUCKETS as f64)))
@@ -311,7 +299,6 @@ pub fn frequency_analysis(
             }
         }
     }
-
 
     for res in result.iter_mut() {
         *res = *res / max_amp;

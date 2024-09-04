@@ -64,12 +64,12 @@ impl tab_view::TabView for ProgressTab {
 
         // Get any new progress.
         while let Ok(progress) = controller.recv_progress() {
-            jobs.insert(progress);
+            jobs.replace(progress);
         }
 
         let mut finished_jobs = vec![];
         ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
-            Grid::new("progress").striped(true).show(ui, |ui| {
+            Grid::new("progress").striped(true).num_columns(1).show(ui, |ui| {
                 for job in jobs.clone() {
                     // Draw it.
                     Self::progress_widget(ui, &job);
@@ -94,7 +94,8 @@ impl tab_view::TabView for ProgressTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

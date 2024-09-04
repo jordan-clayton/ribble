@@ -4,17 +4,17 @@ use egui::{Button, Grid, Label, RichText, ScrollArea, Slider, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use sdl2::log::log;
 use strum::{IntoEnumIterator, VariantArray};
-use whisper_realtime::{configs::Configs, model::ModelType};
 use whisper_realtime::model::Model;
+use whisper_realtime::{configs::Configs, model::ModelType};
 
+use crate::ui::tabs::controller_tabs::controller_common;
+use crate::ui::tabs::whisper_tab::FocusTab;
+use crate::utils::preferences::get_app_theme;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::tab_view,
     utils::{constants, threading::get_max_threads},
 };
-use crate::ui::tabs::controller_tabs::controller_common;
-use crate::ui::tabs::whisper_tab::FocusTab;
-use crate::utils::preferences::get_app_theme;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RealtimeTab {
@@ -86,7 +86,8 @@ impl tab_view::TabView for RealtimeTab {
         } = realtime_configs;
 
         // Update ready state
-        let data_dir = eframe::storage_dir(constants::APP_ID).expect("Failed to get data directory");
+        let data_dir =
+            eframe::storage_dir(constants::APP_ID).expect("Failed to get data directory");
         let m_model = Model::new_with_type_and_dir(*model, data_dir);
         let downloaded = m_model.is_downloaded();
         controller.set_realtime_ready(downloaded);
@@ -359,7 +360,8 @@ impl tab_view::TabView for RealtimeTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

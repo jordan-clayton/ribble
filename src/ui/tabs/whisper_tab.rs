@@ -4,13 +4,9 @@ use egui_dock::{NodeIndex, SurfaceIndex};
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::{
-        controller_tabs::{
-            r#static::StaticTab, realtime::RealtimeTab,
-            recording::RecordingTab,
-        },
+        controller_tabs::{r#static::StaticTab, realtime::RealtimeTab, recording::RecordingTab},
         display_tabs::{
-            console::ConsoleTab, progress::ProgressTab,
-            transcription::TranscriptionTab,
+            console::ConsoleTab, progress::ProgressTab, transcription::TranscriptionTab,
             visualizer::VisualizerTab,
         },
         tab_view::TabView,
@@ -42,23 +38,13 @@ pub enum FocusTab {
 impl FocusTab {
     pub fn id(&self) -> String {
         match self {
-            FocusTab::Realtime => { String::from("Realtime") }
-            FocusTab::Static => { String::from("Static") }
-            FocusTab::Recording => {
-                String::from("Recording")
-            }
-            FocusTab::Transcription => {
-                String::from("Transcription")
-            }
-            FocusTab::Visualizer => {
-                String::from("Visualizer")
-            }
-            FocusTab::Progress => {
-                String::from("Progress")
-            }
-            FocusTab::Console => {
-                String::from("Progress")
-            }
+            FocusTab::Realtime => String::from("Realtime"),
+            FocusTab::Static => String::from("Static"),
+            FocusTab::Recording => String::from("Recording"),
+            FocusTab::Transcription => String::from("Transcription"),
+            FocusTab::Visualizer => String::from("Visualizer"),
+            FocusTab::Progress => String::from("Progress"),
+            FocusTab::Console => String::from("Progress"),
         }
     }
 }
@@ -78,27 +64,13 @@ impl WhisperTab {
 
     pub fn matches(&self, tab_type: FocusTab) -> bool {
         match self {
-            WhisperTab::Realtime(_) => {
-                tab_type == FocusTab::Realtime
-            }
-            WhisperTab::Static(_) => {
-                tab_type == FocusTab::Static
-            }
-            WhisperTab::Recording(_) => {
-                tab_type == FocusTab::Recording
-            }
-            WhisperTab::Transcription(_) => {
-                tab_type == FocusTab::Transcription
-            }
-            WhisperTab::Visualizer(_) => {
-                tab_type == FocusTab::Visualizer
-            }
-            WhisperTab::Progress(_) => {
-                tab_type == FocusTab::Progress
-            }
-            WhisperTab::Console(_) => {
-                tab_type == FocusTab::Console
-            }
+            WhisperTab::Realtime(_) => tab_type == FocusTab::Realtime,
+            WhisperTab::Static(_) => tab_type == FocusTab::Static,
+            WhisperTab::Recording(_) => tab_type == FocusTab::Recording,
+            WhisperTab::Transcription(_) => tab_type == FocusTab::Transcription,
+            WhisperTab::Visualizer(_) => tab_type == FocusTab::Visualizer,
+            WhisperTab::Progress(_) => tab_type == FocusTab::Progress,
+            WhisperTab::Console(_) => tab_type == FocusTab::Console,
         }
     }
 }

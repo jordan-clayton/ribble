@@ -1,6 +1,6 @@
 use catppuccin_egui::Theme;
 use eframe::epaint::Color32;
-use egui::{Image, ImageSource, include_image, Response, Sense, Ui, vec2, Widget};
+use egui::{include_image, vec2, Image, ImageSource, Response, Sense, Ui, Widget};
 
 // NOTE: egui caches image textures by default and will not evict if the image scaling changes.
 // If ever needing to scale icons larger than 1x, an eviction implementation will be required.

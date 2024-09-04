@@ -1,18 +1,13 @@
 use catppuccin_egui::Theme;
-use egui::{
-    CentralPanel, Frame, ScrollArea, TopBottomPanel, Ui, WidgetText,
-};
+use egui::{CentralPanel, Frame, ScrollArea, TopBottomPanel, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
+use crate::utils::preferences;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
-    ui::{
-        tabs::tab_view,
-        widgets::recording_icon::recording_icon,
-    },
+    ui::{tabs::tab_view, widgets::recording_icon::recording_icon},
     utils::constants,
 };
-use crate::utils::preferences;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TranscriptionTab {
@@ -169,7 +164,8 @@ impl tab_view::TabView for TranscriptionTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

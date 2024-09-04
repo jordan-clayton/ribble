@@ -3,18 +3,17 @@ use std::path::PathBuf;
 use egui::{Button, Grid, Label, RichText, ScrollArea, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::VariantArray;
-use whisper_realtime::{configs::Configs, model::ModelType};
 use whisper_realtime::model::Model;
+use whisper_realtime::{configs::Configs, model::ModelType};
 
-use crate::{
-    controller::whisper_app_controller::WhisperAppController,
-    ui::tabs::tab_view,
-    utils::threading::get_max_threads,
-};
 use crate::ui::tabs::controller_tabs::controller_common;
 use crate::ui::widgets::icons::{ok_icon, warning_icon};
-use crate::utils::{constants, file_mgmt};
 use crate::utils::preferences::get_app_theme;
+use crate::utils::{constants, file_mgmt};
+use crate::{
+    controller::whisper_app_controller::WhisperAppController, ui::tabs::tab_view,
+    utils::threading::get_max_threads,
+};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StaticTab {
@@ -64,7 +63,7 @@ impl tab_view::TabView for StaticTab {
             title: _,
             static_configs,
             max_threads,
-            audio_path
+            audio_path,
         } = self;
 
         let Configs {
@@ -102,7 +101,8 @@ impl tab_view::TabView for StaticTab {
         };
 
         // Set static ready based on the current model + audio file.
-        let data_dir = eframe::storage_dir(constants::APP_ID).expect("Failed to get data directory");
+        let data_dir =
+            eframe::storage_dir(constants::APP_ID).expect("Failed to get data directory");
         let m_model = Model::new_with_type_and_dir(*model, data_dir);
         let downloaded = m_model.is_downloaded();
         let is_ready = downloaded & has_file;
@@ -113,7 +113,6 @@ impl tab_view::TabView for StaticTab {
         let available_models: Vec<ModelType> = ModelType::VARIANTS.to_vec();
         let system_theme = controller.get_system_theme();
         let theme = get_app_theme(system_theme);
-
 
         let file_name = file_path.file_name();
 
@@ -186,7 +185,10 @@ impl tab_view::TabView for StaticTab {
             let mic_occupied = controller.is_working() ^ static_running;
             ui.add_enabled_ui(!mic_occupied, |ui| {
                 // Transcription section
-                ui.add_enabled(static_ready, Label::new(RichText::new("Transcription").heading()));
+                ui.add_enabled(
+                    static_ready,
+                    Label::new(RichText::new("Transcription").heading()),
+                );
                 ui.vertical_centered_justified(|ui| {
                     if ui
                         .add_enabled(!static_running && static_ready, Button::new("Start"))
@@ -210,7 +212,10 @@ impl tab_view::TabView for StaticTab {
 
             ui.heading("Audio File");
             ui.vertical_centered_justified(|ui| {
-                if ui.add_enabled(!static_running, Button::new("Open")).clicked() {
+                if ui
+                    .add_enabled(!static_running, Button::new("Open"))
+                    .clicked()
+                {
                     // Open File dialog at HOME directory, fallback to root.
                     let base_dirs = directories::BaseDirs::new();
                     let dir = if let Some(dir) = base_dirs {
@@ -294,7 +299,8 @@ impl tab_view::TabView for StaticTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

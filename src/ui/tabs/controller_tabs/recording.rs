@@ -4,16 +4,14 @@ use egui::{Button, Checkbox, ComboBox, Grid, ScrollArea, Slider, Ui, WidgetText}
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::IntoEnumIterator;
 
+use crate::ui::tabs::tab_view;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     utils::{
         constants,
-        recorder_configs::{
-            BufferSize, Channel, RecorderConfigs, RecordingFormat, SampleRate,
-        },
+        recorder_configs::{BufferSize, Channel, RecorderConfigs, RecordingFormat, SampleRate},
     },
 };
-use crate::ui::tabs::tab_view;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RecordingTab {
@@ -240,7 +238,8 @@ impl tab_view::TabView for RecordingTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

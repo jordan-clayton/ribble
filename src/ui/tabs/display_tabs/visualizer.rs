@@ -1,15 +1,17 @@
 use eframe::epaint::text::TextWrapMode;
-use egui::{CentralPanel, FontId, Frame, RichText, Sense, TextStyle, TopBottomPanel, Ui, WidgetText};
+use egui::{
+    CentralPanel, FontId, Frame, RichText, Sense, TextStyle, TopBottomPanel, Ui, WidgetText,
+};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::IntoEnumIterator;
 
+use crate::ui::widgets::fft_visualizer::draw_fft;
+use crate::utils::audio_analysis::AnalysisType;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::{tabs::tab_view, widgets::recording_icon::recording_icon},
     utils::{audio_analysis, constants, preferences},
 };
-use crate::ui::widgets::fft_visualizer::draw_fft;
-use crate::utils::audio_analysis::AnalysisType;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct VisualizerTab {
@@ -141,7 +143,10 @@ impl tab_view::TabView for VisualizerTab {
             let visualization_functions = AnalysisType::iter();
             let mut current = controller.get_analysis_type();
             for visual in visualization_functions {
-                if ui.selectable_value(&mut current, visual, visual.to_string()).clicked() {
+                if ui
+                    .selectable_value(&mut current, visual, visual.to_string())
+                    .clicked()
+                {
                     controller.set_analysis_type(visual);
                     ui.close_menu();
                 }
@@ -158,7 +163,8 @@ impl tab_view::TabView for VisualizerTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true
