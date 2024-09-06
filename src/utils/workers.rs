@@ -9,18 +9,16 @@ pub enum WorkerType {
     Static,
     Recording,
     IO,
-    ThreadManagement,
 }
 
-// TODO: finish this
 #[atomic_enum]
-pub enum WorkerState {
+pub enum AudioWorkerState {
     Idle,
     Loading,
     Running,
+    Error,
 }
 
-// TODO: Remove if unnecessary
 #[atomic_enum]
 pub enum AudioWorkerType {
     Realtime,

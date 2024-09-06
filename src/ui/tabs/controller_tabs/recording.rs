@@ -1,15 +1,18 @@
 use std::path::PathBuf;
 
-use egui::{Button, Checkbox, ComboBox, Grid, ScrollArea, Slider, Ui, WidgetText};
+use egui::{Button, ComboBox, Grid, ScrollArea, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::IntoEnumIterator;
 
-use crate::ui::tabs::tab_view;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     utils::{
         constants,
         recorder_configs::{BufferSize, Channel, RecorderConfigs, RecordingFormat, SampleRate},
+    },
+    ui::tabs::{
+        controller_tabs::controller_common::{f_higher_stack, f_lower_stack, toggle_bandpass_filter_stack},
+        tab_view,
     },
 };
 
@@ -139,35 +142,18 @@ impl tab_view::TabView for RecordingTab {
 
                         ui.end_row();
 
+                        // TODO: move to controller_common.
+
                         // RUN BANDPASS FILTER
-                        ui.label("Bandpass Filter:").on_hover_ui(|ui| {
-                            ui.label("Run a bandpass filter to clean up recording?");
-                        });
-                        ui.add(Checkbox::without_text(filter));
+                        toggle_bandpass_filter_stack(ui, filter);
                         ui.end_row();
 
                         // BANDPASS THRESHOLDS
-                        ui.add_enabled_ui(*filter, |ui| {
-                            // High Threshold
-                            ui.label("High frequency cutoff:").on_hover_ui(|ui| {
-                                ui.label("Frequencies higher than this threshold will be filtered out.");
-                            });
-                        });
-
-                        ui.add_enabled_ui(*filter, |ui| {
-                            ui.add(Slider::new(f_higher, constants::MIN_F_HIGHER..=constants::MAX_F_HIGHER).suffix("Hz"));
-                        });
+                        f_higher_stack(ui, *filter, f_higher);
                         ui.end_row();
 
                         // Low Threshold
-                        ui.add_enabled_ui(*filter, |ui| {
-                            ui.label("Low frequency cutoff:").on_hover_ui(|ui| {
-                                ui.label("Frequencies lower than this threshold will be filtered out.");
-                            });
-                        });
-                        ui.add_enabled_ui(*filter, |ui| {
-                            ui.add(Slider::new(f_lower, constants::MIN_F_LOWER..=constants::MAX_F_LOWER).suffix("Hz"));
-                        });
+                        f_lower_stack(ui, *filter, f_lower);
                         ui.end_row();
 
                         // DEFAULTS.
@@ -238,8 +224,7 @@ impl tab_view::TabView for RecordingTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

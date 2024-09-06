@@ -1,20 +1,20 @@
-// TODO: clean up imports.
-use std::any::TypeId;
-use std::path::Path;
-use std::sync::RwLock;
 use std::{
     any::Any,
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex, TryLockError,
+        Arc,
+        atomic::{AtomicBool, Ordering}, Mutex, TryLockError,
     },
     thread::{self, JoinHandle},
 };
+// TODO: clean up imports.
+use std::any::TypeId;
+use std::path::Path;
+use std::sync::RwLock;
 
 use arboard::Clipboard;
 use crossbeam::channel::{
-    bounded, unbounded, Receiver, RecvError, SendError, Sender, TryRecvError,
+    bounded, Receiver, Sender, SendError, TryRecvError, unbounded,
 };
 use hound::{Sample, SampleFormat, WavSpec};
 #[cfg(feature = "cuda")]
@@ -23,9 +23,6 @@ use realfft::num_traits::{Bounded, FromPrimitive, NumCast, Zero};
 use sdl2::audio::AudioSpecDesired;
 use sdl2::log::log;
 use tokio::runtime::Handle;
-use whisper_realtime::transcriber::static_transcriber::{
-    StaticTranscriber, SupportedAudioSample, SupportedChannels,
-};
 use whisper_realtime::{
     downloader::{
         download::AsyncDownload,
@@ -34,6 +31,9 @@ use whisper_realtime::{
     errors::WhisperRealtimeError,
     microphone,
     transcriber::{realtime_transcriber::RealtimeTranscriber, transcriber::Transcriber},
+};
+use whisper_realtime::transcriber::static_transcriber::{
+    StaticTranscriber, SupportedAudioSample, SupportedChannels,
 };
 
 use crate::{
@@ -55,13 +55,13 @@ use crate::{
 use crate::controller::utils::transcriber_utilities::init_microphone;
 use crate::ui::tabs::whisper_tab::FocusTab;
 use crate::utils::audio_analysis::{
-    bandpass_filter, f_central, frequency_analysis, from_f32_normalized, normalized_waveform,
-    power_analysis, to_f32_normalized, AnalysisType, AtomicAnalysisType,
+    AnalysisType, AtomicAnalysisType, bandpass_filter, f_central, frequency_analysis,
+    from_f32_normalized, normalized_waveform, power_analysis, to_f32_normalized,
 };
 use crate::utils::errors::{WhisperAppError, WhisperAppErrorType};
-use crate::utils::file_mgmt::{decode_audio, get_audio_reader};
+use crate::utils::file_mgmt::{decode_audio, delete_temporary_audio_file, get_audio_reader};
 use crate::utils::recorder_configs::{RecorderConfigs, RecordingFormat};
-use crate::utils::workers::WorkerType;
+use crate::utils::workers::{AtomicAudioWorkerState, AudioWorkerState, WorkerType};
 
 // TODO: Remaining impls;
 
@@ -101,16 +101,29 @@ impl WhisperAppController {
 
     // This will fall back to Mocha on a failed system_theme grab.
     pub fn get_system_theme(&self) -> Option<eframe::Theme> {
-        let guard = self.0.system_theme.try_lock();
+        let guard = self.0.system_theme.try_read();
         match guard {
             Ok(t) => t.clone(),
-            Err(_) => None,
+            Err(TryLockError::WouldBlock) => None,
+            Err(TryLockError::Poisoned(e)) => {
+                let t = e.into_inner();
+                t.clone()
+            }
         }
     }
 
     pub fn set_system_theme(&mut self, theme: Option<eframe::Theme>) {
-        let mut guard = self.0.system_theme.lock().expect("Mutex poisoned.");
-        *guard = theme;
+        let guard = self.0.system_theme.try_write();
+        match guard {
+            Ok(mut t) => {
+                *t = theme;
+            }
+            Err(TryLockError::WouldBlock) => {}
+            Err(TryLockError::Poisoned(p)) => {
+                let mut t = p.into_inner();
+                *t = theme;
+            }
+        }
     }
 
     pub fn audio_running(&self) -> bool {
@@ -121,6 +134,13 @@ impl WhisperAppController {
     }
 
     // STATE
+    pub fn app_running(&self) -> bool {
+        self.0.application_running.load(Ordering::Acquire)
+    }
+
+    pub fn audio_worker_state(&self) -> AudioWorkerState {
+        self.0.audio_worker_state.load(Ordering::Acquire)
+    }
     pub fn is_working(&self) -> bool {
         let audio_running = self.audio_running();
         let downloading = self.is_downloading();
@@ -222,37 +242,6 @@ impl WhisperAppController {
         self.0.console_receiver.try_recv()
     }
 
-    fn receive_audio_f32(&self) -> Result<Vec<f32>, RecvError> {
-        self.0.record_audio_f32_receiver.recv()
-    }
-
-    // TODO: faster, better, solution. Internal context cannot be mutated without RWLocking, defeating the purpose of a msg queue.
-    fn clear_audio_f32(&self) {
-        while let Ok(_) = self.0.record_audio_f32_receiver.try_recv() {
-            continue;
-        }
-    }
-
-    fn clear_audio_i32(&self) {
-        while let Ok(_) = self.0.record_audio_i32_receiver.try_recv() {
-            continue;
-        }
-    }
-
-    fn clear_audio_i16(&self) {
-        while let Ok(_) = self.0.record_audio_i16_receiver.try_recv() {
-            continue;
-        }
-    }
-
-    // This needs to be copied and a copy given to the RealtimeTranscriber struct.
-    // TODO: possibly handle this internally.
-    pub fn transcription_text_sender(
-        &self,
-    ) -> Sender<Result<(String, bool), WhisperRealtimeError>> {
-        self.0.transcription_text_sender.clone()
-    }
-
     pub fn read_fft_buffer(&self, dest: &mut [f32; constants::NUM_BUCKETS]) {
         let guard = self.0.visualizer_buffer.try_read();
         match guard {
@@ -269,7 +258,6 @@ impl WhisperAppController {
         }
     }
 
-    // TODO: finish.
     pub fn read_transcription_buffer(&self, dest: &mut Vec<String>) {
         let guard = self.0.transcription_buffer.try_read();
         match guard {
@@ -288,6 +276,23 @@ impl WhisperAppController {
         }
     }
 
+    fn clear_transcription_buffer(&self) {
+        let guard = self.0.transcription_buffer.write();
+        match guard {
+            Ok(mut text_buffer) => {
+                text_buffer.clear();
+                log(&format!(
+                    "Text buffer should be length 0, length: {}",
+                    text_buffer.len()
+                ))
+            }
+            Err(poison) => {
+                let mut text_buffer = poison.into_inner();
+                text_buffer.clear();
+            }
+        }
+    }
+
     pub fn send_thread_handle(
         &self,
         thread: WhisperAppThread,
@@ -296,7 +301,7 @@ impl WhisperAppController {
     }
 
     // TODO: add focus-to-transcription tab.
-    pub fn start_realtime_transcription(&mut self, configs: whisper_realtime::configs::Configs) {
+    pub fn start_realtime_transcription(&mut self, configs: whisper_realtime::configs::Configs, filtering: (bool, f32, f32)) {
         let job_name = "Realtime Setup";
 
         // UPDATE PROGRESS BAR
@@ -305,6 +310,7 @@ impl WhisperAppController {
             .expect("Progress channel closed");
 
         // Update state
+        self.0.audio_worker_state.store(AudioWorkerState::Loading, Ordering::Release);
         self.0.realtime_running.store(true, Ordering::Release);
         self.0.save_recording_ready.store(false, Ordering::Release);
 
@@ -343,7 +349,7 @@ impl WhisperAppController {
                 .expect("Progress channel closed");
 
             // Run
-            run_realtime_audio_transcription(c_controller.clone(), rt_configs)
+            run_realtime_audio_transcription(c_controller.clone(), rt_configs, filtering)
         });
 
         let thread = (WorkerType::Realtime, rt_thread);
@@ -366,6 +372,7 @@ impl WhisperAppController {
             .expect("Progress channel closed");
 
         self.0.static_running.store(true, Ordering::Release);
+        self.0.audio_worker_state.store(AudioWorkerState::Loading, Ordering::Release);
 
         let progress = Progress::new(String::from(job_name), 10, 100);
         self.send_progress(progress)
@@ -480,6 +487,7 @@ impl WhisperAppController {
         // Update state.
         self.0.recorder_running.store(true, Ordering::Release);
         self.0.save_recording_ready.store(false, Ordering::Release);
+        self.0.audio_worker_state.store(AudioWorkerState::Loading, Ordering::Release);
 
         let controller = self.clone();
 
@@ -571,8 +579,6 @@ impl WhisperAppController {
             .expect("Thread channel closed.");
     }
 
-    // TODO: check if stack-allocation is expensive && whether to store.
-    // TODO: this may also not be worth the overhead to do on a thread; it might be fast enough to do on the GUI thread.
     // TODO: proper error handling.
     pub fn copy_to_clipboard(&self) {
         let controller = self.clone();
@@ -610,7 +616,6 @@ impl WhisperAppController {
             .expect("Thread channel closed");
     }
 
-    // TODO: refactor to handle data internally.
     pub fn save_transcription(&self, output_path: &PathBuf) {
         let p = output_path.clone();
         let c_controller = self.clone();
@@ -654,21 +659,31 @@ impl WhisperAppController {
         self.send_thread_handle(worker)
             .expect("Thread channel closed.")
     }
+
+    pub fn cleanup(&self) -> std::io::Result<()> {
+        #[cfg(debug_assertions)]
+        log("Cleanup called");
+        self.0.realtime_running.store(false, Ordering::Relaxed);
+        self.0.static_running.store(false, Ordering::Relaxed);
+        self.0.recorder_running.store(false, Ordering::Relaxed);
+        self.0.application_running.store(false, Ordering::Relaxed);
+        delete_temporary_audio_file()
+    }
 }
 
 fn recording_impl<
     T: Default
-        + Clone
-        + Copy
-        + FromPrimitive
-        + NumCast
-        + Bounded
-        + Zero
-        + sdl2::audio::AudioFormatNum
-        + Sample
-        + Sync
-        + Send
-        + 'static,
+    + Clone
+    + Copy
+    + FromPrimitive
+    + NumCast
+    + Bounded
+    + Zero
+    + sdl2::audio::AudioFormatNum
+    + Sample
+    + Sync
+    + Send
+    + 'static,
 >(
     controller: WhisperAppController,
     desired_audio: &AudioSpecDesired,
@@ -706,7 +721,7 @@ fn recording_impl<
         .expect("Focus tab channel closed");
 
     mic.resume();
-    // TODO: Set the state enum.
+    controller.0.audio_worker_state.store(AudioWorkerState::Running, Ordering::Release);
 
     let _ = thread::scope(|s| {
         let _write_thread = s.spawn(|| {
@@ -886,7 +901,8 @@ fn run_recording(controller: WhisperAppController, configs: RecorderConfigs) {
                 filter,
                 f_central,
             );
-            controller.clear_audio_i16();
+
+            clear_message_queue(controller.0.record_audio_i16_receiver.clone());
         }
         RecordingFormat::I32 => {
             let sender = controller.0.record_audio_i32_sender.clone();
@@ -905,7 +921,7 @@ fn run_recording(controller: WhisperAppController, configs: RecorderConfigs) {
                 filter,
                 f_central,
             );
-            controller.clear_audio_i32();
+            clear_message_queue(controller.0.record_audio_i32_receiver.clone());
         }
         RecordingFormat::F32 => {
             let sender = controller.0.record_audio_f32_sender.clone();
@@ -924,20 +940,26 @@ fn run_recording(controller: WhisperAppController, configs: RecorderConfigs) {
                 filter,
                 f_central,
             );
-            controller.clear_audio_f32();
+            clear_message_queue(controller.0.record_audio_f32_receiver.clone());
         }
     }
+    controller.0.audio_worker_state.store(AudioWorkerState::Idle, Ordering::Release);
 }
 
-// TODO: refactor threading: Visualizer + Writer do not return -> likely msg queue not yet dropped.
 // TODO: add a progress job to this setup.
 fn run_realtime_audio_transcription(
     controller: WhisperAppController,
     configs: Arc<whisper_realtime::configs::Configs>,
+    filtering: (bool, f32, f32),
 ) -> Result<String, Box<dyn Any + Send>> {
-    // Clear the text buffer.
-    clear_transcription_buffer(controller.clone());
+    // Audio filtering
+    let filter = filtering.0;
+    let f_higher = filtering.1;
+    let f_lower = filtering.2;
+    let f_central = f_central(f_lower, f_higher);
 
+    // Clear the text buffer.
+    controller.clear_transcription_buffer();
     // Clone the controller
     let c_controller_audio_thread = controller.clone();
     let c_controller_write_thread = controller.clone();
@@ -977,6 +999,8 @@ fn run_realtime_audio_transcription(
     );
     let audio_spec = Arc::new(mic_stream.spec().clone());
     let sample_rate = audio_spec.freq as f64;
+    let sample_rate_bandpass = sample_rate as f32;
+
     let c_audio_spec = audio_spec.clone();
     let c_mic_stream = mic_stream.clone();
 
@@ -984,6 +1008,7 @@ fn run_realtime_audio_transcription(
     let ctx = init_whisper_ctx(c_model.clone(), c_configs.use_gpu);
     let mut state = ctx.create_state().expect("Failed to create WhisperState");
 
+    // Focus the transcriber tab.
     controller
         .send_focus_tab(FocusTab::Transcription)
         .expect("Focus tab channel closed");
@@ -1009,7 +1034,6 @@ fn run_realtime_audio_transcription(
                             normalized_waveform(&output, &mut guard);
                         }
                         AnalysisType::Power => {
-                            // Power analysis
                             let mut guard = c_controller_visualizer_thread
                                 .0
                                 .visualizer_buffer
@@ -1018,7 +1042,6 @@ fn run_realtime_audio_transcription(
                             power_analysis(&output, &mut guard);
                         }
                         AnalysisType::SpectrumDensity => {
-                            // Spectrum analysis
                             let mut guard = c_controller_visualizer_thread
                                 .0
                                 .visualizer_buffer
@@ -1054,11 +1077,6 @@ fn run_realtime_audio_transcription(
             }
 
             writer.finalize().expect("Failed to close writer.");
-            // Update state - can save recording.
-            c_controller_write_thread
-                .0
-                .save_recording_ready
-                .store(true, Ordering::Release);
 
             log(&"Writer closed properly");
         });
@@ -1076,10 +1094,15 @@ fn run_realtime_audio_transcription(
                     break;
                 }
 
-                let output = c_controller_audio_thread.receive_audio_f32();
+                let output = c_controller_audio_thread.0.record_audio_f32_receiver.recv();
                 assert!(output.is_ok(), "Realtime Audio Channel closed");
 
                 let mut audio_data = output.unwrap();
+
+                // Filter the audio
+                if filter {
+                    bandpass_filter(&mut audio_data, sample_rate_bandpass, f_central);
+                }
 
                 // NOTE: This blocks.
                 c_audio_reader.push_audio(&mut audio_data);
@@ -1099,7 +1122,7 @@ fn run_realtime_audio_transcription(
 
             // CLEAR THE MSG QUEUE -> this runs a loop to eat msgs until the channel is fully cleared
             // or has no producers.
-            c_controller_audio_thread.clear_audio_f32();
+            clear_message_queue(c_controller_audio_thread.0.record_audio_f32_receiver.clone());
 
             // Closed properly
             log(&"Audio reader thread closed properly");
@@ -1116,8 +1139,7 @@ fn run_realtime_audio_transcription(
                         match result {
                             Ok(text_packet) => {
                                 if text_packet.0 == constants::GO_MSG {
-                                    // TODO: SET THE STATE ENUM FROM PROGRESS TO -GO-
-                                    continue;
+                                    c_controller_transcription_reader_thread.0.audio_worker_state.store(AudioWorkerState::Running, Ordering::Release);
                                 }
 
                                 if text_packet.0 == constants::STOP_MSG {
@@ -1170,19 +1192,9 @@ fn run_realtime_audio_transcription(
                 }
             }
 
+            // TODO: factor out.
             // Clear the text channel
-            while let Ok(t) = c_controller_transcription_reader_thread
-                .0
-                .transcription_text_receiver
-                .try_recv()
-            {
-                match t {
-                    Ok(t) => log(&t.0),
-                    Err(e) => log(&e.to_string()),
-                }
-                continue;
-            }
-
+            clear_message_queue(c_controller_transcription_reader_thread.0.transcription_text_receiver.clone());
             // Closed properly
             log(&"Transcription reader thread closed properly");
         });
@@ -1198,7 +1210,6 @@ fn run_realtime_audio_transcription(
                 );
 
                 let output = transcriber.process_audio(&mut state, None::<fn(i32)>);
-                // Closed properly
                 log(&"Transcription runner thread closed properly");
                 output
             })
@@ -1207,7 +1218,8 @@ fn run_realtime_audio_transcription(
     });
 
     c_mic_stream.pause();
-    match transcription {
+
+    let result = match transcription {
         Ok(t) => {
             let mut guard = controller
                 .0
@@ -1222,7 +1234,16 @@ fn run_realtime_audio_transcription(
             // TODO: write an app error to propagate
             Err(e)
         }
-    }
+    };
+
+
+    // Update state
+    controller
+        .0
+        .save_recording_ready
+        .store(true, Ordering::Release);
+    controller.0.audio_worker_state.store(AudioWorkerState::Idle, Ordering::Release);
+    result
 }
 
 // TODO: add progress job.
@@ -1232,7 +1253,7 @@ fn run_static_audio_transcription(
     configs: Arc<whisper_realtime::configs::Configs>,
 ) -> Result<String, Box<dyn Any + Send>> {
     // Clear the text buffer.
-    clear_transcription_buffer(controller.clone());
+    controller.clear_transcription_buffer();
 
     let c_controller_runner_thread = controller.clone();
     let c_controller_reader_thread = controller.clone();
@@ -1271,6 +1292,9 @@ fn run_static_audio_transcription(
             .spawn(move || {
                 let mut transcriber =
                     StaticTranscriber::new_with_configs(audio, data_sender, configs, channels);
+
+                c_controller_runner_thread.0.audio_worker_state.store(AudioWorkerState::Running, Ordering::Release);
+
                 let output = transcriber.process_audio(&mut state, progress_callback);
                 // TODO: check library for whether set internally.
                 c_controller_runner_thread
@@ -1346,25 +1370,14 @@ fn run_static_audio_transcription(
                 }
             }
 
-            // TODO: factor out.
             // Clear the text channel
-            while let Ok(t) = c_controller_reader_thread
-                .0
-                .transcription_text_receiver
-                .try_recv()
-            {
-                match t {
-                    Ok(t) => log(&t.0),
-                    Err(e) => log(&e.to_string()),
-                }
-                continue;
-            }
+            clear_message_queue(c_controller_reader_thread.0.transcription_text_receiver.clone());
             log(&String::from("Transcription reader finished"));
         });
         transcription_runner_thread
     });
 
-    match transcription_thread {
+    let result = match transcription_thread {
         Ok(t) => {
             let mut guard = controller
                 .0
@@ -1379,23 +1392,15 @@ fn run_static_audio_transcription(
             // TODO: Proper error
             Err(e)
         }
-    }
+    };
+    controller.0.audio_worker_state.store(AudioWorkerState::Idle, Ordering::Release);
+
+    result
 }
 
-fn clear_transcription_buffer(controller: WhisperAppController) {
-    let guard = controller.0.transcription_buffer.write();
-    match guard {
-        Ok(mut text_buffer) => {
-            text_buffer.clear();
-            log(&format!(
-                "Text buffer should be length 0, length: {}",
-                text_buffer.len()
-            ))
-        }
-        Err(poison) => {
-            let mut text_buffer = poison.into_inner();
-            text_buffer.clear();
-        }
+fn clear_message_queue<T>(queue: Receiver<T>) {
+    while let Ok(_) = queue.try_recv() {
+        continue;
     }
 }
 
@@ -1409,11 +1414,12 @@ struct WhisperAppContext {
     // ASYNC (DOWNLOADS)
     client: reqwest::Client,
     handle: Handle,
-
-    system_theme: Mutex<Option<eframe::Theme>>,
+    system_theme: RwLock<Option<eframe::Theme>>,
     // SDL AUDIO
     audio_wrapper: Arc<SdlAudioWrapper>,
     // STATE
+    audio_worker_state: Arc<AtomicAudioWorkerState>,
+    application_running: Arc<AtomicBool>,
     realtime_ready: Arc<AtomicBool>,
     static_ready: Arc<AtomicBool>,
     save_recording_ready: Arc<AtomicBool>,
@@ -1468,7 +1474,7 @@ impl WhisperAppContext {
         let gpu_enabled = check_gpu_target();
         let gpu_support = Arc::new(AtomicBool::new(gpu_enabled));
 
-        let system_theme = Mutex::new(system_theme);
+        let system_theme = RwLock::new(system_theme);
 
         // STATE
         let downloading = Arc::new(AtomicBool::new(false));
@@ -1479,6 +1485,9 @@ impl WhisperAppContext {
         let realtime_running = Arc::new(AtomicBool::new(false));
         let static_running = Arc::new(AtomicBool::new(false));
         let recorder_running = Arc::new(AtomicBool::new(false));
+
+        let application_running = Arc::new(AtomicBool::new(true));
+        let audio_worker_state = Arc::new(AtomicAudioWorkerState::new(AudioWorkerState::Idle));
 
         // Visualizer
         let visualizer_buffer = RwLock::new([0.0; constants::NUM_BUCKETS]);
@@ -1508,6 +1517,8 @@ impl WhisperAppContext {
             handle,
             system_theme,
             audio_wrapper,
+            audio_worker_state,
+            application_running,
             realtime_ready,
             static_ready,
             save_recording_ready,

@@ -8,7 +8,7 @@ use hound::{Sample, WavReader, WavSpec, WavWriter};
 use symphonia::{
     core::{
         audio::SampleBuffer,
-        codecs::{Decoder, DecoderOptions, CODEC_TYPE_NULL},
+        codecs::{CODEC_TYPE_NULL, Decoder, DecoderOptions},
         errors::Error,
         formats::{FormatOptions, FormatReader},
         io::MediaSourceStream,
@@ -27,6 +27,13 @@ fn qualify_path(dir: &Path) -> PathBuf {
     let mut path = dir.to_path_buf();
     path.push(constants::TEMP_FILE);
     path
+}
+
+pub fn delete_temporary_audio_file() -> io::Result<()> {
+    let data_dir = eframe::storage_dir(constants::APP_ID).expect("Failed to get data directory.");
+    let file_path = get_temp_file_path(&data_dir);
+    std::fs::remove_file(&file_path)?;
+    Ok(())
 }
 
 pub fn copy_data(from: &Path, to: &Path) -> io::Result<()> {

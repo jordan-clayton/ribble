@@ -3,16 +3,19 @@ use std::path::PathBuf;
 use egui::{Button, Grid, Label, RichText, ScrollArea, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::VariantArray;
-use whisper_realtime::model::Model;
-use whisper_realtime::{configs::Configs, model::ModelType};
+use whisper_realtime::{configs::Configs, model::{Model, ModelType}};
 
-use crate::ui::tabs::controller_tabs::controller_common;
-use crate::ui::widgets::icons::{ok_icon, warning_icon};
-use crate::utils::preferences::get_app_theme;
-use crate::utils::{constants, file_mgmt};
 use crate::{
-    controller::whisper_app_controller::WhisperAppController, ui::tabs::tab_view,
-    utils::threading::get_max_threads,
+    controller::whisper_app_controller::WhisperAppController, ui::{
+        tabs::controller_tabs::controller_common::{model_stack, n_threads_stack, save_transcription_button, set_language_stack, set_translate_stack, use_gpu_stack},
+        widgets::icons::{ok_icon, warning_icon},
+    },
+    ui::tabs::tab_view,
+    utils::{
+        constants,
+        file_mgmt, preferences::get_app_theme,
+        threading::get_max_threads,
+    },
 };
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -124,7 +127,7 @@ impl tab_view::TabView for StaticTab {
                     .show(ui, |ui| {
                         // MODEL ROW, see configs common.
                         // Contains dropdown to select model type, to open a downloaded model + download a model.
-                        controller_common::model_row(
+                        model_stack(
                             ui,
                             model,
                             &m_model,
@@ -135,16 +138,16 @@ impl tab_view::TabView for StaticTab {
                         );
                         ui.end_row();
                         // Num_threads
-                        controller_common::n_threads_row(ui, n_threads, *max_threads);
+                        n_threads_stack(ui, n_threads, *max_threads);
                         ui.end_row();
                         let gpu_enabled = controller.gpu_enabled();
-                        controller_common::use_gpu_row(ui, use_gpu, gpu_enabled);
+                        use_gpu_stack(ui, use_gpu, gpu_enabled);
                         ui.end_row();
                         // INPUT Language -> Set to auto for language detection
-                        controller_common::set_language_row(ui, language);
+                        set_language_stack(ui, language);
                         ui.end_row();
                         // Translate (TO ENGLISH)
-                        controller_common::set_translate_row(ui, set_translate);
+                        set_translate_stack(ui, set_translate);
                         ui.end_row();
                         // Reset defaults button.
                         ui.label("Reset To Defaults");
@@ -265,24 +268,7 @@ impl tab_view::TabView for StaticTab {
             ui.add_enabled_ui(!static_running && !realtime_running, |ui| {
                 ui.heading("Saving");
                 ui.vertical_centered_justified(|ui| {
-                    // TODO: factor out to common.
-                    if ui.add(Button::new("Save Transcription")).clicked() {
-                        // Open File dialog at HOME directory, fallback to root.
-                        let base_dirs = directories::BaseDirs::new();
-                        let dir = if let Some(dir) = base_dirs {
-                            dir.home_dir().to_path_buf()
-                        } else {
-                            PathBuf::from("/")
-                        };
-
-                        if let Some(p) = rfd::FileDialog::new()
-                            .add_filter("text (.txt)", &["txt"])
-                            .set_directory(dir)
-                            .save_file()
-                        {
-                            controller.save_transcription(&p);
-                        }
-                    }
+                    save_transcription_button(ui, controller.clone());
                     ui.add_space(constants::BLANK_SEPARATOR);
                     if ui.add(Button::new("Copy to Clipboard")).clicked() {
                         controller.copy_to_clipboard();
@@ -299,8 +285,7 @@ impl tab_view::TabView for StaticTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

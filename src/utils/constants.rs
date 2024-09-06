@@ -23,26 +23,25 @@ pub const MIN_VAD_PROBABILITY: f32 = 0.5;
 pub const MAX_VAD_PROBABILITY: f32 = 0.9;
 
 // FFT CONSTANTS
-// TODO: SETTLE ON PROPER VALUES
 pub const FRAME_CONVERGENCE_ITERATIONS: usize = 1000;
 pub const FRAME_CONVERGENCE_TOLERANCE: usize = 2;
 pub const NUM_BUCKETS: usize = 32;
 pub const SMOOTH_FACTOR: f32 = 8.0;
 
-// Human speech is roughly 80-85Hz.
-pub const DEFAULT_F_LOWER: f32 = 25f32;
-pub const DEFAULT_F_HIGHER: f32 = 4000f32;
-pub const MIN_F_LOWER: f32 = 25.0;
+// Default range is 20Hz - 20kHz
+pub const DEFAULT_F_LOWER: f32 = 20f32;
+pub const DEFAULT_F_HIGHER: f32 = 20000f32;
+pub const MIN_F_LOWER: f32 = 10.0;
 pub const MAX_F_LOWER: f32 = 100.0;
 pub const MIN_F_HIGHER: f32 = 330.0;
-pub const MAX_F_HIGHER: f32 = 20000.0;
-pub const MAX_FFT_HEIGHT: f32 = 800.0;
-pub const MIN_FFT_HEIGHT: f32 = 30.0;
-pub const FFT_HEIGHT_EXPANSION: f32 = 20.0;
-pub const FFT_MAX_HEIGHT_PROPORTION: f32 = 0.90;
-pub const FFT_MIN_HEIGHT_PROPORTION: f32 = 0.10;
-pub const FFT_MAX_WIDTH: f32 = 100.0;
-pub const FFT_MIN_WIDTH: f32 = 8.0;
+pub const MAX_F_HIGHER: f32 = 80000.0;
+pub const MAX_VISUALIZER_HEIGHT: f32 = 800.0;
+pub const MIN_VISUALIZER_HEIGHT: f32 = 30.0;
+pub const VISUALIZER_HEIGHT_EXPANSION: f32 = 20.0;
+pub const VISUALIZER_MAX_HEIGHT_PROPORTION: f32 = 0.90;
+pub const VISUALIZER_MIN_HEIGHT_PROPORTION: f32 = 0.10;
+pub const VISUALIZER_MAX_WIDTH: f32 = 16.0;
+pub const VISUALIZER_MIN_WIDTH: f32 = 8.0;
 pub const FFT_GAIN: f32 = 30.0;
 pub const WAVEFORM_GAIN: f32 = FFT_GAIN / 2.0;
 

@@ -1,10 +1,17 @@
-use std::any::Any;
-use std::thread::JoinHandle;
+use std::{
+    any::Any,
+    thread::JoinHandle,
+};
 
-use crate::controller::whisper_app_controller::WhisperAppController;
-use crate::utils::console_message::{ConsoleMessage, ConsoleMessageType};
-use crate::utils::constants;
-use crate::utils::workers::WorkerType;
+use sdl2::log::log;
+
+use crate::{
+    controller::whisper_app_controller::WhisperAppController,
+    utils::{
+        console_message::{ConsoleMessage, ConsoleMessageType},
+        workers::WorkerType,
+    },
+};
 
 pub fn get_max_threads() -> std::ffi::c_int {
     match std::thread::available_parallelism() {
@@ -21,11 +28,14 @@ pub fn join_threads_loop(
     )>,
     controller: WhisperAppController,
 ) {
-    loop {
+    while controller.app_running() {
         let msg = msg_queue.recv();
+        if !controller.app_running() {
+            break;
+        }
         match msg {
             Ok(m) => {
-                let (worker, handle) = m;
+                let (_worker, handle) = m;
                 let res = handle.join();
                 if let Err(e) = res {
                     let msg = ConsoleMessage::new(ConsoleMessageType::Error, format!("{:?}", e));
@@ -42,12 +52,6 @@ pub fn join_threads_loop(
 
                 let res = res.unwrap();
 
-                if worker == WorkerType::ThreadManagement {
-                    if res == constants::CLOSE_MSG {
-                        break;
-                    }
-                }
-
                 let msg = ConsoleMessage::new(ConsoleMessageType::Status, res);
                 send_console_msg(msg, controller.clone());
             }
@@ -57,6 +61,8 @@ pub fn join_threads_loop(
             }
         }
     }
+    #[cfg(debug_assertions)]
+    log("Joiner thread closed.");
 }
 
 // TODO: figure out a way to handle without panicking.

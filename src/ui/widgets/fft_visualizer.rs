@@ -1,12 +1,11 @@
-use catppuccin_egui::{Theme, MOCHA};
+use catppuccin_egui::{MOCHA, Theme};
 use eframe::epaint::Hsva;
-use egui::emath::easing::{cubic_out, exponential_in};
-use egui::{lerp, vec2, Pos2, Rgba, Sense, Stroke, Ui};
+use egui::{
+    emath::easing::{cubic_out, exponential_in},
+    lerp, Pos2, Rgba, Sense, Stroke, Ui, vec2};
 
 use crate::utils::constants;
-use crate::utils::constants::FFT_HEIGHT_EXPANSION;
 
-// At the moment, this is pretty bare-bones.
 pub fn draw_fft(ui: &mut Ui, data: &[f32; constants::NUM_BUCKETS], theme: Option<Theme>) {
     let theme = theme.unwrap_or(MOCHA);
     let gradient_stops: Vec<Rgba> = vec![
@@ -39,17 +38,20 @@ pub fn draw_fft(ui: &mut Ui, data: &[f32; constants::NUM_BUCKETS], theme: Option
     let available_width = ui.available_size().x;
     let spacing_x = ui.spacing().item_spacing.x;
     let spacing_threshold = spacing_x * 0.5 * (float_buckets - 1.0);
-    let minimum_total_spacing = available_width - constants::FFT_MIN_WIDTH * (float_buckets);
+    let double_bars_threshold = spacing_x * (2.0 * float_buckets - 1.0);
+    let minimum_total_spacing = available_width - constants::VISUALIZER_MIN_WIDTH * (float_buckets);
 
-    let max_num_columns = (available_width - spacing_threshold) / constants::FFT_MIN_WIDTH;
+    let max_num_columns = (available_width - spacing_threshold) / constants::VISUALIZER_MIN_WIDTH;
     let p = max_num_columns / float_buckets;
     let max_linear = lerp(10.0..=(float_buckets - 1.0), p).ceil() as usize;
     let max_num_columns = max_linear;
 
-    // let all_bars = 0.0 <= expected_column_width;
+    let double_bars = minimum_total_spacing >= double_bars_threshold;
     let all_bars = minimum_total_spacing >= spacing_threshold;
 
-    let num_columns = if all_bars {
+    let num_columns = if double_bars {
+        constants::NUM_BUCKETS * 2
+    } else if all_bars {
         constants::NUM_BUCKETS
     } else {
         max_num_columns
@@ -68,10 +70,18 @@ pub fn draw_fft(ui: &mut Ui, data: &[f32; constants::NUM_BUCKETS], theme: Option
 
     ui.horizontal_centered(|ui| {
         ui.columns(num_columns, |cols| {
-            for (i, col) in cols.iter_mut().enumerate() {
-                col.centered_and_justified(|ui| {
-                    fft_bar(ui, gradient[i], data[i], &pos);
-                });
+            if double_bars {
+                for (i, col) in cols.iter_mut().enumerate() {
+                    col.centered_and_justified(|ui| {
+                        fft_bar(ui, gradient[i / 2], data[i / 2], &pos);
+                    });
+                }
+            } else {
+                for (i, col) in cols.iter_mut().enumerate() {
+                    col.centered_and_justified(|ui| {
+                        fft_bar(ui, gradient[i], data[i], &pos);
+                    });
+                }
             }
         });
     });
@@ -80,9 +90,9 @@ pub fn draw_fft(ui: &mut Ui, data: &[f32; constants::NUM_BUCKETS], theme: Option
 fn fft_bar(ui: &mut Ui, color: Rgba, amp: f32, mouse_position: &Pos2) {
     let available_size = ui.available_size();
     let max_cell_height =
-        (available_size.y * constants::FFT_MAX_HEIGHT_PROPORTION).min(constants::MAX_FFT_HEIGHT);
+        (available_size.y * constants::VISUALIZER_MAX_HEIGHT_PROPORTION).min(constants::MAX_VISUALIZER_HEIGHT);
     let min_cell_height =
-        (available_size.y * constants::FFT_MIN_HEIGHT_PROPORTION).max(constants::MIN_FFT_HEIGHT);
+        (available_size.y * constants::VISUALIZER_MIN_HEIGHT_PROPORTION).max(constants::MIN_VISUALIZER_HEIGHT);
 
     let high_color: Rgba = color;
 
@@ -96,11 +106,11 @@ fn fft_bar(ui: &mut Ui, color: Rgba, amp: f32, mouse_position: &Pos2) {
     let color_t = cubic_out(amp);
     let color = lerp(low_color..=high_color, color_t);
 
-    // Cell is between 10 and 100 px thick (atm);
+    // Cell is between 8 and 20 px thick (atm);
     let cell_width = available_size
         .x
-        .min(constants::FFT_MAX_WIDTH)
-        .max(constants::FFT_MIN_WIDTH);
+        .min(constants::VISUALIZER_MAX_WIDTH)
+        .max(constants::VISUALIZER_MIN_WIDTH);
     let desired_size = vec2(cell_width, adjusted_cell_height);
     let (rect, _) = ui.allocate_exact_size(desired_size, Sense::hover());
     let spacing = ui.spacing().item_spacing * 3.0;
@@ -124,7 +134,7 @@ fn fft_bar(ui: &mut Ui, color: Rgba, amp: f32, mouse_position: &Pos2) {
             0.0
         };
 
-        let mut vertical_expand = in_bounds * FFT_HEIGHT_EXPANSION;
+        let mut vertical_expand = in_bounds * constants::VISUALIZER_HEIGHT_EXPANSION;
         let height = rect.height();
         if height + vertical_expand > max_cell_height {
             let diff = height + vertical_expand - max_cell_height;
@@ -132,7 +142,7 @@ fn fft_bar(ui: &mut Ui, color: Rgba, amp: f32, mouse_position: &Pos2) {
         }
 
         let expansion = vec2(in_bounds, vertical_expand);
-        let mut rect = rect.expand2(expansion);
+        let rect = rect.expand2(expansion);
 
         let rounding = 0.5 * rect.height();
         ui.painter().rect(rect, rounding, color, Stroke::NONE);

@@ -4,16 +4,20 @@ use egui::{Button, Grid, Label, RichText, ScrollArea, Slider, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use sdl2::log::log;
 use strum::{IntoEnumIterator, VariantArray};
-use whisper_realtime::model::Model;
-use whisper_realtime::{configs::Configs, model::ModelType};
+use whisper_realtime::{configs::Configs, model::{Model, ModelType}};
 
-use crate::ui::tabs::controller_tabs::controller_common;
-use crate::ui::tabs::whisper_tab::FocusTab;
-use crate::utils::preferences::get_app_theme;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
-    ui::tabs::tab_view,
-    utils::{constants, threading::get_max_threads},
+    ui::{
+        tabs::controller_tabs::controller_common::{f_higher_stack, f_lower_stack, model_stack, n_threads_stack, save_transcription_button, set_language_stack, set_translate_stack, toggle_bandpass_filter_stack, use_gpu_stack},
+        tabs::tab_view,
+        tabs::whisper_tab::FocusTab,
+    },
+    utils::{
+        constants,
+        preferences::get_app_theme,
+        threading::get_max_threads,
+    },
 };
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -23,18 +27,25 @@ pub struct RealtimeTab {
     #[serde(skip)]
     #[serde(default = "get_max_threads")]
     max_threads: std::ffi::c_int,
+    filter: bool,
+    f_lower: f32,
+    f_higher: f32,
 }
 
 impl RealtimeTab {
     pub fn new() -> Self {
         Self::default()
     }
-    pub fn new_with_configs(configs: Configs) -> Self {
+    pub fn new_with_configs(realtime_configs: Configs) -> Self {
         let max_threads = get_max_threads();
         Self {
             title: String::from("Realtime"),
-            realtime_configs: configs,
+            realtime_configs,
             max_threads,
+            filter: false,
+            f_lower: constants::DEFAULT_F_LOWER,
+            f_higher: constants::DEFAULT_F_HIGHER,
+
         }
     }
 }
@@ -61,7 +72,7 @@ impl tab_view::TabView for RealtimeTab {
         let Self {
             title: _,
             realtime_configs,
-            max_threads,
+            max_threads, filter, f_lower, f_higher,
         } = self;
 
         let Configs {
@@ -112,21 +123,32 @@ impl tab_view::TabView for RealtimeTab {
                     .striped(true)
                     .show(ui, |ui| {
                         // Model
-                        controller_common::model_row(ui, model, &m_model, downloaded, controller.clone(), available_models.as_slice(), Some(theme));
+                        model_stack(ui, model, &m_model, downloaded, controller.clone(), available_models.as_slice(), Some(theme));
                         ui.end_row();
                         // Num_threads
-                        controller_common::n_threads_row(ui, n_threads, *max_threads);
+                        n_threads_stack(ui, n_threads, *max_threads);
                         ui.end_row();
                         // Use gpu
                         let gpu_enabled = controller.gpu_enabled();
-                        controller_common::use_gpu_row(ui, use_gpu, gpu_enabled);
+                        use_gpu_stack(ui, use_gpu, gpu_enabled);
                         ui.end_row();
                         // INPUT Language -> Set to auto for language detection
-                        controller_common::set_language_row(ui, language);
+                        set_language_stack(ui, language);
                         ui.end_row();
                         // Translate (TO ENGLISH)
-                        controller_common::set_translate_row(ui, set_translate);
+                        set_translate_stack(ui, set_translate);
                         ui.end_row();
+
+                        // Filter audio
+                        toggle_bandpass_filter_stack(ui, filter);
+                        ui.end_row();
+
+                        f_higher_stack(ui, *filter, f_higher);
+                        ui.end_row();
+
+                        f_lower_stack(ui, *filter, f_lower);
+                        ui.end_row();
+
                         // Transcriber Timeout
                         ui.label("Transcription Timeout").on_hover_ui(|ui| {
                             ui.label("Set realtime timeout? Set to 0 to disable");
@@ -252,6 +274,9 @@ impl tab_view::TabView for RealtimeTab {
                             *vad_sample_ms = default_vad_sample_ms;
                             *phrase_timeout = default_phrase_timeout;
                             *voice_probability_threshold = default_voice_probability_threshold;
+                            *filter = false;
+                            *f_lower = constants::DEFAULT_F_LOWER;
+                            *f_higher = constants::DEFAULT_F_HIGHER;
                         }
                         ui.end_row();
                     });
@@ -267,7 +292,7 @@ impl tab_view::TabView for RealtimeTab {
                         .add_enabled(!realtime_running && realtime_ready, Button::new("Start"))
                         .clicked()
                     {
-                        controller.start_realtime_transcription(c_configs);
+                        controller.start_realtime_transcription(c_configs, (*filter, *f_higher, *f_lower));
                     }
 
                     ui.add_space(constants::BLANK_SEPARATOR);
@@ -291,23 +316,7 @@ impl tab_view::TabView for RealtimeTab {
             ui.add_enabled_ui(!realtime_running && !static_running, |ui| {
                 ui.heading("Saving");
                 ui.vertical_centered_justified(|ui| {
-                    if ui.add(Button::new("Save Transcription")).clicked() {
-                        // Open File dialog at HOME directory, fallback to root.
-                        let base_dirs = directories::BaseDirs::new();
-                        let dir = if let Some(dir) = base_dirs {
-                            dir.home_dir().to_path_buf()
-                        } else {
-                            PathBuf::from("/")
-                        };
-
-                        if let Some(p) = rfd::FileDialog::new()
-                            .add_filter("text (.txt)", &["txt"])
-                            .set_directory(dir)
-                            .save_file()
-                        {
-                            controller.save_transcription(&p);
-                        }
-                    }
+                    save_transcription_button(ui, controller.clone());
                     ui.add_space(constants::BLANK_SEPARATOR);
                     if ui.add(Button::new("Copy to Clipboard")).clicked() {
                         controller.copy_to_clipboard();
@@ -360,8 +369,7 @@ impl tab_view::TabView for RealtimeTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

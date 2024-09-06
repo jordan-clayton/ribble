@@ -1,26 +1,28 @@
 use eframe::epaint::text::TextWrapMode;
-use egui::{
-    CentralPanel, FontId, Frame, RichText, Sense, TextStyle, TopBottomPanel, Ui, WidgetText,
-};
+use egui::{Align, CentralPanel, FontId, Frame, Layout, RichText, Sense, TextStyle, TopBottomPanel, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::IntoEnumIterator;
 
-use crate::ui::widgets::fft_visualizer::draw_fft;
-use crate::utils::audio_analysis::AnalysisType;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
-    ui::{tabs::tab_view, widgets::recording_icon::recording_icon},
-    utils::{audio_analysis, constants, preferences},
+    ui::{
+        tabs::{
+            display_tabs::display_common::get_header_recording_icon,
+            tab_view,
+        },
+        widgets::{fft_visualizer::draw_fft, toggle_switch::toggle},
+    },
+    utils::{audio_analysis::{AnalysisType, smoothing}, constants, preferences},
 };
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct VisualizerTab {
     title: String,
     #[serde(skip)]
-    #[serde(default = "allocate_new_fft_buffer")]
+    #[serde(default = "allocate_new_visualizer_buffer")]
     current: [f32; constants::NUM_BUCKETS],
     #[serde(skip)]
-    #[serde(default = "allocate_new_fft_buffer")]
+    #[serde(default = "allocate_new_visualizer_buffer")]
     target: [f32; constants::NUM_BUCKETS],
     // This is to avoid unnecessary calls to clear the array.
     #[serde(skip)]
@@ -32,8 +34,8 @@ impl VisualizerTab {
     pub fn new() -> Self {
         Self {
             title: String::from("Visualizer"),
-            current: allocate_new_fft_buffer(),
-            target: allocate_new_fft_buffer(),
+            current: allocate_new_visualizer_buffer(),
+            target: allocate_new_visualizer_buffer(),
             target_cleared: false,
             visualize: true,
         }
@@ -64,12 +66,13 @@ impl tab_view::TabView for VisualizerTab {
         } = self;
 
         controller.set_run_visualizer(*visualize);
-        let mut accepting_speech = false;
         let realtime_running = controller.realtime_running();
         let recorder_running = controller.recorder_running();
         let mic_running = realtime_running || recorder_running;
+        let audio_worker_state = controller.audio_worker_state();
+        let visualizer_running = controller.run_visualizer();
 
-        if mic_running {
+        if visualizer_running && mic_running {
             *target_cleared = false;
             // Update to the latest fft data.
             controller.read_fft_buffer(target);
@@ -84,7 +87,7 @@ impl tab_view::TabView for VisualizerTab {
         // Get the frame time.
         let dt = ui.ctx().input(|i| i.stable_dt);
         // Smooth the current position towards tgt
-        audio_analysis::smoothing(current, target, dt);
+        smoothing(current, target, dt);
 
         // Force a repaint if the amplitudes are not zero.
         if current.iter().any(|f| (*f - 0.0) >= f32::EPSILON) {
@@ -93,32 +96,18 @@ impl tab_view::TabView for VisualizerTab {
 
         let system_theme = controller.get_system_theme();
         let theme = preferences::get_app_theme(system_theme);
-        let time_scale = Some(constants::RECORDING_ANIMATION_TIMESCALE);
 
-        // TODO: refactor this -> atomic enum for state + which audio_worker
-        TopBottomPanel::top("header")
+        TopBottomPanel::top("visualizer_header")
             .resizable(false)
             .show_inside(ui, |ui| {
-                let (icon, msg) = if accepting_speech {
-                    (
-                        recording_icon(egui::Rgba::from(theme.red), true, time_scale),
-                        "Recording in progress.",
-                    )
-                } else if mic_running {
-                    (
-                        recording_icon(egui::Rgba::from(theme.green), true, time_scale),
-                        "Preparing to record.",
-                    )
-                } else {
-                    (
-                        recording_icon(egui::Rgba::from(theme.green), false, time_scale),
-                        "Ready to record.",
-                    )
-                };
-
                 ui.horizontal(|ui| {
+                    let (icon, msg) = get_header_recording_icon(audio_worker_state, false, &theme);
                     ui.add(icon);
                     ui.label(msg);
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.add(toggle(visualize));
+                        ui.label("Run Visualizer")
+                    });
                 });
                 let space = ui.spacing().item_spacing.y;
                 ui.add_space(space);
@@ -163,8 +152,7 @@ impl tab_view::TabView for VisualizerTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true
@@ -175,7 +163,7 @@ impl tab_view::TabView for VisualizerTab {
     }
 }
 
-fn allocate_new_fft_buffer() -> [f32; constants::NUM_BUCKETS] {
+fn allocate_new_visualizer_buffer() -> [f32; constants::NUM_BUCKETS] {
     [0.0; constants::NUM_BUCKETS]
 }
 

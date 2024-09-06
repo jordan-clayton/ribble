@@ -4,19 +4,18 @@ use catppuccin_egui::Theme;
 use egui::Visuals;
 use egui_dock::{DockArea, DockState, NodeIndex, Style, SurfaceIndex, TabIndex};
 
-use crate::ui::tabs::whisper_tab::WhisperTab;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::{
         controller_tabs::{r#static, realtime, recording},
         display_tabs::{console, progress, transcription, visualizer},
         tab_viewer,
+        whisper_tab::WhisperTab,
     },
     utils::preferences,
 };
 
 pub struct WhisperApp {
-    // These need to be serialized
     tree: DockState<WhisperTab>,
     closed_tabs: HashMap<String, WhisperTab>,
     controller: WhisperAppController,
@@ -76,6 +75,7 @@ impl eframe::App for WhisperApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let system_theme = frame.info().system_theme;
         self.controller.set_system_theme(system_theme.clone());
+
 
         let theme = preferences::get_app_theme(system_theme);
 
