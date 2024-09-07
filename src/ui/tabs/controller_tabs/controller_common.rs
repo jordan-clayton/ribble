@@ -4,12 +4,12 @@ use catppuccin_egui::Theme;
 use egui::{Button, Checkbox, ComboBox, Slider, Ui};
 use whisper_realtime::model::{Model, ModelType};
 
+use crate::utils::errors::{WhisperAppError, WhisperAppErrorType};
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::widgets::icons::{ok_icon, warning_icon},
     utils::{constants, file_mgmt::copy_data},
 };
-use crate::utils::errors::{WhisperAppError, WhisperAppErrorType};
 
 pub fn save_transcription_button(ui: &mut Ui, controller: WhisperAppController) {
     if ui.add(Button::new("Save Transcription")).clicked() {
@@ -40,14 +40,17 @@ pub fn model_stack(
     available_models: &[ModelType],
     theme: Option<Theme>,
 ) {
+    let style = ui.style_mut();
+    style.interaction.show_tooltips_only_when_still = true;
+    style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
+    style.interaction.tooltip_delay = constants::TOOLTIP_DELAY;
+
     let downloading = controller.is_downloading();
 
     let model_path = m_model.file_path();
 
     ui.horizontal(|ui| {
-        ui.label("Model:").on_hover_ui(|ui| {
-            ui.label("Select the desired model for transcribing");
-        });
+        ui.label("Model:");
 
         if downloaded {
             ui.add(ok_icon(None, theme)).on_hover_ui(|ui| {
@@ -67,12 +70,16 @@ pub fn model_stack(
                 for m in available_models {
                     ui.selectable_value(model, *m, m.to_string());
                 }
+            })
+            .response
+            .on_hover_ui(|ui| {
+                ui.label("Select the desired model for transcribing");
             });
 
         if ui
             .button("Open")
             .on_hover_ui(|ui| {
-                ui.label(format!("Open a compatible {}, model.", model.to_string()));
+                ui.label(format!("Open a compatible {} model.", model.to_string()));
             })
             .clicked()
         {
@@ -99,7 +106,11 @@ pub fn model_stack(
                             to.as_os_str()
                         )),
                         Err(e) => {
-                            let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Failed to copy file. Info: {}", e.to_string()), false);
+                            let err = WhisperAppError::new(
+                                WhisperAppErrorType::IOError,
+                                format!("Failed to copy file. Info: {}", e.to_string()),
+                                false,
+                            );
                             Err(err)
                         }
                     }
@@ -126,39 +137,44 @@ pub fn model_stack(
 }
 
 pub fn n_threads_stack(ui: &mut Ui, n_threads: &mut std::ffi::c_int, max_threads: std::ffi::c_int) {
-    ui.label("Threads:").on_hover_ui(|ui| {
-        ui.label("Select the number of threads to allocate for transcription");
-        ui.label(format!("Recommended: {}", std::cmp::min(7, max_threads)));
-    });
+    let style = ui.style_mut();
+    style.interaction.show_tooltips_only_when_still = true;
+    style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
+    style.interaction.tooltip_delay = constants::TOOLTIP_DELAY;
+    ui.label("Threads:");
 
     ui.add(Slider::new(
         n_threads,
         1..=std::cmp::min(max_threads, constants::MAX_WHISPER_THREADS),
-    ));
+    ))
+    .on_hover_ui(|ui| {
+        ui.label("Select the number of threads to allocate for transcription");
+        ui.label(format!("Recommended: {}", std::cmp::min(7, max_threads)));
+    });
 }
 
 pub fn use_gpu_stack(ui: &mut Ui, use_gpu: &mut bool, gpu_capable: bool) {
+    let style = ui.style_mut();
+    style.interaction.show_tooltips_only_when_still = true;
+    style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
+    style.interaction.tooltip_delay = constants::TOOLTIP_DELAY;
     *use_gpu = *use_gpu & gpu_capable;
-    ui.label("Hardware Accelerated (GPU):").on_hover_ui(|ui| {
-        ui.label(
-            "Enable hardware acceleration (if supported). REQUIRED to use large models in realtime mode.",
-        );
-    });
+    ui.label("Hardware Acceleration (GPU):");
     ui.add_enabled(gpu_capable, Checkbox::without_text(use_gpu))
         .on_hover_ui(|ui| {
-            let status = if gpu_capable {
-                "supported"
-            } else {
-                "unsupported"
-            };
-            ui.label(format!("Hardware acceleration is {}", status));
+            ui.label("Enable hardware acceleration. Required for large models in realtime.");
+        })
+        .on_disabled_hover_ui(|ui| {
+            ui.label("Hardware acceleration is not supported. Realtime model selection limited.");
         });
 }
 
 pub fn set_language_stack(ui: &mut Ui, language: &mut Option<String>) {
-    ui.label("Language:").on_hover_ui(|ui| {
-        ui.label("Select input language. Set to Auto for auto-detection");
-    });
+    let style = ui.style_mut();
+    style.interaction.show_tooltips_only_when_still = true;
+    style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
+    style.interaction.tooltip_delay = constants::TOOLTIP_DELAY;
+    ui.label("Language:");
 
     ComboBox::from_id_source("language")
         .selected_text(
@@ -170,45 +186,70 @@ pub fn set_language_stack(ui: &mut Ui, language: &mut Option<String>) {
             for (k, v) in constants::LANGUAGE_OPTIONS.iter() {
                 ui.selectable_value(language, v.clone(), *k);
             }
+        })
+        .response
+        .on_hover_ui(|ui| {
+            ui.label("Select input language. Set to Auto for auto-detection");
         });
 }
 
 pub fn set_translate_stack(ui: &mut Ui, set_translate: &mut bool) {
-    ui.label("Translate").on_hover_ui(|ui| {
-        ui.label("Translate transcription (to English ONLY)");
-    });
+    let style = ui.style_mut();
+    style.interaction.show_tooltips_only_when_still = true;
+    style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
+    style.interaction.tooltip_delay = constants::TOOLTIP_DELAY;
+    ui.label("Translate");
 
-    ui.add(Checkbox::without_text(set_translate));
+    ui.add(Checkbox::without_text(set_translate))
+        .on_hover_ui(|ui| {
+            ui.label("Translate transcription into English.");
+        });
 }
 
-
 pub fn toggle_bandpass_filter_stack(ui: &mut Ui, filter: &mut bool) {
-    ui.label("Bandpass Filter:").on_hover_ui(|ui| {
-        ui.label("Run a bandpass filter to clean up audio?");
+    let style = ui.style_mut();
+    style.interaction.show_tooltips_only_when_still = true;
+    style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
+    style.interaction.tooltip_delay = constants::TOOLTIP_DELAY;
+    ui.label("Bandpass Filter:");
+    ui.add(Checkbox::without_text(filter)).on_hover_ui(|ui| {
+        ui.label("Run a bandpass filter to clean up audio.");
     });
-    ui.add(Checkbox::without_text(filter));
 }
 
 pub fn f_higher_stack(ui: &mut Ui, filter: bool, f_higher: &mut f32) {
+    let style = ui.style_mut();
+    style.interaction.show_tooltips_only_when_still = true;
+    style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
+    style.interaction.tooltip_delay = constants::TOOLTIP_DELAY;
     ui.add_enabled_ui(filter, |ui| {
         // High Threshold
-        ui.label("High frequency cutoff:").on_hover_ui(|ui| {
-            ui.label("Frequencies higher than this threshold will be filtered out.");
-        });
+        ui.label("High frequency cutoff:");
     });
 
     ui.add_enabled_ui(filter, |ui| {
-        ui.add(Slider::new(f_higher, constants::MIN_F_HIGHER..=constants::MAX_F_HIGHER).suffix("Hz"));
+        ui.add(
+            Slider::new(f_higher, constants::MIN_F_HIGHER..=constants::MAX_F_HIGHER).suffix("Hz"),
+        )
+        .on_hover_ui(|ui| {
+            ui.label("Frequencies higher than this threshold will be filtered out.");
+        });
     });
 }
 
 pub fn f_lower_stack(ui: &mut Ui, filter: bool, f_lower: &mut f32) {
+    let style = ui.style_mut();
+    style.interaction.show_tooltips_only_when_still = true;
+    style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
+    style.interaction.tooltip_delay = constants::TOOLTIP_DELAY;
+
     ui.add_enabled_ui(filter, |ui| {
-        ui.label("Low frequency cutoff:").on_hover_ui(|ui| {
-            ui.label("Frequencies lower than this threshold will be filtered out.");
-        });
+        ui.label("Low frequency cutoff:");
     });
     ui.add_enabled_ui(filter, |ui| {
-        ui.add(Slider::new(f_lower, constants::MIN_F_LOWER..=constants::MAX_F_LOWER).suffix("Hz"));
+        ui.add(Slider::new(f_lower, constants::MIN_F_LOWER..=constants::MAX_F_LOWER).suffix("Hz"))
+            .on_hover_ui(|ui| {
+                ui.label("Frequencies lower than this threshold will be filtered out.");
+            });
     });
 }

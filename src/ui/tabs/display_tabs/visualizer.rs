@@ -1,18 +1,21 @@
 use eframe::epaint::text::TextWrapMode;
-use egui::{Align, CentralPanel, FontId, Frame, Layout, RichText, Sense, TextStyle, TopBottomPanel, Ui, WidgetText};
+use egui::{
+    Align, CentralPanel, FontId, Frame, Layout, RichText, Sense, TextStyle, TopBottomPanel, Ui,
+    WidgetText,
+};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::IntoEnumIterator;
 
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::{
-        tabs::{
-            display_tabs::display_common::get_header_recording_icon,
-            tab_view,
-        },
+        tabs::{display_tabs::display_common::get_header_recording_icon, tab_view},
         widgets::{fft_visualizer::draw_fft, toggle_switch::toggle},
     },
-    utils::{audio_analysis::{AnalysisType, smoothing}, constants, preferences},
+    utils::{
+        audio_analysis::{smoothing, AnalysisType},
+        constants, preferences,
+    },
 };
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -152,7 +155,8 @@ impl tab_view::TabView for VisualizerTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

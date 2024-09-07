@@ -7,7 +7,9 @@ use strum::IntoEnumIterator;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::{
-        controller_tabs::controller_common::{f_higher_stack, f_lower_stack, toggle_bandpass_filter_stack},
+        controller_tabs::controller_common::{
+            f_higher_stack, f_lower_stack, toggle_bandpass_filter_stack,
+        },
         tab_view,
     },
     utils::{
@@ -220,7 +222,8 @@ impl tab_view::TabView for RecordingTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

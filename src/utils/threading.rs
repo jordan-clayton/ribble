@@ -3,12 +3,12 @@ use std::thread::JoinHandle;
 use crossbeam::channel::SendError;
 use sdl2::log::log;
 
+use crate::utils::constants;
+use crate::utils::errors::{extract_error_message, WhisperAppError, WhisperAppErrorType};
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     utils::console_message::{ConsoleMessage, ConsoleMessageType},
 };
-use crate::utils::constants;
-use crate::utils::errors::{extract_error_message, WhisperAppError, WhisperAppErrorType};
 
 pub fn get_max_threads() -> std::ffi::c_int {
     match std::thread::available_parallelism() {
@@ -18,9 +18,7 @@ pub fn get_max_threads() -> std::ffi::c_int {
 }
 
 pub fn join_threads_loop(
-    msg_queue: crossbeam::channel::Receiver<
-        JoinHandle<Result<String, WhisperAppError>>
-    >,
+    msg_queue: crossbeam::channel::Receiver<JoinHandle<Result<String, WhisperAppError>>>,
     controller: WhisperAppController,
 ) {
     loop {
@@ -33,7 +31,10 @@ pub fn join_threads_loop(
                 if let Err(e) = res {
                     let e_msg = extract_error_message(e);
 
-                    let msg = ConsoleMessage::new(ConsoleMessageType::Error, format!("Worker thread panicked.  Info: {}", e_msg));
+                    let msg = ConsoleMessage::new(
+                        ConsoleMessageType::Error,
+                        format!("Worker thread panicked.  Info: {}", e_msg),
+                    );
                     if let Err(_) = send_console_msg(msg.clone(), controller.clone()) {
                         // Print to stderr
                         eprintln!("{}", msg);
@@ -43,18 +44,20 @@ pub fn join_threads_loop(
                     continue;
                 }
 
-
                 let res = res.unwrap();
 
                 if let Err(e) = res {
-                    let msg = ConsoleMessage::new(ConsoleMessageType::Error, format!("{}", e.to_string()));
+                    let msg = ConsoleMessage::new(
+                        ConsoleMessageType::Error,
+                        format!("{}", e.to_string()),
+                    );
                     if let Err(_) = send_console_msg(msg.clone(), controller.clone()) {
                         // Print to stderr
                         eprintln!("{}", msg);
                         controller.mark_poisoned();
                     };
 
-                    if e.fatal {
+                    if e.fatal() {
                         // Print to stderr
                         eprintln!("{}", msg);
                         controller.mark_poisoned();
@@ -72,7 +75,11 @@ pub fn join_threads_loop(
                 let msg = ConsoleMessage::new(ConsoleMessageType::Status, res);
                 if let Err(_) = send_console_msg(msg, controller.clone()) {
                     // Print to stderr
-                    let msg = WhisperAppError::new(WhisperAppErrorType::IOError, String::from("Console message channel closed."), true);
+                    let msg = WhisperAppError::new(
+                        WhisperAppErrorType::IOError,
+                        String::from("Console message channel closed."),
+                        true,
+                    );
                     eprintln!("{}", msg);
                     controller.mark_poisoned();
                 }
@@ -87,7 +94,9 @@ pub fn join_threads_loop(
     log("Joiner thread closed.");
 }
 
-fn send_console_msg(msg: ConsoleMessage, controller: WhisperAppController) -> Result<(), SendError<ConsoleMessage>> {
-    controller
-        .send_console_message(msg)
+fn send_console_msg(
+    msg: ConsoleMessage,
+    controller: WhisperAppController,
+) -> Result<(), SendError<ConsoleMessage>> {
+    controller.send_console_message(msg)
 }

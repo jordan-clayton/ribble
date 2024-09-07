@@ -3,10 +3,7 @@ use egui_dock::{NodeIndex, SurfaceIndex};
 
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
-    ui::tabs::{
-        display_tabs::display_common::get_header_recording_icon,
-        tab_view,
-    },
+    ui::tabs::{display_tabs::display_common::get_header_recording_icon, tab_view},
     utils::preferences,
 };
 
@@ -95,7 +92,8 @@ impl tab_view::TabView for TranscriptionTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

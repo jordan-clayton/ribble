@@ -1,10 +1,18 @@
 use catppuccin_egui::Theme;
 use eframe::epaint::Color32;
-use egui::{Image, ImageSource, include_image, Response, Sense, Ui, vec2, Widget, WidgetInfo, WidgetType};
+use egui::{
+    include_image, vec2, Image, ImageSource, Response, Sense, Ui, Widget, WidgetInfo, WidgetType,
+};
 
 // NOTE: egui caches image textures by default and will not evict if the image scaling changes.
 // If ever needing to scale icons larger than 1x, an eviction implementation will be required.
-fn draw_icon(ui: &mut Ui, scale: Option<f32>, image: ImageSource, tint: Color32, accessibility_label: &str) -> Response {
+fn draw_icon(
+    ui: &mut Ui,
+    scale: Option<f32>,
+    image: ImageSource,
+    tint: Color32,
+    accessibility_label: &str,
+) -> Response {
     let scale = scale.unwrap_or(1.0);
     let desired_size = ui.spacing().interact_size.y * vec2(1.0, 1.0) * scale;
     let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click());
@@ -31,7 +39,13 @@ fn draw_ok_icon(ui: &mut Ui, scale: Option<f32>, theme: Option<Theme>) -> Respon
     } else {
         Color32::LIGHT_GREEN
     };
-    draw_icon(ui, scale, ok_icon, color, "Green-colored okay icon signifying ok-status.")
+    draw_icon(
+        ui,
+        scale,
+        ok_icon,
+        color,
+        "Green-colored okay icon signifying ok-status.",
+    )
 }
 
 pub fn ok_icon(scale: Option<f32>, theme: Option<Theme>) -> impl Widget {
@@ -46,7 +60,13 @@ fn draw_warning_icon(ui: &mut Ui, scale: Option<f32>, theme: Option<Theme>) -> R
     } else {
         Color32::LIGHT_RED
     };
-    draw_icon(ui, scale, warning_icon, color, "Yellow-colored warning icon signifying an issue.")
+    draw_icon(
+        ui,
+        scale,
+        warning_icon,
+        color,
+        "Yellow-colored warning icon signifying an issue.",
+    )
 }
 
 pub fn warning_icon(scale: Option<f32>, theme: Option<Theme>) -> impl Widget {

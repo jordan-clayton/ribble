@@ -1,8 +1,9 @@
-use catppuccin_egui::{MOCHA, Theme};
+use catppuccin_egui::{Theme, MOCHA};
 use eframe::epaint::Hsva;
 use egui::{
     emath::easing::{cubic_out, exponential_in},
-    lerp, Pos2, Rgba, Sense, Stroke, Ui, vec2};
+    lerp, vec2, Pos2, Rgba, Sense, Stroke, Ui,
+};
 
 use crate::utils::constants;
 
@@ -89,10 +90,10 @@ pub fn draw_fft(ui: &mut Ui, data: &[f32; constants::NUM_BUCKETS], theme: Option
 
 fn fft_bar(ui: &mut Ui, color: Rgba, amp: f32, mouse_position: &Pos2) {
     let available_size = ui.available_size();
-    let max_cell_height =
-        (available_size.y * constants::VISUALIZER_MAX_HEIGHT_PROPORTION).min(constants::MAX_VISUALIZER_HEIGHT);
-    let min_cell_height =
-        (available_size.y * constants::VISUALIZER_MIN_HEIGHT_PROPORTION).max(constants::MIN_VISUALIZER_HEIGHT);
+    let max_cell_height = (available_size.y * constants::VISUALIZER_MAX_HEIGHT_PROPORTION)
+        .min(constants::MAX_VISUALIZER_HEIGHT);
+    let min_cell_height = (available_size.y * constants::VISUALIZER_MIN_HEIGHT_PROPORTION)
+        .max(constants::MIN_VISUALIZER_HEIGHT);
 
     let high_color: Rgba = color;
 

@@ -1,10 +1,7 @@
-use std::{
-    io::ErrorKind,
-    thread,
-};
+use std::{io::ErrorKind, thread};
 
 use directories::ProjectDirs;
-use eframe::{emath::vec2, NativeOptions, run_native};
+use eframe::{emath::vec2, run_native, NativeOptions};
 use egui::ViewportBuilder;
 use egui_extras::install_image_loaders;
 use sdl2::log::log;
@@ -33,7 +30,11 @@ fn main() -> Result<(), WhisperAppError> {
     );
 
     if proj_dirs.is_none() {
-        let err = WhisperAppError::new(WhisperAppErrorType::IOError, String::from("Failed to get project directory"), true);
+        let err = WhisperAppError::new(
+            WhisperAppErrorType::IOError,
+            String::from("Failed to get project directory"),
+            true,
+        );
         return Err(err);
     }
 
@@ -50,7 +51,11 @@ fn main() -> Result<(), WhisperAppError> {
     // SDL.
     let sdl = sdl2::init();
     if let Err(e) = &sdl {
-        let err = WhisperAppError::new(WhisperAppErrorType::ParameterError, format!("Failed to initialize sdl. Info: {}", e), true);
+        let err = WhisperAppError::new(
+            WhisperAppErrorType::ParameterError,
+            format!("Failed to initialize sdl. Info: {}", e),
+            true,
+        );
         return Err(err);
     }
 
@@ -58,7 +63,11 @@ fn main() -> Result<(), WhisperAppError> {
 
     let audio_subsystem = sdl.audio();
     if let Err(e) = &audio_subsystem {
-        let err = WhisperAppError::new(WhisperAppErrorType::ParameterError, format!("Failed to initialize sdl. Info: {}", e), true);
+        let err = WhisperAppError::new(
+            WhisperAppErrorType::ParameterError,
+            format!("Failed to initialize sdl. Info: {}", e),
+            true,
+        );
         return Err(err);
     }
 
@@ -109,9 +118,7 @@ fn main() -> Result<(), WhisperAppError> {
     );
 
     // Send a "Finished" message to close the background joiner thread.
-    let finished = thread::spawn(|| {
-        Ok(String::from(constants::CLOSE_APP))
-    });
+    let finished = thread::spawn(|| Ok(String::from(constants::CLOSE_APP)));
 
     let _ = controller.send_thread_handle(finished);
 
@@ -120,7 +127,11 @@ fn main() -> Result<(), WhisperAppError> {
     // if failed to delete temporary file.
     if let Err(e) = controller.cleanup() {
         if e.kind() != ErrorKind::NotFound {
-            let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Failed to delete scratch buffer. Info: {}", e), true);
+            let err = WhisperAppError::new(
+                WhisperAppErrorType::IOError,
+                format!("Failed to delete scratch buffer. Info: {}", e),
+                true,
+            );
             eprintln!("{}", err);
         }
     }
@@ -131,7 +142,8 @@ fn main() -> Result<(), WhisperAppError> {
     if let Err(e) = app {
         let err = WhisperAppError::new(
             WhisperAppErrorType::GUIError,
-            format!("Failed to set up GFX ctx, Info: {}", e), true,
+            format!("Failed to set up GFX ctx, Info: {}", e),
+            true,
         );
         eprintln!("{}", err);
     }
@@ -139,7 +151,8 @@ fn main() -> Result<(), WhisperAppError> {
     if let Err(e) = t {
         let err = WhisperAppError::new(
             WhisperAppErrorType::ThreadError,
-            format!("Thread panicked. Info: {:?}", e), true,
+            format!("Thread panicked. Info: {:?}", e),
+            true,
         );
         return Err(err);
     }

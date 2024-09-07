@@ -3,19 +3,22 @@ use std::path::PathBuf;
 use egui::{Button, Grid, Label, RichText, ScrollArea, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::VariantArray;
-use whisper_realtime::{configs::Configs, model::{Model, ModelType}};
+use whisper_realtime::{
+    configs::Configs,
+    model::{Model, ModelType},
+};
 
 use crate::{
-    controller::whisper_app_controller::WhisperAppController, ui::{
-        tabs::controller_tabs::controller_common::{model_stack, n_threads_stack, save_transcription_button, set_language_stack, set_translate_stack, use_gpu_stack},
+    controller::whisper_app_controller::WhisperAppController,
+    ui::tabs::tab_view,
+    ui::{
+        tabs::controller_tabs::controller_common::{
+            model_stack, n_threads_stack, save_transcription_button, set_language_stack,
+            set_translate_stack, use_gpu_stack,
+        },
         widgets::icons::{ok_icon, warning_icon},
     },
-    ui::tabs::tab_view,
-    utils::{
-        constants,
-        file_mgmt, preferences::get_app_theme,
-        threading::get_max_threads,
-    },
+    utils::{constants, file_mgmt, preferences::get_app_theme, threading::get_max_threads},
 };
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -283,7 +286,8 @@ impl tab_view::TabView for StaticTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

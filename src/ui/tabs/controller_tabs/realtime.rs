@@ -4,20 +4,22 @@ use egui::{Button, Grid, Label, RichText, ScrollArea, Slider, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use sdl2::log::log;
 use strum::{IntoEnumIterator, VariantArray};
-use whisper_realtime::{configs::Configs, model::{Model, ModelType}};
+use whisper_realtime::{
+    configs::Configs,
+    model::{Model, ModelType},
+};
 
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::{
-        tabs::controller_tabs::controller_common::{f_higher_stack, f_lower_stack, model_stack, n_threads_stack, save_transcription_button, set_language_stack, set_translate_stack, toggle_bandpass_filter_stack, use_gpu_stack},
+        tabs::controller_tabs::controller_common::{
+            f_higher_stack, f_lower_stack, model_stack, n_threads_stack, save_transcription_button,
+            set_language_stack, set_translate_stack, toggle_bandpass_filter_stack, use_gpu_stack,
+        },
         tabs::tab_view,
         tabs::whisper_tab::FocusTab,
     },
-    utils::{
-        constants,
-        preferences::get_app_theme,
-        threading::get_max_threads,
-    },
+    utils::{constants, preferences::get_app_theme, threading::get_max_threads},
 };
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -42,7 +44,6 @@ impl RealtimeTab {
             filter: false,
             f_lower: constants::DEFAULT_F_LOWER,
             f_higher: constants::DEFAULT_F_HIGHER,
-
         }
     }
 }
@@ -69,7 +70,10 @@ impl tab_view::TabView for RealtimeTab {
         let Self {
             title: _,
             realtime_configs,
-            max_threads, filter, f_lower, f_higher,
+            max_threads,
+            filter,
+            f_lower,
+            f_higher,
         } = self;
 
         let Configs {
@@ -366,7 +370,8 @@ impl tab_view::TabView for RealtimeTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

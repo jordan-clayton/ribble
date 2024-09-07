@@ -6,7 +6,11 @@ use crate::{
     utils::{constants, workers::AudioWorkerState},
 };
 
-pub fn get_header_recording_icon(state: AudioWorkerState, transcriber: bool, theme: &Theme) -> (impl Widget, &'static str) {
+pub fn get_header_recording_icon(
+    state: AudioWorkerState,
+    transcriber: bool,
+    theme: &Theme,
+) -> (impl Widget, &'static str) {
     let time_scale = Some(constants::RECORDING_ANIMATION_TIMESCALE);
     match state {
         AudioWorkerState::Idle => {
@@ -16,12 +20,20 @@ pub fn get_header_recording_icon(state: AudioWorkerState, transcriber: bool, the
         }
         AudioWorkerState::Loading => {
             let icon = recording_icon(Rgba::from(theme.green), true, time_scale);
-            let msg = if transcriber { "Preparing to transcribe." } else { "Preparing to record." };
+            let msg = if transcriber {
+                "Preparing to transcribe."
+            } else {
+                "Preparing to record."
+            };
             (icon, msg)
         }
         AudioWorkerState::Running => {
             let icon = recording_icon(Rgba::from(theme.red), true, time_scale);
-            let msg = if transcriber { "Transcription in progress." } else { "Recording in progress." };
+            let msg = if transcriber {
+                "Transcription in progress."
+            } else {
+                "Recording in progress."
+            };
             (icon, msg)
         }
         AudioWorkerState::Error => {

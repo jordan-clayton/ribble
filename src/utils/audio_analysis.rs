@@ -4,7 +4,7 @@ use std::{
 };
 
 use atomic_enum::atomic_enum;
-use biquad::{Biquad, Coefficients, DirectForm2Transposed, Q_BUTTERWORTH_F32, ToHertz, Type};
+use biquad::{Biquad, Coefficients, DirectForm2Transposed, ToHertz, Type, Q_BUTTERWORTH_F32};
 use lazy_static::lazy_static;
 use realfft::{
     num_complex::{Complex32, ComplexFloat},
@@ -179,7 +179,7 @@ pub fn power_analysis(samples: &[f32], result: &mut [f32; constants::NUM_BUCKETS
         None,
         None,
     )
-        .expect("Failed to build frames");
+    .expect("Failed to build frames");
 
     // Init FFT
     let mut planner = FFT_PLANNER.lock().expect("Failed to get FFT Planner mutex");
@@ -325,7 +325,8 @@ fn fixed_frames(
         return Err(WhisperAppError::new(
             WhisperAppErrorType::ParameterError,
             String::from("Cannot return 0 segments."),
-            false));
+            false,
+        ));
     }
 
     if len < k {
@@ -378,7 +379,8 @@ fn fixed_frames(
         let err = WhisperAppError::new(
             WhisperAppErrorType::ParameterError,
             String::from("Zero length frames, insufficient sample size"),
-            false);
+            false,
+        );
         return Err(err);
     }
 
@@ -401,14 +403,16 @@ fn welch_frames(
         return Err(WhisperAppError::new(
             WhisperAppErrorType::ParameterError,
             String::from("Zero sample size provided."),
-            false));
+            false,
+        ));
     }
     let k = num_segments.unwrap_or(4);
     if k < 1 {
         return Err(WhisperAppError::new(
             WhisperAppErrorType::ParameterError,
             String::from("Cannot return 0 segments."),
-            false));
+            false,
+        ));
     }
     let a = overlap.unwrap_or(0.5);
 
@@ -442,7 +446,8 @@ fn welch_frames(
         let err = WhisperAppError::new(
             WhisperAppErrorType::ParameterError,
             String::from("Zero length frames, insufficient sample size"),
-            false);
+            false,
+        );
         return Err(err);
     }
 

@@ -69,18 +69,21 @@ impl tab_view::TabView for ProgressTab {
 
         let mut finished_jobs = vec![];
         ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
-            Grid::new("progress").striped(true).num_columns(1).show(ui, |ui| {
-                for job in jobs.clone() {
-                    // Draw it.
-                    Self::progress_widget(ui, &job);
-                    ui.end_row();
+            Grid::new("progress")
+                .striped(true)
+                .num_columns(1)
+                .show(ui, |ui| {
+                    for job in jobs.clone() {
+                        // Draw it.
+                        Self::progress_widget(ui, &job);
+                        ui.end_row();
 
-                    // Check for removal
-                    if job.finished() {
-                        finished_jobs.push(job)
+                        // Check for removal
+                        if job.finished() {
+                            finished_jobs.push(job)
+                        }
                     }
-                }
-            });
+                });
         });
 
         for job in finished_jobs {

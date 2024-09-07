@@ -35,12 +35,15 @@ impl WhisperApp {
         controller.set_system_theme(system_theme);
 
         match load_app_state() {
-            None => {
-                Self::default_layout(controller)
-            }
+            None => Self::default_layout(controller),
             Some(state) => {
                 let (tree, closed_tabs) = state;
-                Self { tree, closed_tabs, controller, last_save_join_handle: None }
+                Self {
+                    tree,
+                    closed_tabs,
+                    controller,
+                    last_save_join_handle: None,
+                }
             }
         }
     }
@@ -88,7 +91,6 @@ impl eframe::App for WhisperApp {
 
         let system_theme = frame.info().system_theme;
         self.controller.set_system_theme(system_theme.clone());
-
 
         let theme = preferences::get_app_theme(system_theme);
 
@@ -185,8 +187,13 @@ impl eframe::App for WhisperApp {
         if let Some(join_handle) = self.last_save_join_handle.take() {
             if let Some(result) = join_handle.join().ok() {
                 if let Err(e) = result {
-                    let msg = ConsoleMessage::new(ConsoleMessageType::Error, format!("{}", e.to_string()));
-                    self.controller.send_console_message(msg).expect("Console message channel should not be closed.");
+                    let msg = ConsoleMessage::new(
+                        ConsoleMessageType::Error,
+                        format!("{}", e.to_string()),
+                    );
+                    self.controller
+                        .send_console_message(msg)
+                        .expect("Console message channel should not be closed.");
                 }
             };
         }
