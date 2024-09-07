@@ -18,7 +18,7 @@ pub struct TranscriptionTab {
 }
 
 impl TranscriptionTab {
-    fn new(text_buffer: Vec<String>, realtime_mode: bool, accepting_speech: bool) -> Self {
+    fn new(text_buffer: Vec<String>) -> Self {
         Self {
             title: String::from("Transcription"),
             text_buffer,
@@ -29,9 +29,7 @@ impl TranscriptionTab {
 impl Default for TranscriptionTab {
     fn default() -> Self {
         let text_buffer = vec![];
-        let realtime_mode = true;
-        let accepting_speech = false;
-        Self::new(text_buffer, realtime_mode, accepting_speech)
+        Self::new(text_buffer)
     }
 }
 

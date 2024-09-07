@@ -7,8 +7,9 @@ use whisper_realtime::model::{Model, ModelType};
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::widgets::icons::{ok_icon, warning_icon},
-    utils::{constants, file_mgmt::copy_data, workers::WorkerType},
+    utils::{constants, file_mgmt::copy_data},
 };
+use crate::utils::errors::{WhisperAppError, WhisperAppErrorType};
 
 pub fn save_transcription_button(ui: &mut Ui, controller: WhisperAppController) {
     if ui.add(Button::new("Save Transcription")).clicked() {
@@ -98,15 +99,15 @@ pub fn model_stack(
                             to.as_os_str()
                         )),
                         Err(e) => {
-                            panic!("{}", e)
+                            let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Failed to copy file. Info: {}", e.to_string()), false);
+                            Err(err)
                         }
                     }
                 });
 
-                let worker = (WorkerType::Downloading, copy_thread);
                 controller
-                    .send_thread_handle(worker)
-                    .expect("Thread channel closed")
+                    .send_thread_handle(copy_thread)
+                    .expect("Thread channel should be open.")
             }
         }
         if ui
@@ -163,7 +164,7 @@ pub fn set_language_stack(ui: &mut Ui, language: &mut Option<String>) {
         .selected_text(
             *constants::LANGUAGE_CODES
                 .get(language)
-                .expect("Failed to get language"),
+                .expect("Language should be retrieved from LANGUAGE_CODES."),
         )
         .show_ui(ui, |ui| {
             for (k, v) in constants::LANGUAGE_OPTIONS.iter() {

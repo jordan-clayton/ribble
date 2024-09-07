@@ -33,9 +33,6 @@ pub struct RealtimeTab {
 }
 
 impl RealtimeTab {
-    pub fn new() -> Self {
-        Self::default()
-    }
     pub fn new_with_configs(realtime_configs: Configs) -> Self {
         let max_threads = get_max_threads();
         Self {
@@ -121,6 +118,7 @@ impl tab_view::TabView for RealtimeTab {
                 ui.heading("Configuration");
                 Grid::new("realtime_configs")
                     .striped(true)
+                    .num_columns(2)
                     .show(ui, |ui| {
                         // Model
                         model_stack(ui, model, &m_model, downloaded, controller.clone(), available_models.as_slice(), Some(theme));
@@ -157,7 +155,6 @@ impl tab_view::TabView for RealtimeTab {
                         let mut rt_timeout = *realtime_timeout as u64 / 1000;
 
                         // MAX_REALTIME_TIMEOUT is in seconds.
-                        // TODO: test the step-by + drag velocity
                         ui.horizontal(|ui| {
                             if ui.add(Slider::new(&mut rt_timeout, 0..=constants::MAX_REALTIME_TIMEOUT)
                                 .step_by(1.0)

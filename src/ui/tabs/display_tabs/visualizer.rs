@@ -75,7 +75,7 @@ impl tab_view::TabView for VisualizerTab {
         if visualizer_running && mic_running {
             *target_cleared = false;
             // Update to the latest fft data.
-            controller.read_fft_buffer(target);
+            controller.read_visualizer_buffer(target);
         } else {
             if !*target_cleared {
                 // Zero out the tgt array

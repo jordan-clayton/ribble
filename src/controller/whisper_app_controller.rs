@@ -1,69 +1,69 @@
 use std::{
-    any::Any,
-    path::PathBuf,
+    any::TypeId,
+    path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering}, Mutex, TryLockError,
+        atomic::{AtomicBool, Ordering},
+        Mutex, RwLock, TryLockError,
     },
     thread::{self, JoinHandle},
 };
-// TODO: clean up imports.
-use std::any::TypeId;
-use std::path::Path;
-use std::sync::RwLock;
 
 use arboard::Clipboard;
 use crossbeam::channel::{
     bounded, Receiver, Sender, SendError, TryRecvError, unbounded,
 };
 use hound::{Sample, SampleFormat, WavSpec};
-#[cfg(feature = "cuda")]
-use nvml_wrapper::{cuda_driver_version_major, cuda_driver_version_minor};
 use realfft::num_traits::{Bounded, FromPrimitive, NumCast, Zero};
-use sdl2::audio::AudioSpecDesired;
-use sdl2::log::log;
+use sdl2::{
+    audio::AudioSpecDesired,
+    log::log,
+};
 use tokio::runtime::Handle;
 use whisper_realtime::{
     downloader::{
-        download::AsyncDownload,
         request::{async_download_request, reqwest},
+        traits::AsyncDownload,
     },
     errors::WhisperRealtimeError,
     microphone,
-    transcriber::{realtime_transcriber::RealtimeTranscriber, transcriber::Transcriber},
-};
-use whisper_realtime::transcriber::static_transcriber::{
-    StaticTranscriber, SupportedAudioSample, SupportedChannels,
+    transcriber::{
+        realtime_transcriber::RealtimeTranscriber,
+        static_transcriber::{
+            StaticTranscriber, SupportedAudioSample, SupportedChannels,
+        },
+        traits::Transcriber,
+    },
 };
 
 use crate::{
-    controller::utils::transcriber_utilities::{
-        init_audio_ring_buffer, init_model, init_realtime_microphone, init_whisper_ctx,
+    controller::{
+        utils::gpu_init::check_gpu_target,
+        utils::transcriber_utilities::{
+            init_audio_ring_buffer, init_model, init_realtime_microphone, init_whisper_ctx,
+        },
+        utils::transcriber_utilities::init_microphone,
     },
+    ui::tabs::whisper_tab::FocusTab,
     utils::{
+        audio_analysis::{
+            AnalysisType, AtomicAnalysisType, bandpass_filter, f_central, frequency_analysis,
+            from_f32_normalized, normalized_waveform, power_analysis, to_f32_normalized,
+        },
         console_message::{ConsoleMessage, ConsoleMessageType},
         constants,
+        errors::{WhisperAppError, WhisperAppErrorType},
+        errors::extract_error_message,
         file_mgmt::{
-            copy_data, get_temp_file_path, get_tmp_file_writer, save_transcription,
+            copy_data, decode_audio, delete_temporary_audio_file, get_audio_reader, get_temp_file_path, get_tmp_file_writer, save_transcription,
             write_audio_sample,
         },
         progress::Progress,
+        recorder_configs::{RecorderConfigs, RecordingFormat},
         sdl_audio_wrapper::SdlAudioWrapper,
+        workers::{AtomicAudioWorkerState, AudioWorkerState},
     },
 };
-// TODO: nest imports
-use crate::controller::utils::transcriber_utilities::init_microphone;
-use crate::ui::tabs::whisper_tab::FocusTab;
-use crate::utils::audio_analysis::{
-    AnalysisType, AtomicAnalysisType, bandpass_filter, f_central, frequency_analysis,
-    from_f32_normalized, normalized_waveform, power_analysis, to_f32_normalized,
-};
-use crate::utils::errors::{WhisperAppError, WhisperAppErrorType};
-use crate::utils::file_mgmt::{decode_audio, delete_temporary_audio_file, get_audio_reader};
-use crate::utils::recorder_configs::{RecorderConfigs, RecordingFormat};
-use crate::utils::workers::{AtomicAudioWorkerState, AudioWorkerState, WorkerType};
-
-// TODO: Remaining impls;
 
 #[derive(Clone)]
 pub struct WhisperAppController(Arc<WhisperAppContext>);
@@ -93,6 +93,14 @@ impl WhisperAppController {
         );
         let app_ctx = Arc::new(app_ctx);
         Self(app_ctx)
+    }
+
+    pub fn is_poisoned(&self) -> bool {
+        self.0.poisoned.load(Ordering::Relaxed)
+    }
+
+    pub fn mark_poisoned(&self) {
+        self.0.poisoned.store(true, Ordering::Relaxed)
     }
 
     pub fn gpu_enabled(&self) -> bool {
@@ -131,11 +139,6 @@ impl WhisperAppController {
         let static_running = self.static_running();
         let recorder_running = self.recorder_running();
         return realtime_running || static_running || recorder_running;
-    }
-
-    // STATE
-    pub fn app_running(&self) -> bool {
-        self.0.application_running.load(Ordering::Acquire)
     }
 
     pub fn audio_worker_state(&self) -> AudioWorkerState {
@@ -242,18 +245,19 @@ impl WhisperAppController {
         self.0.console_receiver.try_recv()
     }
 
-    pub fn read_fft_buffer(&self, dest: &mut [f32; constants::NUM_BUCKETS]) {
+    pub fn read_visualizer_buffer(&self, dest: &mut [f32; constants::NUM_BUCKETS]) {
         let guard = self.0.visualizer_buffer.try_read();
         match guard {
-            Ok(g) => {
-                dest.copy_from_slice(g.as_slice());
+            Ok(data) => {
+                dest.copy_from_slice(data.as_slice());
             }
             Err(TryLockError::WouldBlock) => {
                 return;
             }
-            Err(_g) => {
-                // TODO: proper error handling -> this is recoverable.
-                panic!("Visualizer RwLock poisoned.");
+            Err(TryLockError::Poisoned(poison)) => {
+                let data = poison.into_inner();
+                dest.copy_from_slice(data.as_slice());
+                self.0.visualizer_buffer.clear_poison();
             }
         }
     }
@@ -269,9 +273,12 @@ impl WhisperAppController {
             Err(TryLockError::WouldBlock) => {
                 return;
             }
-            Err(_g) => {
-                // TODO: proper error handling -> this is recoverable.
-                panic!("Transcription RwLock poisoned.");
+            Err(TryLockError::Poisoned(poison)) => {
+                let transcription = poison.into_inner();
+                let len = transcription.len();
+                dest.resize(len, String::from(""));
+                dest.clone_from_slice(transcription.as_slice());
+                self.0.transcription_buffer.clear_poison();
             }
         }
     }
@@ -281,14 +288,11 @@ impl WhisperAppController {
         match guard {
             Ok(mut text_buffer) => {
                 text_buffer.clear();
-                log(&format!(
-                    "Text buffer should be length 0, length: {}",
-                    text_buffer.len()
-                ))
             }
             Err(poison) => {
                 let mut text_buffer = poison.into_inner();
                 text_buffer.clear();
+                self.0.transcription_buffer.clear_poison();
             }
         }
     }
@@ -300,14 +304,13 @@ impl WhisperAppController {
         self.0.thread_handle_sender.send(thread)
     }
 
-    // TODO: add focus-to-transcription tab.
     pub fn start_realtime_transcription(&mut self, configs: whisper_realtime::configs::Configs, filtering: (bool, f32, f32)) {
-        let job_name = "Realtime Setup";
+        let job_name = "Realtime Init";
 
         // UPDATE PROGRESS BAR
         let progress = Progress::new(String::from(job_name), 1, 100);
         self.send_progress(progress)
-            .expect("Progress channel closed");
+            .expect("Progress channel should be open");
 
         // Update state
         self.0.audio_worker_state.store(AudioWorkerState::Loading, Ordering::Release);
@@ -317,7 +320,7 @@ impl WhisperAppController {
         // UPDATE PROGRESS BAR
         let progress = Progress::new(String::from(job_name), 17, 100);
         self.send_progress(progress)
-            .expect("Progress channel closed");
+            .expect("Progress channel should be open");
 
         let controller = self.clone();
         let c_controller = controller.clone();
@@ -325,38 +328,41 @@ impl WhisperAppController {
         // UPDATE PROGRESS BAR
         let progress = Progress::new(String::from(job_name), 33, 100);
         self.send_progress(progress)
-            .expect("Progress channel closed");
+            .expect("Progress channel should be open");
 
         let rt_thread = thread::spawn(move || {
             // UPDATE PROGRESS BAR
             let progress = Progress::new(String::from(job_name), 50, 100);
-            c_controller
-                .send_progress(progress)
-                .expect("Progress channel closed");
+
+            if let Err(e) = c_controller.send_progress(progress) {
+                let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+                return Err(err);
+            }
 
             // UPDATE PROGRESS BAR
             let progress = Progress::new(String::from(job_name), 76, 100);
-            c_controller
-                .send_progress(progress)
-                .expect("Progress channel closed");
+            if let Err(e) = c_controller.send_progress(progress) {
+                let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+                return Err(err);
+            }
 
             let rt_configs = Arc::new(configs);
 
             // UPDATE PROGRESS BAR
             let progress = Progress::new(String::from(job_name), 100, 100);
-            c_controller
-                .send_progress(progress)
-                .expect("Progress channel closed");
+            if let Err(e) = c_controller.send_progress(progress) {
+                let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+                return Err(err);
+            }
 
             // Run
             run_realtime_audio_transcription(c_controller.clone(), rt_configs, filtering)
         });
 
-        let thread = (WorkerType::Realtime, rt_thread);
 
         // Send to the background controller to join.
-        self.send_thread_handle(thread)
-            .expect("Thread channel closed");
+        self.send_thread_handle(rt_thread)
+            .expect("Thread channel should be open.");
     }
 
     pub fn start_static_transcription(
@@ -364,37 +370,39 @@ impl WhisperAppController {
         audio_file: &Path,
         configs: whisper_realtime::configs::Configs,
     ) {
-        let job_name = "Static Setup";
+        let job_name = "Static Init";
         let audio_file = audio_file.to_path_buf();
 
         let progress = Progress::new(String::from(job_name), 1, 100);
         self.send_progress(progress)
-            .expect("Progress channel closed");
+            .expect("Progress channel should be open.");
 
         self.0.static_running.store(true, Ordering::Release);
         self.0.audio_worker_state.store(AudioWorkerState::Loading, Ordering::Release);
 
         let progress = Progress::new(String::from(job_name), 10, 100);
         self.send_progress(progress)
-            .expect("Progress channel closed");
+            .expect("Progress channel should be open.");
 
         let controller = self.clone();
         let c_controller = controller.clone();
         let progress = Progress::new(String::from(job_name), 20, 100);
         self.send_progress(progress)
-            .expect("Progress channel closed");
+            .expect("Progress channel should be open.");
 
         let st_thread = thread::spawn(move || {
             let audio_file = audio_file.as_path();
             let progress = Progress::new(String::from(job_name), 30, 100);
-            c_controller
-                .send_progress(progress)
-                .expect("Progress channel closed");
+            if let Err(e) = c_controller.send_progress(progress) {
+                let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+                return Err(err);
+            }
 
             let progress = Progress::new(String::from(job_name), 50, 100);
-            c_controller
-                .send_progress(progress)
-                .expect("Progress channel closed");
+            if let Err(e) = c_controller.send_progress(progress) {
+                let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+                return Err(err);
+            }
 
             // Wrap for static transcriber.
             let st_configs = Arc::new(configs);
@@ -402,19 +410,19 @@ impl WhisperAppController {
             // Load the file & decode.
             let audio_reader = get_audio_reader(audio_file);
             if let Err(e) = &audio_reader {
-                let msg = ConsoleMessage::new(ConsoleMessageType::Error, e.to_string());
                 c_controller
                     .0
                     .static_running
                     .store(false, Ordering::Release);
-                panic!("{}", msg);
+                return Err(e.clone());
             }
 
             let (id, format, decoder) = audio_reader.unwrap();
             let progress = Progress::new(String::from(job_name), 60, 100);
-            c_controller
-                .send_progress(progress)
-                .expect("Progress channel closed");
+            if let Err(e) = c_controller.send_progress(progress) {
+                let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+                return Err(err);
+            }
 
             // Second progress job -> decode audio.
             let decode_job_name = "Decoding audio";
@@ -429,7 +437,7 @@ impl WhisperAppController {
                     Progress::new(String::from(decode_job_name), total_decoded, total_size);
                 c_controller
                     .send_progress(progress)
-                    .expect("Progress channel closed");
+                    .expect("Progress channel should be open");
             };
 
             // decode
@@ -439,7 +447,7 @@ impl WhisperAppController {
             let progress = Progress::new(String::from(job_name), 80, 100);
             c_controller
                 .send_progress(progress)
-                .expect("Progress channel closed");
+                .expect("Progress channel should be open");
 
             if let Err(e) = &decode_success {
                 let msg = ConsoleMessage::new(ConsoleMessageType::Error, e.to_string());
@@ -457,14 +465,14 @@ impl WhisperAppController {
                 let progress = Progress::new(String::from(decode_job_name), 0, total_size);
                 c_controller
                     .send_progress(progress)
-                    .expect("Progress channel closed");
+                    .expect("Progress channel should be open");
 
                 // In case of inexact sizes: progress task will be removed on next ui draw.
             } else if total_size != decoded.len() {
                 let progress = Progress::new(String::from(decode_job_name), 1, 1);
                 c_controller
                     .send_progress(progress)
-                    .expect("Progress channel closed");
+                    .expect("Progress channel should be open");
             }
 
             assert!(!decoded.is_empty(), "Invalid file: 0-size audio");
@@ -472,18 +480,15 @@ impl WhisperAppController {
             let progress = Progress::new(String::from(job_name), 100, 100);
             c_controller
                 .send_progress(progress)
-                .expect("Progress channel closed");
+                .expect("Progress channel should be open");
             run_static_audio_transcription(decoded, c_controller.clone(), st_configs)
         });
 
-        let worker = (WorkerType::Static, st_thread);
-        self.send_thread_handle(worker)
-            .expect("Thread channel closed");
+        self.send_thread_handle(st_thread)
+            .expect("Thread channel should be open");
     }
 
-    // TODO: add progress
     pub fn start_recording(&self, configs: RecorderConfigs) {
-        let job_name = "Recorder Setup";
         // Update state.
         self.0.recorder_running.store(true, Ordering::Release);
         self.0.save_recording_ready.store(false, Ordering::Release);
@@ -492,14 +497,11 @@ impl WhisperAppController {
         let controller = self.clone();
 
         let rec_thread = thread::spawn(move || {
-            run_recording(controller, configs);
-
-            Ok(String::from("Finished Recording."))
+            run_recording(controller, configs)
         });
 
-        let worker = (WorkerType::Recording, rec_thread);
-        self.send_thread_handle(worker)
-            .expect("Thread channel closed");
+        self.send_thread_handle(rec_thread)
+            .expect("Thread channel should be open");
     }
 
     pub fn start_download(&self, url: String, file_name: String, file_directory: PathBuf) {
@@ -520,7 +522,8 @@ impl WhisperAppController {
             let stream = handle.block_on(stream_downloader);
             if let Err(e) = stream.as_ref() {
                 controller.0.downloading.store(false, Ordering::Release);
-                panic!("{}", e);
+                let err = WhisperAppError::new(WhisperAppErrorType::WhisperRealtime, format!("Download failed. Info: {}", e.to_string()), false);
+                return Err(err);
             }
 
             let mut stream = stream.unwrap();
@@ -531,11 +534,7 @@ impl WhisperAppController {
 
             stream.progress_callback = Some(move |n| {
                 let progress = Progress::new(job_name.clone(), n, total_size);
-                let sent = c_controller.send_progress(progress);
-                if let Err(e) = sent {
-                    c_controller.0.downloading.store(false, Ordering::Release);
-                    panic!("{}", e);
-                }
+                let _ = c_controller.send_progress(progress);
             });
 
             let download = stream.download(file_directory, c_file_name.as_str());
@@ -543,7 +542,8 @@ impl WhisperAppController {
             controller.0.downloading.store(false, Ordering::Release);
 
             if let Err(e) = success {
-                panic!("{}", e);
+                let err = WhisperAppError::new(WhisperAppErrorType::WhisperRealtime, format!("Download failed. Info: {}", e.to_string()), false);
+                return Err(err);
             }
             Ok(format!(
                 "Model: {}, successfully downloaded to {:?}",
@@ -552,34 +552,31 @@ impl WhisperAppController {
             ))
         });
 
-        let worker = (WorkerType::Downloading, download_thread);
-
-        self.send_thread_handle(worker)
-            .expect("Thread channel closed");
+        self.send_thread_handle(download_thread)
+            .expect("Thread channel should be open.");
     }
 
     pub fn save_audio_recording(&self, output_path: &PathBuf) {
         let to = output_path.to_path_buf();
         let data_dir = eframe::storage_dir(constants::APP_ID).expect("Failed to get storage dir");
         let tmp_file_path = get_temp_file_path(data_dir.as_path());
-        assert!(tmp_file_path.exists(), "Audio buffer file missing!");
+        debug_assert!(tmp_file_path.exists(), "Audio buffer file missing!");
         let from = tmp_file_path.clone();
         let copy_thread = thread::spawn(move || {
             let success = copy_data(&from, &to);
             match success {
                 Ok(_) => Ok(format!("File: {:?} saved successfully.", to.file_stem())),
                 Err(e) => {
-                    panic!("{}", e)
+                    let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Failed to copy file. Info: {}", e.to_string()), false);
+                    return Err(err);
                 }
             }
         });
 
-        let worker = (WorkerType::Saving, copy_thread);
-        self.send_thread_handle(worker)
-            .expect("Thread channel closed.");
+        self.send_thread_handle(copy_thread)
+            .expect("Thread channel should be open.");
     }
 
-    // TODO: proper error handling.
     pub fn copy_to_clipboard(&self) {
         let controller = self.clone();
         let copy_thread = thread::spawn(move || {
@@ -589,6 +586,7 @@ impl WhisperAppController {
                 Ok(text_buffer) => text_buffer.join("\n"),
                 Err(poison) => {
                     let text_buffer = poison.into_inner();
+                    controller.0.transcription_buffer.clear_poison();
                     text_buffer.join("\n")
                 }
             };
@@ -603,17 +601,15 @@ impl WhisperAppController {
                     let err = WhisperAppError::new(
                         WhisperAppErrorType::IOError,
                         format!("Failed to copy to clipboard. Error: {}", e.to_string()),
+                        false,
                     );
-                    // TODO: remove box once error refactor.
-                    let err: Box<dyn Any + Send> = Box::new(err);
                     Err(err)
                 }
             }
         });
 
-        let worker = (WorkerType::IO, copy_thread);
-        self.send_thread_handle(worker)
-            .expect("Thread channel closed");
+        self.send_thread_handle(copy_thread)
+            .expect("Thread channel should be open");
     }
 
     pub fn save_transcription(&self, output_path: &PathBuf) {
@@ -634,15 +630,15 @@ impl WhisperAppController {
             let job_name = format!("Saving: {:?}", p.file_name());
             let total_size = transcription_text.len();
 
-            let file_name = p.file_stem().expect("Invalid filename");
-            let directory = p.parent().expect("Failed to get saving directory");
-            let directory = directory.as_os_str();
+            let file_name = p.file_stem();
+            let directory = p.parent().and_then(|path| {
+                Some(path.as_os_str())
+            });
 
             let progress_callback = move |n: usize| {
                 let progress = Progress::new(job_name.clone(), n, total_size);
-                c_controller
-                    .send_progress(progress)
-                    .expect("Progress channel closed.");
+                let _ = c_controller
+                    .send_progress(progress);
             };
 
             let write_success =
@@ -650,14 +646,13 @@ impl WhisperAppController {
             match write_success {
                 Ok(_) => Ok(format!("{:?} saved to {:?}", file_name, directory)),
                 Err(e) => {
-                    panic!("{}", e)
+                    Err(e)
                 }
             }
         });
 
-        let worker = (WorkerType::Saving, save_thread);
-        self.send_thread_handle(worker)
-            .expect("Thread channel closed.")
+        self.send_thread_handle(save_thread)
+            .expect("Thread channel should be open.")
     }
 
     pub fn cleanup(&self) -> std::io::Result<()> {
@@ -666,7 +661,6 @@ impl WhisperAppController {
         self.0.realtime_running.store(false, Ordering::Relaxed);
         self.0.static_running.store(false, Ordering::Relaxed);
         self.0.recorder_running.store(false, Ordering::Relaxed);
-        self.0.application_running.store(false, Ordering::Relaxed);
         delete_temporary_audio_file()
     }
 }
@@ -691,14 +685,35 @@ fn recording_impl<
     channel: (Sender<Vec<T>>, Receiver<Vec<T>>),
     filter: bool,
     f_central: f32,
-) {
+) -> Result<String, WhisperAppError> {
+    let job_name = "Recorder Setup";
+
+    let progress = Progress::new(String::from(job_name), 1, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
     let c_controller_write = controller.clone();
     let c_controller_visualizer_thread = controller.clone();
     let audio_subsystem = &controller.0.audio_wrapper.audio_subsystem;
 
+
+    let progress = Progress::new(String::from(job_name), 10, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
+
     let (sender, receiver) = channel;
 
     let mic = init_microphone(audio_subsystem, &desired_audio, sender);
+
+
+    let progress = Progress::new(String::from(job_name), 30, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
 
     let audio_spec = mic.spec().clone();
 
@@ -708,22 +723,65 @@ fn recording_impl<
     spec.channels = channels;
     spec.sample_rate = sample_rate;
 
-    // TODO: these need to be refactored to reset the running flag.
-    let data_dir = eframe::storage_dir(constants::APP_ID).expect("Failed to get data dir");
-    let mut writer = get_tmp_file_writer(data_dir.as_path(), &spec).expect("Failed to open writer");
+
+    let progress = Progress::new(String::from(job_name), 40, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
+
+    let data_dir = eframe::storage_dir(constants::APP_ID);
+    if data_dir.is_none() {
+        controller.0.recorder_running.store(false, Ordering::Release);
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, String::from("Failed to get data dir"), true);
+        return Err(err);
+    }
+    let data_dir = data_dir.unwrap();
+
+
+    let progress = Progress::new(String::from(job_name), 60, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
+
+    let writer = get_tmp_file_writer(data_dir.as_path(), &spec);
+    if let Err(e) = &writer {
+        controller.0.recorder_running.store(false, Ordering::Release);
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Failed to open wav writer. Info: {}", e.to_string()), false);
+        return Err(err);
+    }
+
+    let mut writer = writer.unwrap();
+
+
+    let progress = Progress::new(String::from(job_name), 80, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
 
     // Visualizer channel.
     let (visualizer_s, visualizer_r) = bounded(whisper_realtime::constants::INPUT_BUFFER_CAPACITY);
 
     // Focus the visualizer.
-    controller
-        .send_focus_tab(FocusTab::Visualizer)
-        .expect("Focus tab channel closed");
+    if let Err(e) = controller.send_focus_tab(FocusTab::Visualizer) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Focus tab channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    };
 
     mic.resume();
+
     controller.0.audio_worker_state.store(AudioWorkerState::Running, Ordering::Release);
 
-    let _ = thread::scope(|s| {
+
+    let progress = Progress::new(String::from(job_name), 100, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
+
+    let result: thread::Result<()> = thread::scope(|s| {
         let _write_thread = s.spawn(|| {
             loop {
                 if !c_controller_write.recorder_running() {
@@ -735,7 +793,7 @@ fn recording_impl<
                     break;
                 }
                 let output = receiver.recv();
-                assert!(output.is_ok(), "Recording channel closed");
+                debug_assert!(output.is_ok(), "Recording channel should be open");
                 let mut output = output.unwrap();
 
                 // Filter audio (if desired)
@@ -751,7 +809,7 @@ fn recording_impl<
                 // Propagate the data to the visualizer
                 if c_controller_write.0.run_visualizer.load(Ordering::Acquire) {
                     let visualizer_propagation = visualizer_s.send(output.clone());
-                    assert!(visualizer_propagation.is_ok(), "Visualizer Channel Closed");
+                    debug_assert!(visualizer_propagation.is_ok(), "Visualizer Channel Closed");
                 }
 
                 write_audio_sample(&output, &mut writer, None::<fn(usize)>);
@@ -764,7 +822,6 @@ fn recording_impl<
             while c_controller_visualizer_thread.recorder_running() {
                 let new_audio = visualizer_r.recv();
                 if let Ok(output) = new_audio {
-                    // TODO: test this -> It might be just as fast/free to cast_to_f32 safely
                     if TypeId::of::<T>() == TypeId::of::<f32>() {
                         let o = unsafe {
                             let mut out = std::mem::ManuallyDrop::new(output);
@@ -865,12 +922,24 @@ fn recording_impl<
             }
             log(&String::from("Recorder: visualizing thread done."));
         });
+        Ok(())
     });
 
     mic.pause();
+    match result {
+        Ok(_) => {
+            Ok(String::from("Recording finished."))
+        }
+        Err(e) => {
+            let e_msg = extract_error_message(e);
+
+            let err = WhisperAppError::new(WhisperAppErrorType::ThreadError, format!("Recording thread panicked. Info: {}", e_msg), false);
+            Err(err)
+        }
+    }
 }
 
-fn run_recording(controller: WhisperAppController, configs: RecorderConfigs) {
+fn run_recording(controller: WhisperAppController, configs: RecorderConfigs) -> Result<String, WhisperAppError> {
     let sample_rate_request = configs.sample_rate.sample_rate();
     let channels_request = configs.channel.num_channels();
     let buffer_size_request = configs.buffer_size.size();
@@ -883,7 +952,7 @@ fn run_recording(controller: WhisperAppController, configs: RecorderConfigs) {
     let filter = configs.filter;
     let f_central = f_central(configs.f_lower, configs.f_higher);
     // Get the audio channel.
-    match configs.format {
+    let result = match configs.format {
         RecordingFormat::I16 => {
             let sender = controller.0.record_audio_i16_sender.clone();
             let receiver = controller.0.record_audio_i16_receiver.clone();
@@ -893,7 +962,7 @@ fn run_recording(controller: WhisperAppController, configs: RecorderConfigs) {
                 bits_per_sample: 16,
                 sample_format: SampleFormat::Int,
             };
-            recording_impl(
+            let res = recording_impl(
                 controller.clone(),
                 &desired_audio,
                 spec,
@@ -903,6 +972,7 @@ fn run_recording(controller: WhisperAppController, configs: RecorderConfigs) {
             );
 
             clear_message_queue(controller.0.record_audio_i16_receiver.clone());
+            res
         }
         RecordingFormat::I32 => {
             let sender = controller.0.record_audio_i32_sender.clone();
@@ -913,7 +983,7 @@ fn run_recording(controller: WhisperAppController, configs: RecorderConfigs) {
                 bits_per_sample: 32,
                 sample_format: SampleFormat::Int,
             };
-            recording_impl(
+            let res = recording_impl(
                 controller.clone(),
                 &desired_audio,
                 spec,
@@ -922,6 +992,7 @@ fn run_recording(controller: WhisperAppController, configs: RecorderConfigs) {
                 f_central,
             );
             clear_message_queue(controller.0.record_audio_i32_receiver.clone());
+            res
         }
         RecordingFormat::F32 => {
             let sender = controller.0.record_audio_f32_sender.clone();
@@ -932,7 +1003,7 @@ fn run_recording(controller: WhisperAppController, configs: RecorderConfigs) {
                 bits_per_sample: 32,
                 sample_format: SampleFormat::Float,
             };
-            recording_impl(
+            let res = recording_impl(
                 controller.clone(),
                 &desired_audio,
                 spec,
@@ -941,22 +1012,38 @@ fn run_recording(controller: WhisperAppController, configs: RecorderConfigs) {
                 f_central,
             );
             clear_message_queue(controller.0.record_audio_f32_receiver.clone());
+            res
         }
-    }
+    };
     controller.0.audio_worker_state.store(AudioWorkerState::Idle, Ordering::Release);
+    result
 }
 
-// TODO: add a progress job to this setup.
 fn run_realtime_audio_transcription(
     controller: WhisperAppController,
     configs: Arc<whisper_realtime::configs::Configs>,
     filtering: (bool, f32, f32),
-) -> Result<String, Box<dyn Any + Send>> {
+) -> Result<String, WhisperAppError> {
+    let job_name = "Realtime Setup";
+
+    let progress = Progress::new(String::from(job_name), 1, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
+
     // Audio filtering
     let filter = filtering.0;
     let f_higher = filtering.1;
     let f_lower = filtering.2;
     let f_central = f_central(f_lower, f_higher);
+
+
+    let progress = Progress::new(String::from(job_name), 10, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
 
     // Clear the text buffer.
     controller.clear_transcription_buffer();
@@ -965,6 +1052,13 @@ fn run_realtime_audio_transcription(
     let c_controller_write_thread = controller.clone();
     let c_controller_visualizer_thread = controller.clone();
     let c_controller_transcription_reader_thread = controller.clone();
+
+
+    let progress = Progress::new(String::from(job_name), 20, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
 
     // Init model.
     let model = init_model(configs.clone());
@@ -978,6 +1072,13 @@ fn run_realtime_audio_transcription(
     let c_audio_reader = audio.clone();
     let c_audio_transcriber = audio.clone();
 
+
+    let progress = Progress::new(String::from(job_name), 30, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
+
     // Text sender
     let c_text_sender = controller.0.transcription_text_sender.clone();
     // Recording sender for writing to tmp file
@@ -990,8 +1091,14 @@ fn run_realtime_audio_transcription(
     let audio_visualizer_receiver = r_visualizer.clone();
 
     // State Flags - This should likely be refactored.
-    let c_realtime_is_ready = controller.0.realtime_ready.clone();
     let c_realtime_is_running = controller.0.realtime_running.clone();
+
+
+    let progress = Progress::new(String::from(job_name), 40, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
 
     let mic_stream = init_realtime_microphone(
         &controller.0.audio_wrapper.audio_subsystem,
@@ -1004,17 +1111,50 @@ fn run_realtime_audio_transcription(
     let c_audio_spec = audio_spec.clone();
     let c_mic_stream = mic_stream.clone();
 
+
+    let progress = Progress::new(String::from(job_name), 50, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
+
     // Init Whisper.
     let ctx = init_whisper_ctx(c_model.clone(), c_configs.use_gpu);
-    let mut state = ctx.create_state().expect("Failed to create WhisperState");
+
+    let state = ctx.create_state();
+    if let Err(e) = &state {
+        let err = WhisperAppError::new(WhisperAppErrorType::WhisperRealtime, format!("Failed to create Whisper State. Info: {}", e.to_string()), false);
+        return Err(err);
+    }
+
+
+    let progress = Progress::new(String::from(job_name), 80, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
+
+    let mut state = state.unwrap();
+
 
     // Focus the transcriber tab.
-    controller
-        .send_focus_tab(FocusTab::Transcription)
-        .expect("Focus tab channel closed");
 
-    // TODO: refactor panics.
-    let transcription = thread::scope(|s| {
+    if let Err(e) = controller
+        .send_focus_tab(FocusTab::Transcription) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Focus tab channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    };
+
+
+    let progress = Progress::new(String::from(job_name), 100, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
+
+    // NOTE: this can still panic. The panic will kill the thread and the joiner will
+    // catch and close the app on next update.
+    let transcription_thread = thread::scope(|s| {
         c_mic_stream.resume();
         let c_realtime_is_running_transcription_reader_thread = c_realtime_is_running.clone();
         let _visualizer_thread = s.spawn(move || {
@@ -1026,28 +1166,52 @@ fn run_realtime_audio_transcription(
                     }
                     match c_controller_visualizer_thread.get_analysis_type() {
                         AnalysisType::Waveform => {
-                            let mut guard = c_controller_visualizer_thread
+                            let guard = c_controller_visualizer_thread
                                 .0
                                 .visualizer_buffer
-                                .write()
-                                .expect("Visualizer RwLock Poisoned");
-                            normalized_waveform(&output, &mut guard);
+                                .write();
+                            match guard {
+                                Ok(mut buffer) => {
+                                    normalized_waveform(&output, &mut buffer);
+                                }
+                                Err(poisoned) => {
+                                    let mut buffer = poisoned.into_inner();
+                                    c_controller_visualizer_thread.0.visualizer_buffer.clear_poison();
+                                    normalized_waveform(&output, &mut buffer);
+                                }
+                            }
                         }
                         AnalysisType::Power => {
-                            let mut guard = c_controller_visualizer_thread
+                            let guard = c_controller_visualizer_thread
                                 .0
                                 .visualizer_buffer
-                                .write()
-                                .expect("Visualizer RwLock Poisoned");
-                            power_analysis(&output, &mut guard);
+                                .write();
+                            match guard {
+                                Ok(mut buffer) => {
+                                    power_analysis(&output, &mut buffer);
+                                }
+                                Err(poisoned) => {
+                                    let mut buffer = poisoned.into_inner();
+                                    c_controller_visualizer_thread.0.visualizer_buffer.clear_poison();
+                                    power_analysis(&output, &mut buffer);
+                                }
+                            }
                         }
                         AnalysisType::SpectrumDensity => {
-                            let mut guard = c_controller_visualizer_thread
+                            let guard = c_controller_visualizer_thread
                                 .0
                                 .visualizer_buffer
-                                .write()
-                                .expect("Visualizer RwLock Poisoned");
-                            frequency_analysis(&output, &mut guard, sample_rate);
+                                .write();
+                            match guard {
+                                Ok(mut buffer) => {
+                                    frequency_analysis(&output, &mut buffer, sample_rate);
+                                }
+                                Err(poisoned) => {
+                                    let mut buffer = poisoned.into_inner();
+                                    c_controller_visualizer_thread.0.visualizer_buffer.clear_poison();
+                                    frequency_analysis(&output, &mut buffer, sample_rate);
+                                }
+                            }
                         }
                     }
                 }
@@ -1095,7 +1259,7 @@ fn run_realtime_audio_transcription(
                 }
 
                 let output = c_controller_audio_thread.0.record_audio_f32_receiver.recv();
-                assert!(output.is_ok(), "Realtime Audio Channel closed");
+                debug_assert!(output.is_ok(), "Realtime Audio Channel closed");
 
                 let mut audio_data = output.unwrap();
 
@@ -1128,8 +1292,11 @@ fn run_realtime_audio_transcription(
             log(&"Audio reader thread closed properly");
         });
 
-        let _transcription_reader_thread = s.spawn(move || {
-            while c_controller_transcription_reader_thread.realtime_running() {
+        let transcription_reader_thread = s.spawn(move || {
+            let res = loop {
+                if !c_controller_transcription_reader_thread.realtime_running() {
+                    break Ok(());
+                }
                 let text = c_controller_transcription_reader_thread
                     .0
                     .transcription_text_receiver
@@ -1165,8 +1332,8 @@ fn run_realtime_audio_transcription(
                                         }
                                     }
                                     Err(poison) => {
-                                        // Mutex is poisoned.  TODO: proper handling.
                                         let mut text_buffer = poison.into_inner();
+                                        c_controller_transcription_reader_thread.0.transcription_buffer.clear_poison();
                                         if text_packet.1 {
                                             text_buffer.push(text_packet.0)
                                         } else {
@@ -1176,98 +1343,145 @@ fn run_realtime_audio_transcription(
                                     }
                                 }
                             }
-                            Err(_e) => {
-                                // TODO: error msg.
+                            Err(e) => {
+                                let err = WhisperAppError::new(WhisperAppErrorType::WhisperRealtime, format!("Transcription failure. Info: {}", e.to_string()), false);
                                 c_realtime_is_running_transcription_reader_thread
                                     .store(false, Ordering::Release);
+                                break Err(err);
                             }
                         }
                     }
-                    Err(_e) => {
-                        // TODO: error msg - transcription channel is closed.
+                    Err(e) => {
+                        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Transcription channel closed. Info: {}", e.to_string()), false);
                         c_realtime_is_running_transcription_reader_thread
                             .store(false, Ordering::Release);
-                        break;
+                        break Err(err);
                     }
                 }
-            }
+            };
 
-            // TODO: factor out.
             // Clear the text channel
             clear_message_queue(c_controller_transcription_reader_thread.0.transcription_text_receiver.clone());
             // Closed properly
             log(&"Transcription reader thread closed properly");
+            res
         });
         let transcription_runner_thread = s
             .spawn(move || {
                 let mut transcriber = RealtimeTranscriber::new_with_configs(
                     c_audio_transcriber,
                     c_text_sender,
-                    c_realtime_is_running.clone(),
-                    c_realtime_is_ready.clone(),
                     c_configs.clone(),
                     None,
                 );
+                #[cfg(debug_assertions)]
+                log("Transcriber should be created.");
 
-                let output = transcriber.process_audio(&mut state, None::<fn(i32)>);
+                let output = transcriber.process_audio(&mut state, c_realtime_is_running, None::<fn(i32)>);
+                #[cfg(debug_assertions)]
                 log(&"Transcription runner thread closed properly");
                 output
             })
             .join();
-        transcription_runner_thread
+
+        let reader = match transcription_reader_thread.join() {
+            Ok(res) => {
+                res
+            }
+            Err(e) => {
+                let e_msg = extract_error_message(e);
+
+                let err = WhisperAppError::new(WhisperAppErrorType::ThreadError, format!("Transcription reader thread panicked. Info: {}", e_msg), false);
+                Err(err)
+            }
+        };
+        (transcription_runner_thread, reader)
     });
 
     c_mic_stream.pause();
+    #[cfg(debug_assertions)]
+    log("Realtime transcription finished");
 
-    let result = match transcription {
-        Ok(t) => {
-            let mut guard = controller
-                .0
-                .transcription_buffer
-                .write()
-                .expect("RwLock Poisoned");
-            guard.clear();
-            guard.push(t);
-            Ok(String::from("Transcription Complete"))
-        }
-        Err(e) => {
-            // TODO: write an app error to propagate
-            Err(e)
-        }
-    };
-
-
-    // Update state
-    controller
-        .0
-        .save_recording_ready
-        .store(true, Ordering::Release);
-    controller.0.audio_worker_state.store(AudioWorkerState::Idle, Ordering::Release);
-    result
+    controller.0.save_recording_ready.store(true, Ordering::Release);
+    finalize_transcription(controller.clone(), transcription_thread)
 }
 
-// TODO: add progress job.
 fn run_static_audio_transcription(
     audio: Vec<f32>,
     controller: WhisperAppController,
     configs: Arc<whisper_realtime::configs::Configs>,
-) -> Result<String, Box<dyn Any + Send>> {
+) -> Result<String, WhisperAppError> {
+    let job_name = "Static Setup";
+
+
+    let progress = Progress::new(String::from(job_name), 1, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
+
     // Clear the text buffer.
     controller.clear_transcription_buffer();
 
+
+    let progress = Progress::new(String::from(job_name), 10, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
+
     let c_controller_runner_thread = controller.clone();
     let c_controller_reader_thread = controller.clone();
+
+    let progress = Progress::new(String::from(job_name), 20, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
     let model = init_model(configs.clone());
+
+    let progress = Progress::new(String::from(job_name), 30, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
+
     let audio = SupportedAudioSample::F32(audio);
     let audio = Arc::new(Mutex::new(audio));
+
+    let progress = Progress::new(String::from(job_name), 40, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
 
     let data_sender = controller.0.transcription_text_sender.clone();
     let data_sender = Some(data_sender);
     let channels = SupportedChannels::MONO;
 
+
+    let progress = Progress::new(String::from(job_name), 50, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
+
     // Init Whisper.
     let ctx = init_whisper_ctx(model.clone(), configs.use_gpu);
-    let mut state = ctx.create_state().expect("Failed to create WhisperState");
+    let state = ctx.create_state();
+    if let Err(e) = &state {
+        let err = WhisperAppError::new(WhisperAppErrorType::WhisperRealtime, format!("Failed to create Whisper State. Info: {}", e.to_string()), false);
+        return Err(err);
+    }
+
+
+    let progress = Progress::new(String::from(job_name), 60, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
+
+    let mut state = state.unwrap();
 
     // Progress callback.
     let p_controller = controller.clone();
@@ -1276,44 +1490,37 @@ fn run_static_audio_transcription(
 
     let progress_callback = move |n: i32| {
         let progress = Progress::new(String::from(transcriber_job_name), n as usize, total_size);
-        p_controller
-            .send_progress(progress)
-            .expect("Progress channel closed");
+        let _ = p_controller
+            .send_progress(progress);
     };
 
+
+    let progress = Progress::new(String::from(job_name), 80, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
+
     let progress_callback = Some(progress_callback);
-    // Focus transcription tab
-    controller
-        .send_focus_tab(FocusTab::Transcription)
-        .expect("Transcription channel closed");
 
+    // Focus the transcriber tab.
+    if let Err(e) = controller.send_focus_tab(FocusTab::Transcription) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Focus tab channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    };
+
+
+    let progress = Progress::new(String::from(job_name), 100, 100);
+    if let Err(e) = controller.send_progress(progress) {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Progress channel closed. Info: {}", e.to_string()), true);
+        return Err(err);
+    }
+
+    // NOTE: this can still panic. The panic will kill the thread and the joiner will
+    // catch and close the app on next update.
     let transcription_thread = thread::scope(|s| {
-        let transcription_runner_thread = s
-            .spawn(move || {
-                let mut transcriber =
-                    StaticTranscriber::new_with_configs(audio, data_sender, configs, channels);
-
-                c_controller_runner_thread.0.audio_worker_state.store(AudioWorkerState::Running, Ordering::Release);
-
-                let output = transcriber.process_audio(&mut state, progress_callback);
-                // TODO: check library for whether set internally.
-                c_controller_runner_thread
-                    .0
-                    .static_running
-                    .store(false, Ordering::Release);
-                // Final progress update -> Whisper finishes before the final callback.
-
-                let progress = Progress::new(String::from(transcriber_job_name), 1, 1);
-                c_controller_runner_thread
-                    .send_progress(progress)
-                    .expect("Progress channel closed");
-                log(&String::from("Transcription runner finished"));
-                output
-            })
-            .join();
-
         // Transcription reader thread.
-        let _reader_thread = s.spawn(move || {
+        let reader_thread = s.spawn(move || {
             while c_controller_reader_thread.static_running() {
                 let text = c_controller_reader_thread
                     .0
@@ -1323,11 +1530,6 @@ fn run_static_audio_transcription(
                     Ok(result) => {
                         match result {
                             Ok(text_packet) => {
-                                if text_packet.0 == constants::GO_MSG {
-                                    // TODO: SET STATE ENUM FROM PROGRESS TO GO
-                                    continue;
-                                }
-
                                 let guard =
                                     c_controller_reader_thread.0.transcription_buffer.write();
                                 match guard {
@@ -1341,6 +1543,7 @@ fn run_static_audio_transcription(
                                     }
                                     Err(poison) => {
                                         let mut text_buffer = poison.into_inner();
+                                        c_controller_reader_thread.0.transcription_buffer.clear_poison();
                                         if text_packet.1 {
                                             text_buffer.push(text_packet.0);
                                         } else {
@@ -1350,22 +1553,25 @@ fn run_static_audio_transcription(
                                     }
                                 }
                             }
-                            Err(_e) => {
-                                // TODO: send error msg
+                            Err(e) => {
                                 c_controller_reader_thread
                                     .0
                                     .static_running
                                     .store(false, Ordering::Release);
+
+                                let err = WhisperAppError::new(WhisperAppErrorType::WhisperRealtime, format!("Transcription failure. Info: {}", e.to_string()), false);
+                                return Err(err);
                             }
                         }
                     }
-                    Err(_e) => {
-                        // TODO: proper error -> transcription channel closed.
-                        // Might be able to recover by re-initializing the controller.
+                    Err(e) => {
                         c_controller_reader_thread
                             .0
                             .static_running
                             .store(false, Ordering::Release);
+
+                        let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Transcription channel closed. Info: {}", e), true);
+                        return Err(err);
                     }
                 }
             }
@@ -1373,28 +1579,99 @@ fn run_static_audio_transcription(
             // Clear the text channel
             clear_message_queue(c_controller_reader_thread.0.transcription_text_receiver.clone());
             log(&String::from("Transcription reader finished"));
+            Ok(())
         });
-        transcription_runner_thread
+
+        let transcription_runner_thread = s
+            .spawn(move || {
+                let mut transcriber =
+                    StaticTranscriber::new_with_configs(audio, data_sender, configs, channels);
+
+                c_controller_runner_thread.0.audio_worker_state.store(AudioWorkerState::Running, Ordering::Release);
+                let static_running = c_controller_runner_thread.0.static_running.clone();
+                let output = transcriber.process_audio(&mut state, static_running, progress_callback);
+
+                // Update state if transcription not already stopped.
+                c_controller_runner_thread
+                    .0
+                    .static_running
+                    .store(false, Ordering::Release);
+                // Final progress update -> Whisper finishes before the final callback.
+                let progress = Progress::new(String::from(transcriber_job_name), 1, 1);
+                c_controller_runner_thread
+                    .send_progress(progress).expect("Progress channel should be open");
+
+                log(&String::from("Transcription runner finished"));
+                output
+            })
+            .join();
+
+
+        let reader = match reader_thread.join() {
+            Ok(res) => {
+                match res {
+                    Ok(_) => {
+                        Ok(())
+                    }
+                    Err(e) => {
+                        Err(e)
+                    }
+                }
+            }
+            Err(e) => {
+                let e_msg = extract_error_message(e);
+                let err = WhisperAppError::new(WhisperAppErrorType::ThreadError, format!("Transcription reader thread panicked. Info: {}", e_msg), false);
+                Err(err)
+            }
+        };
+        (transcription_runner_thread, reader)
     });
 
-    let result = match transcription_thread {
+    #[cfg(debug_assertions)]
+    log("Static transcription finished");
+    finalize_transcription(controller.clone(), transcription_thread)
+}
+
+fn finalize_transcription(controller: WhisperAppController, transcription_results: (thread::Result<String>, Result<(), WhisperAppError>)) -> Result<String, WhisperAppError> {
+    let (transcription, reader) = transcription_results;
+    // Get info from the reader thread.
+    if let Err(e) = reader {
+        if e.fatal {
+            return Err(e);
+        } else {
+            let msg = ConsoleMessage::new(ConsoleMessageType::Error, e.to_string());
+            let send_msg = controller.send_console_message(msg);
+            if let Err(e) = send_msg {
+                let fatal = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Console channel closed. Info: {}", e), true);
+                return Err(fatal);
+            }
+        }
+    }
+
+    controller.0.audio_worker_state.store(AudioWorkerState::Idle, Ordering::Release);
+    // Extract the transcription if possible.
+    let result = match transcription {
         Ok(t) => {
-            let mut guard = controller
+            let guard = controller
                 .0
                 .transcription_buffer
-                .write()
-                .expect("RwLock poisoned");
-            guard.clear();
-            guard.push(t);
+                .write();
+            let mut buffer = match guard {
+                Ok(buffer) => { buffer }
+                Err(poison) => {
+                    controller.0.transcription_buffer.clear_poison();
+                    poison.into_inner()
+                }
+            };
+            buffer.clear();
+            buffer.push(t);
             Ok(String::from("Transcription Complete"))
         }
-        Err(e) => {
-            // TODO: Proper error
-            Err(e)
+        Err(_) => {
+            let err = WhisperAppError::new(WhisperAppErrorType::WhisperRealtime, String::from("Transcription failed."), false);
+            Err(err)
         }
     };
-    controller.0.audio_worker_state.store(AudioWorkerState::Idle, Ordering::Release);
-
     result
 }
 
@@ -1404,11 +1681,11 @@ fn clear_message_queue<T>(queue: Receiver<T>) {
     }
 }
 
-// TODO: JoinHandle errors should be WhisperAppErrors.
-type WhisperAppThread = (WorkerType, JoinHandle<Result<String, Box<dyn Any + Send>>>);
+type WhisperAppThread = JoinHandle<Result<String, WhisperAppError>>;
 
 #[derive(Debug)]
 struct WhisperAppContext {
+    poisoned: Arc<AtomicBool>,
     // GPU AVAILABLE
     gpu_support: Arc<AtomicBool>,
     // ASYNC (DOWNLOADS)
@@ -1419,7 +1696,6 @@ struct WhisperAppContext {
     audio_wrapper: Arc<SdlAudioWrapper>,
     // STATE
     audio_worker_state: Arc<AtomicAudioWorkerState>,
-    application_running: Arc<AtomicBool>,
     realtime_ready: Arc<AtomicBool>,
     static_ready: Arc<AtomicBool>,
     save_recording_ready: Arc<AtomicBool>,
@@ -1477,6 +1753,7 @@ impl WhisperAppContext {
         let system_theme = RwLock::new(system_theme);
 
         // STATE
+        let poisoned = Arc::new(AtomicBool::new(false));
         let downloading = Arc::new(AtomicBool::new(false));
         let realtime_ready = Arc::new(AtomicBool::new(false));
         let static_ready = Arc::new(AtomicBool::new(false));
@@ -1486,7 +1763,6 @@ impl WhisperAppContext {
         let static_running = Arc::new(AtomicBool::new(false));
         let recorder_running = Arc::new(AtomicBool::new(false));
 
-        let application_running = Arc::new(AtomicBool::new(true));
         let audio_worker_state = Arc::new(AtomicAudioWorkerState::new(AudioWorkerState::Idle));
 
         // Visualizer
@@ -1512,13 +1788,13 @@ impl WhisperAppContext {
         let (focus_tab_sender, focus_tab_receiver) = unbounded();
 
         Self {
+            poisoned,
             gpu_support,
             client,
             handle,
             system_theme,
             audio_wrapper,
             audio_worker_state,
-            application_running,
             realtime_ready,
             static_ready,
             save_recording_ready,
@@ -1547,100 +1823,4 @@ impl WhisperAppContext {
             focus_tab_receiver,
         }
     }
-}
-
-// TODO: MIGRATE THESE TO A SEPARATE FILE
-#[cfg(all(target_os = "windows", feature = "cuda"))]
-fn check_gpu_target() -> bool {
-    use nvml_wrapper::Nvml;
-    let nvml = Nvml::init();
-    if let Err(_) = &nvml {
-        return false;
-    };
-
-    let nvml = nvml.unwrap();
-    let device_count = nvml.device_count();
-    if let Err(_) = &device_count {
-        return false;
-    };
-
-    let device_count = device_count.unwrap();
-    if device_count < 1 {
-        return false;
-    };
-
-    let cuda_version = nvml.sys_cuda_driver_version();
-    if let Err(_) = &cuda_version {
-        return false;
-    }
-
-    let cuda_version = cuda_version.unwrap();
-    let sys_major_version = cuda_driver_version_major(cuda_version);
-    let sys_minor_version = cuda_driver_version_minor(cuda_version);
-    sys_major_version >= constants::MIN_CUDA_MAJOR && sys_minor_version >= constants::MIN_CUDA_MINOR
-}
-
-#[cfg(all(target_os = "linux", feature = "cuda"))]
-fn check_gpu_target() -> bool {
-    use nvml_wrapper::Nvml;
-    let nvml = Nvml::init();
-    if let Err(_) = &nvml {
-        return false;
-    };
-
-    let nvml = nvml.unwrap();
-    let device_count = nvml.device_count();
-    if let Err(_) = &device_count {
-        return false;
-    };
-
-    let device_count = device_count.unwrap();
-    if device_count < 1 {
-        return false;
-    };
-
-    let cuda_version = nvml.sys_cuda_driver_version();
-    if let Err(_) = &cuda_version {
-        return false;
-    }
-
-    let cuda_version = cuda_version.unwrap();
-    let sys_major_version = cuda_driver_version_major(cuda_version);
-    let sys_minor_version = cuda_driver_version_minor(cuda_version);
-    sys_major_version >= constants::MIN_CUDA_MAJOR && sys_minor_version >= constants::MIN_CUDA_MINOR
-}
-
-#[cfg(all(target_os = "linux", feature = "hipblas"))]
-fn check_gpu_target() -> bool {
-    let hip = env::var("HIP_PATH").is_ok();
-    let common_paths = [
-        "/opt/rocm/lib/libhipblas.so",
-        "/opt/rocm/hip/lib/libhipblas.so",
-        "opt/rocm/lib/librocblas.so",
-        "opt/rocm/hipblas",
-    ];
-    let found_path = common_paths.iter().any(|&path| Path::new(path).exists());
-    let blas = env::var("HIP_BLAS_PATH").is_ok();
-
-    (hip && blas) || found_path
-}
-
-#[cfg(all(feature = "metal", target_arch = "x86_64"))]
-fn check_gpu_target() -> bool {
-    use metal;
-    let available_devices = metal::Device::all();
-
-    // Using raytracing as a base-minimum for running the gpu at a reasonable speed.
-    available_devices.iter().any(|d| d.supports_raytracing());
-}
-
-// Apple Silicon is fully supported by Whisper.cpp
-#[cfg(all(feature = "metal", target_arch = "aarch64"))]
-fn check_gpu_target() -> bool {
-    true
-}
-
-#[cfg(not(feature = "_gpu"))]
-fn check_gpu_target() -> bool {
-    false
 }

@@ -1,9 +1,10 @@
-use std::io::ErrorKind;
-use std::thread;
+use std::{
+    io::ErrorKind,
+    thread,
+};
 
 use directories::ProjectDirs;
-use eframe;
-use eframe::emath::vec2;
+use eframe::{emath::vec2, NativeOptions, run_native};
 use egui::ViewportBuilder;
 use egui_extras::install_image_loaders;
 use sdl2::log::log;
@@ -19,7 +20,6 @@ use crate::{
         threading::join_threads_loop,
     },
 };
-use crate::utils::workers::WorkerType;
 
 mod controller;
 mod ui;
@@ -30,20 +30,39 @@ fn main() -> Result<(), WhisperAppError> {
         constants::QUALIFIER,
         constants::ORGANIZATION,
         constants::APP_ID,
-    )
-        .expect("Failed to get proj dir");
+    );
+
+    if proj_dirs.is_none() {
+        let err = WhisperAppError::new(WhisperAppErrorType::IOError, String::from("Failed to get project directory"), true);
+        return Err(err);
+    }
+
+    let proj_dirs = proj_dirs.unwrap();
+
     let data_dir = proj_dirs.data_dir();
-    let mut native_options = eframe::NativeOptions::default();
+    let mut native_options = NativeOptions::default();
     let viewport = build_viewport();
 
-    // TODO: switch to true once default layout is done.
-    native_options.persist_window = false;
+    native_options.persist_window = true;
     native_options.persistence_path = Some(data_dir.to_path_buf());
     native_options.viewport = viewport;
 
     // SDL.
-    let sdl = sdl2::init().expect("Failed to initialize SDL");
-    let audio_subsystem = sdl.audio().expect("Failed to initialize audio");
+    let sdl = sdl2::init();
+    if let Err(e) = &sdl {
+        let err = WhisperAppError::new(WhisperAppErrorType::ParameterError, format!("Failed to initialize sdl. Info: {}", e), true);
+        return Err(err);
+    }
+
+    let sdl = sdl.unwrap();
+
+    let audio_subsystem = sdl.audio();
+    if let Err(e) = &audio_subsystem {
+        let err = WhisperAppError::new(WhisperAppErrorType::ParameterError, format!("Failed to initialize sdl. Info: {}", e), true);
+        return Err(err);
+    }
+
+    let audio_subsystem = audio_subsystem.unwrap();
 
     let audio_wrapper = SdlAudioWrapper { audio_subsystem };
     let audio_wrapper = std::sync::Arc::new(audio_wrapper);
@@ -58,7 +77,8 @@ fn main() -> Result<(), WhisperAppError> {
     if let Err(e) = rt.as_ref() {
         let err = WhisperAppError::new(
             WhisperAppErrorType::Unknown,
-            format!("Failed to build tokio runtime. Error: {}", e),
+            format!("Failed to build tokio runtime. Info: {}", e),
+            true,
         );
         return Err(err);
     }
@@ -78,7 +98,7 @@ fn main() -> Result<(), WhisperAppError> {
         join_threads_loop(c_receiver, c_controller);
     });
 
-    let app = eframe::run_native(
+    let app = run_native(
         constants::APP_ID,
         native_options,
         Box::new(|cc| {
@@ -88,19 +108,19 @@ fn main() -> Result<(), WhisperAppError> {
         }),
     );
 
-    // Pump a bogus thread to the joiner to get it to stop in case it's blocked.
+    // Send a "Finished" message to close the background joiner thread.
     let finished = thread::spawn(|| {
-        Ok(String::from("Finished"))
+        Ok(String::from(constants::CLOSE_APP))
     });
 
-    let _ = controller.send_thread_handle((WorkerType::IO, finished));
+    let _ = controller.send_thread_handle(finished);
 
     #[cfg(debug_assertions)]
     log("App closed");
     // if failed to delete temporary file.
     if let Err(e) = controller.cleanup() {
         if e.kind() != ErrorKind::NotFound {
-            let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Failed to delete scratch buffer. Error: {}", e));
+            let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Failed to delete scratch buffer. Info: {}", e), true);
             eprintln!("{}", err);
         }
     }
@@ -111,7 +131,7 @@ fn main() -> Result<(), WhisperAppError> {
     if let Err(e) = app {
         let err = WhisperAppError::new(
             WhisperAppErrorType::GUIError,
-            format!("Failed to set up GFX ctx, Error: {}", e),
+            format!("Failed to set up GFX ctx, Info: {}", e), true,
         );
         eprintln!("{}", err);
     }
@@ -119,7 +139,7 @@ fn main() -> Result<(), WhisperAppError> {
     if let Err(e) = t {
         let err = WhisperAppError::new(
             WhisperAppErrorType::ThreadError,
-            format!("Thread panicked. Error: {:?}", e),
+            format!("Thread panicked. Info: {:?}", e), true,
         );
         return Err(err);
     }

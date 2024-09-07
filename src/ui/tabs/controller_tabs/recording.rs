@@ -6,13 +6,13 @@ use strum::IntoEnumIterator;
 
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
-    utils::{
-        constants,
-        recorder_configs::{BufferSize, Channel, RecorderConfigs, RecordingFormat, SampleRate},
-    },
     ui::tabs::{
         controller_tabs::controller_common::{f_higher_stack, f_lower_stack, toggle_bandpass_filter_stack},
         tab_view,
+    },
+    utils::{
+        constants,
+        recorder_configs::{BufferSize, Channel, RecorderConfigs, RecordingFormat, SampleRate},
     },
 };
 
@@ -23,9 +23,6 @@ pub struct RecordingTab {
 }
 
 impl RecordingTab {
-    pub fn new() -> Self {
-        Self::default()
-    }
     pub fn new_with_configs(configs: RecorderConfigs) -> Self {
         Self {
             title: String::from("Recording"),
@@ -74,6 +71,7 @@ impl tab_view::TabView for RecordingTab {
             ui.add_enabled_ui(!recorder_running, |ui| {
                 ui.heading("Configuration");
                 Grid::new("recording_configs")
+                    .num_columns(2)
                     .striped(true)
                     .show(ui, |ui| {
 
@@ -141,8 +139,6 @@ impl tab_view::TabView for RecordingTab {
                         });
 
                         ui.end_row();
-
-                        // TODO: move to controller_common.
 
                         // RUN BANDPASS FILTER
                         toggle_bandpass_filter_stack(ui, filter);

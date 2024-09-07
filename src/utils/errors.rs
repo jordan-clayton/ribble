@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::fmt::Formatter;
 
 use strum::{Display, EnumIter};
@@ -6,11 +7,12 @@ use strum::{Display, EnumIter};
 pub struct WhisperAppError {
     error_type: WhisperAppErrorType,
     reason: String,
+    pub fatal: bool,
 }
 
 impl WhisperAppError {
-    pub fn new(error_type: WhisperAppErrorType, reason: String) -> Self {
-        Self { error_type, reason }
+    pub fn new(error_type: WhisperAppErrorType, reason: String, fatal: bool) -> Self {
+        Self { error_type, reason, fatal }
     }
 }
 
@@ -27,9 +29,29 @@ impl std::fmt::Display for WhisperAppError {
 
 #[derive(Clone, Copy, Debug, Display, EnumIter)]
 pub enum WhisperAppErrorType {
+    WhisperRealtime,
     IOError,
     ParameterError,
     ThreadError,
     GUIError,
     Unknown,
+}
+
+
+pub fn extract_error_message(error: Box<dyn Any + Send>) -> String {
+    match error.downcast_ref::<&'static str>() {
+        None => {
+            match error.downcast_ref::<String>() {
+                None => {
+                    String::from("Unknown error")
+                }
+                Some(s) => {
+                    s.clone()
+                }
+            }
+        }
+        Some(s) => {
+            String::from(*s)
+        }
+    }
 }

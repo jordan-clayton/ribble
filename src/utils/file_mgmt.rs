@@ -1,10 +1,15 @@
 use std::{
+    collections::HashMap,
     fs::File,
-    io::{self, BufReader, BufWriter, ErrorKind, Write},
+    io::{self, BufWriter, ErrorKind, Write},
     path::{Path, PathBuf},
+    thread,
+    thread::JoinHandle,
 };
 
-use hound::{Sample, WavReader, WavSpec, WavWriter};
+use egui_dock::DockState;
+use hound::{Sample, WavSpec, WavWriter};
+use sdl2::log::log;
 use symphonia::{
     core::{
         audio::SampleBuffer,
@@ -18,10 +23,88 @@ use symphonia::{
     default::get_probe,
 };
 
-use crate::utils::{
-    constants,
-    errors::{WhisperAppError, WhisperAppErrorType},
+use crate::{
+    ui::tabs::whisper_tab::WhisperTab,
+    utils::{
+        constants,
+        errors::{WhisperAppError, WhisperAppErrorType},
+    },
 };
+
+pub fn load_app_state() -> Option<(DockState<WhisperTab>, HashMap<String, WhisperTab>)> {
+    let kv: HashMap<String, String> = eframe::storage_dir(constants::APP_ID).and_then(|path| {
+        let save_file = qualify_save_path(&path);
+        match File::open(save_file) {
+            Ok(file) => {
+                let reader = io::BufReader::new(file);
+                match ron::de::from_reader(reader) {
+                    Ok(value) => Some(value),
+                    Err(err) => {
+                        #[cfg(debug_assertions)]
+                        log(&format!("Failed to parse ron. Info: {}", err));
+                        None
+                    }
+                }
+            }
+            Err(_) => {
+                None
+            }
+        }
+    }).unwrap_or_default();
+
+    let tree: Option<DockState<WhisperTab>> = deserialize(&kv, constants::TREE_KEY);
+    let closed_tabs = deserialize(&kv, constants::CLOSED_TABS_KEY);
+
+    if tree.is_none() || closed_tabs.is_none() {
+        None
+    } else {
+        Some((tree.unwrap(), closed_tabs.unwrap()))
+    }
+}
+
+fn deserialize<T: serde::de::DeserializeOwned>(kv: &HashMap<String, String>, key: &str) -> Option<T> {
+    kv.get(key).cloned().and_then(|s| match ron::from_str(&s) {
+        Ok(tree) => Some(tree),
+        Err(err) => {
+            #[cfg(debug_assertions)]
+            log(&format!("Failed to encode data using ron. Info: {}", err));
+            None
+        }
+    })
+}
+
+pub fn save_app_state(tree: &DockState<WhisperTab>, closed_tabs: &HashMap<String, WhisperTab>) -> JoinHandle<Result<(), WhisperAppError>> {
+    let tree_ron = ron::ser::to_string(tree).expect("Failed to serialize tree");
+    let tabs_ron = ron::ser::to_string(closed_tabs).expect("Failed to serialize closed tabs");
+    let kv: HashMap<String, String> = HashMap::from([(String::from(constants::TREE_KEY), tree_ron), (String::from(constants::CLOSED_TABS_KEY), tabs_ron)]);
+
+    thread::spawn(move || {
+        let mut data_dir = eframe::storage_dir(constants::APP_ID).expect("Storage dir should exist");
+        data_dir = qualify_save_path(&data_dir);
+        match File::create(data_dir) {
+            Ok(file) => {
+                let mut writer = BufWriter::new(file);
+                let config = Default::default();
+
+                if let Err(e) = ron::ser::to_writer_pretty(&mut writer, &kv, config).and_then(|_| writer.flush().map_err(|err| err.into())) {
+                    let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Failed to serialize app state. Info: {}", e), false);
+                    return Err(err);
+                };
+                Ok(())
+            }
+            Err(err) => {
+                let err = WhisperAppError::new(WhisperAppErrorType::IOError, format!("Failed to create save file. Info: {}", err), false);
+                Err(err)
+            }
+        }
+    })
+}
+
+fn qualify_save_path(dir: &Path) -> PathBuf {
+    let mut path = dir.to_path_buf();
+    path.push(constants::RON_FILE);
+    path
+}
 
 fn qualify_path(dir: &Path) -> PathBuf {
     let mut path = dir.to_path_buf();
@@ -53,20 +136,11 @@ pub fn get_tmp_file_writer(
     get_wav_output_writer(path.as_path(), spec)
 }
 
-pub fn get_tmp_file_reader(data_dir: &Path) -> hound::Result<WavReader<BufReader<File>>> {
-    let path = qualify_path(data_dir);
-    get_wav_input_reader(path.as_path())
-}
-
 pub fn get_wav_output_writer(
     path: &Path,
     spec: &WavSpec,
 ) -> hound::Result<WavWriter<BufWriter<File>>> {
     hound::WavWriter::create(path, *spec)
-}
-
-pub fn get_wav_input_reader(path: &Path) -> hound::Result<WavReader<BufReader<File>>> {
-    hound::WavReader::open(path)
 }
 
 pub fn get_audio_reader(
@@ -77,7 +151,7 @@ pub fn get_audio_reader(
         let error = WhisperAppError::new(
             WhisperAppErrorType::ParameterError,
             format!("Invalid path: {:?}", path),
-        );
+            false);
         return Err(error);
     }
 
@@ -85,28 +159,13 @@ pub fn get_audio_reader(
     let mss = MediaSourceStream::new(Box::new(src), Default::default());
     let mut hint = Hint::new();
 
-    let ext = path.extension();
-    if ext.is_none() {
-        let error = WhisperAppError::new(
-            WhisperAppErrorType::IOError,
-            format!("Failed to parse file extension, {:?}", path),
-        );
-        return Err(error);
+    let ext = path.extension().and_then(|os_str| {
+        os_str.to_str()
+    });
+
+    if let Some(ex) = ext {
+        hint.with_extension(ex);
     }
-    let ext = ext.unwrap();
-
-    let ext = ext.to_str();
-    if ext.is_none() {
-        let error = WhisperAppError::new(
-            WhisperAppErrorType::IOError,
-            format!("Failed to convert OsStr {:?} to str", ext),
-        );
-        return Err(error);
-    }
-
-    let ext = ext.unwrap();
-
-    hint.with_extension(ext);
 
     let meta_opts: MetadataOptions = Default::default();
     let fmt_opts: FormatOptions = Default::default();
@@ -116,6 +175,7 @@ pub fn get_audio_reader(
         let error = WhisperAppError::new(
             WhisperAppErrorType::ParameterError,
             format!("Unsupported file format. Error: {}", e),
+            false,
         );
         return Err(error);
     }
@@ -131,6 +191,7 @@ pub fn get_audio_reader(
         let error = WhisperAppError::new(
             WhisperAppErrorType::ParameterError,
             format!("Failed to find an audio track in {:?}", path),
+            false,
         );
         return Err(error);
     }
@@ -143,6 +204,7 @@ pub fn get_audio_reader(
         let error = WhisperAppError::new(
             WhisperAppErrorType::ParameterError,
             format!("Unsupported format. Error: {}", e),
+            false,
         );
         return Err(error);
     }
@@ -178,6 +240,7 @@ pub fn decode_audio(
                 let error = WhisperAppError::new(
                     WhisperAppErrorType::Unknown,
                     format!("Unable to decode audio samples. Error: {}", e),
+                    false,
                 );
                 return Err(error);
             }
@@ -185,7 +248,7 @@ pub fn decode_audio(
                 let error = WhisperAppError::new(
                     WhisperAppErrorType::Unknown,
                     format!("Unable to decode audio samples. Error: {}", e),
-                );
+                    false);
                 return Err(error);
             }
         };
@@ -239,7 +302,7 @@ pub fn decode_audio(
                 let error = WhisperAppError::new(
                     WhisperAppErrorType::ParameterError,
                     format!("Decode failure. {}", e),
-                );
+                    false);
                 return Err(error);
             }
             Err(Error::IoError(e)) => {
@@ -248,14 +311,14 @@ pub fn decode_audio(
                 }
                 let error = WhisperAppError::new(
                     WhisperAppErrorType::ParameterError,
-                    format!("IO Error. {}", e),
+                    format!("IO Error. {}", e), false,
                 );
                 return Err(error);
             }
             Err(e) => {
                 let error = WhisperAppError::new(
                     WhisperAppErrorType::ParameterError,
-                    format!("Decode failure. {}", e),
+                    format!("Decode failure. {}", e), false,
                 );
                 return Err(error);
             }
@@ -275,7 +338,7 @@ pub fn save_transcription(
     if let Err(e) = file.as_ref() {
         let error = WhisperAppError::new(
             WhisperAppErrorType::IOError,
-            format!("Failed to write to file: {:?}. Error: {}", file_path, e),
+            format!("Failed to write to file: {:?}. Error: {}", file_path, e), false,
         );
         return Err(error);
     }
@@ -289,6 +352,7 @@ pub fn save_transcription(
                 let error = WhisperAppError::new(
                     WhisperAppErrorType::IOError,
                     format!("Unexpected EOF, cannot write to: {:?}", file_path),
+                    false,
                 );
                 return Err(error);
             }
@@ -307,6 +371,7 @@ pub fn save_transcription(
                 let error = WhisperAppError::new(
                     WhisperAppErrorType::IOError,
                     format!("Failed to write to file: {:?}.  Error: {}", file_path, e),
+                    false,
                 );
                 return Err(error);
             }
@@ -318,6 +383,7 @@ pub fn save_transcription(
         let error = WhisperAppError::new(
             WhisperAppErrorType::IOError,
             format!("Failed to write to file: {:?}. Error: {}", file_path, e),
+            false,
         );
         return Err(error);
     }

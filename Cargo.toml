@@ -28,6 +28,7 @@ tokio = { version = "1.39.3", features = ["rt"] }
 whisper_realtime = { git = "https://github.com/jordan-clayton/whisper-realtime.git", version = "0.1.0", features = ["serde", "crossbeam", "strum"] }
 log = "0.4.22"
 arboard = "3.4.0"
+ron = "0.8.1"
 
 [target.x86_64-apple-darwin.dependencies]
 metal = "0.29.0"

@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::thread::JoinHandle;
 
 use catppuccin_egui::Theme;
-use egui::Visuals;
+use eframe::Storage;
+use egui::{ViewportCommand, Visuals};
 use egui_dock::{DockArea, DockState, NodeIndex, Style, SurfaceIndex, TabIndex};
 
 use crate::{
@@ -12,35 +14,33 @@ use crate::{
         tab_viewer,
         whisper_tab::WhisperTab,
     },
-    utils::preferences,
+    utils::{
+        console_message::{ConsoleMessage, ConsoleMessageType},
+        errors::WhisperAppError,
+        file_mgmt::{load_app_state, save_app_state},
+        preferences,
+    },
 };
 
 pub struct WhisperApp {
     tree: DockState<WhisperTab>,
     closed_tabs: HashMap<String, WhisperTab>,
     controller: WhisperAppController,
+    last_save_join_handle: Option<JoinHandle<Result<(), WhisperAppError>>>,
 }
 
 impl WhisperApp {
     pub fn new(cc: &eframe::CreationContext<'_>, mut controller: WhisperAppController) -> Self {
-        let storage = cc.storage;
         let system_theme = cc.integration_info.system_theme;
         controller.set_system_theme(system_theme);
-        match storage {
-            None => Self::default_layout(controller),
-            Some(s) => {
-                let stored_state = eframe::get_value(s, eframe::APP_KEY);
-                match stored_state {
-                    None => Self::default_layout(controller),
-                    Some(state) => {
-                        let (tree, closed_tabs) = state;
-                        Self {
-                            tree,
-                            closed_tabs,
-                            controller,
-                        }
-                    }
-                }
+
+        match load_app_state() {
+            None => {
+                Self::default_layout(controller)
+            }
+            Some(state) => {
+                let (tree, closed_tabs) = state;
+                Self { tree, closed_tabs, controller, last_save_join_handle: None }
             }
         }
     }
@@ -61,18 +61,31 @@ impl WhisperApp {
 
         let [top, _] = surface.split_below(NodeIndex::root(), 0.7, vec![pd, ed]);
 
-        let [_, _] = surface.split_right(top, 0.6, vec![rc, st, rec]);
+        let [_, _] = surface.split_right(top, 0.55, vec![rc, st, rec]);
 
         Self {
             tree,
             closed_tabs,
             controller,
+            last_save_join_handle: None,
         }
     }
 }
 
 impl eframe::App for WhisperApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Close the app when it's in an invalid state.
+        if self.controller.is_poisoned() {
+            ctx.send_viewport_cmd(ViewportCommand::Close);
+        }
+
+        if ctx.input(|i| i.viewport().close_requested()) {
+            // Join the save thread if it's there & close the app.
+            if let Some(join_handle) = self.last_save_join_handle.take() {
+                join_handle.join().ok();
+            }
+        }
+
         let system_theme = frame.info().system_theme;
         self.controller.set_system_theme(system_theme.clone());
 
@@ -166,14 +179,24 @@ impl eframe::App for WhisperApp {
         });
     }
 
-    // TODO: Restore once testing finished.
-    // fn save(&mut self, storage: &mut dyn Storage) {
-    //     eframe::set_value(storage, eframe::APP_KEY, &(&self.tree, &self.closed_tabs));
-    // }
+    // eframe persistence does not seem to be working in linux.
+    // Atm, this will not write to disk regardless of flushing.
+    fn save(&mut self, _storage: &mut dyn Storage) {
+        if let Some(join_handle) = self.last_save_join_handle.take() {
+            if let Some(result) = join_handle.join().ok() {
+                if let Err(e) = result {
+                    let msg = ConsoleMessage::new(ConsoleMessageType::Error, format!("{}", e.to_string()));
+                    self.controller.send_console_message(msg).expect("Console message channel should not be closed.");
+                }
+            };
+        }
 
-    // TODO: set back to true once testing done
+        let new_save_handle = save_app_state(&self.tree, &self.closed_tabs);
+        self.last_save_join_handle = Some(new_save_handle);
+    }
+
     fn persist_egui_memory(&self) -> bool {
-        false
+        true
     }
 }
 

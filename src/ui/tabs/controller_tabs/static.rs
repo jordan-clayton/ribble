@@ -30,9 +30,6 @@ pub struct StaticTab {
 }
 
 impl StaticTab {
-    pub fn new() -> Self {
-        Self::default()
-    }
     pub fn new_with_configs(configs: Configs) -> Self {
         let max_threads = get_max_threads();
         Self {
@@ -124,6 +121,7 @@ impl tab_view::TabView for StaticTab {
                 ui.heading("Configuration");
                 Grid::new("static_configs_grid")
                     .striped(true)
+                    .num_columns(2)
                     .show(ui, |ui| {
                         // MODEL ROW, see configs common.
                         // Contains dropdown to select model type, to open a downloaded model + download a model.

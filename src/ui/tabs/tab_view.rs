@@ -3,10 +3,8 @@ use egui_dock::{NodeIndex, SurfaceIndex};
 
 use crate::controller::whisper_app_controller::WhisperAppController;
 
-// Port of egui_dock::TabViewer interface, removing type parameter
-// To be able to have heterogeneous tabs.
+// Port of egui_dock::TabViewer trait major features used in drawing app ui.
 
-//TODO: port the remainder of the impl.
 pub trait TabView {
     fn id(&mut self) -> String;
     fn title(&mut self) -> WidgetText;

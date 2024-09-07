@@ -5,7 +5,7 @@ pub const MIN_CUDA_MAJOR: i32 = 12;
 pub const MIN_CUDA_MINOR: i32 = 4;
 pub const BLANK_SEPARATOR: f32 = 8.0;
 
-// TODO: Consider implementing user preferences pane.
+// Future TODO: Consider implementing user preferences pane.
 pub const DEFAULT_CONSOLE_HISTORY_SIZE: usize = 35;
 
 // 2 hours, in ms.
@@ -45,20 +45,19 @@ pub const VISUALIZER_MIN_WIDTH: f32 = 8.0;
 pub const FFT_GAIN: f32 = 30.0;
 pub const WAVEFORM_GAIN: f32 = FFT_GAIN / 2.0;
 
+pub const TREE_KEY: &str = "Tree";
+pub const CLOSED_TABS_KEY: &str = "Closed Tabs";
+pub const RON_FILE: &str = "data.ron";
 pub const APP_ID: &str = "WhisperGUI";
+pub const CLOSE_APP: &str = "[CLOSE APP]";
 pub const QUALIFIER: &str = "com";
 pub const ORGANIZATION: &str = "Jordan";
 
-pub const CLEAR_MSG: &str = "[CLEAR]";
 pub const GO_MSG: &str = "[START SPEAKING]\n";
 pub const STOP_MSG: &str = "\n[END TRANSCRIPTION]\n";
-pub const CLOSE_MSG: &str = "[APP CLOSE]";
-
 pub const TEMP_FILE: &str = "tmp.wav";
 
 pub const RECORDING_ANIMATION_TIMESCALE: f64 = 2.0;
-
-pub const SLEEP_DURATION: Duration = Duration::from_millis(1);
 
 pub const FROM_COLOR: egui::Rgba = egui::Rgba::from_rgba_premultiplied(0.0, 0.0, 0.0, 0.7);
 

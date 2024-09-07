@@ -89,30 +89,6 @@ pub fn from_f32_normalized<T: Copy + NumCast + Bounded + FromPrimitive + ToPrimi
     dest.copy_from_slice(cast);
 }
 
-pub fn cast_to_f32<T: NumCast + FromPrimitive + ToPrimitive + Zero>(
-    source: &[T],
-    dest: &mut [f32],
-) {
-    let cast = source
-        .iter()
-        .map(|n| n.to_f32().expect("Failed to cast T to f32"))
-        .collect::<Vec<_>>();
-    let cast = cast.as_slice();
-    dest.copy_from_slice(cast);
-}
-
-pub fn cast_from_f32<T: NumCast + FromPrimitive + ToPrimitive + Zero + Copy>(
-    source: &[f32],
-    dest: &mut [T],
-) {
-    let cast: Vec<T> = source
-        .iter()
-        .map(|n| T::from(*n).expect("Failed to cast f32 to T"))
-        .collect();
-    let cast = cast.as_slice();
-    dest.copy_from_slice(cast);
-}
-
 // From: http://www.learningaboutelectronics.com/Articles/Center-frequency-calculator.php
 pub fn f_central(f_lower: f32, f_higher: f32) -> f32 {
     if f_higher / f_lower >= 1.1 {
@@ -265,7 +241,6 @@ pub fn frequency_analysis(
 
     let mut max_amp = 1.0;
 
-    // TODO: Determine whether gain is necessary here. Seems more accurate without.
     for frame in frames.iter_mut() {
         process_fft(frame, fft.clone(), &mut input, &mut output);
 
@@ -337,6 +312,7 @@ fn fixed_frames(
         return Err(WhisperAppError::new(
             WhisperAppErrorType::ParameterError,
             String::from("Zero sample size provided."),
+            false,
         ));
     }
     let mut samples = vec![0.0; len];
@@ -349,7 +325,7 @@ fn fixed_frames(
         return Err(WhisperAppError::new(
             WhisperAppErrorType::ParameterError,
             String::from("Cannot return 0 segments."),
-        ));
+            false));
     }
 
     if len < k {
@@ -402,7 +378,7 @@ fn fixed_frames(
         let err = WhisperAppError::new(
             WhisperAppErrorType::ParameterError,
             String::from("Zero length frames, insufficient sample size"),
-        );
+            false);
         return Err(err);
     }
 
@@ -425,14 +401,14 @@ fn welch_frames(
         return Err(WhisperAppError::new(
             WhisperAppErrorType::ParameterError,
             String::from("Zero sample size provided."),
-        ));
+            false));
     }
     let k = num_segments.unwrap_or(4);
     if k < 1 {
         return Err(WhisperAppError::new(
             WhisperAppErrorType::ParameterError,
             String::from("Cannot return 0 segments."),
-        ));
+            false));
     }
     let a = overlap.unwrap_or(0.5);
 
@@ -466,7 +442,7 @@ fn welch_frames(
         let err = WhisperAppError::new(
             WhisperAppErrorType::ParameterError,
             String::from("Zero length frames, insufficient sample size"),
-        );
+            false);
         return Err(err);
     }
 
