@@ -87,7 +87,7 @@ pub fn check_gpu_target() -> bool {
     let available_devices = metal::Device::all();
 
     // Using raytracing as a base-minimum for running the gpu at a reasonable speed.
-    available_devices.iter().any(|d| d.supports_raytracing());
+    available_devices.iter().any(|d| d.supports_raytracing())
 }
 
 // Apple Silicon is fully supported by Whisper.cpp
