@@ -1,4 +1,5 @@
 [package]
+# TODO: change name
 name = "whisper_gui"
 version = "0.1.0"
 edition = "2021"
@@ -32,6 +33,42 @@ ron = "0.8.1"
 
 [target.x86_64-apple-darwin.dependencies]
 metal = "0.29.0"
+
+[package.metadata.packager]
+name = "whisper_gui"
+# TODO: change name
+product-name = "WhisperGUI"
+# TODO: change name
+identifier = "com.Jordan.WhisperGUI"
+resources = ["Cargo.toml", "src", "README.md"]
+# TODO: make icons
+icons = ["src/assets/check_fat.svg"]
+license-file = "LICENSE.md"
+category = "Utility"
+version = "0.1.0"
+out-dir = "./dist"
+copyright = ""
+description = ""
+long-description = ""
+
+# TODO: add icons
+#icons = ["src/assets/app_icon_size.png"]
+
+[package.metadata.packager.deb]
+depends = ""
+section = "rust"
+
+[package.metadata.packager.macos]
+frameworks = ["SDL2"]
+minimum-system-version = "10.12"
+signing-identity = "TODO"
+
+[package.metadata.packager.windows]
+allow-downgrades = "true"
+
+[package.metadata.packager.nsis]
+# TODO: ico file.
+installer-icon = "src/assets/check_fat.svg"
 
 [features]
 default = []
