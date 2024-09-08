@@ -22,10 +22,10 @@ impl RecordingFormat {
         match self {
             RecordingFormat::I16 => "16-bit signed integer format. Audio CD quality.",
             RecordingFormat::I32 => {
-                "32-bit signed integer format. Wider dynamic range, but slower to process."
+                "32-bit signed integer format. Improved quality but slower to process."
             }
             RecordingFormat::F32 => {
-                "32-bit floating point format. Highest dynamic range, but large file size."
+                "32-bit floating point format. Highest dynamic range but large file size."
             }
         }
     }

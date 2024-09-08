@@ -4,12 +4,12 @@ use catppuccin_egui::Theme;
 use egui::{Button, Checkbox, ComboBox, Slider, Ui};
 use whisper_realtime::model::{Model, ModelType};
 
-use crate::utils::errors::{WhisperAppError, WhisperAppErrorType};
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::widgets::icons::{ok_icon, warning_icon},
     utils::{constants, file_mgmt::copy_data},
 };
+use crate::utils::errors::{WhisperAppError, WhisperAppErrorType};
 
 pub fn save_transcription_button(ui: &mut Ui, controller: WhisperAppController) {
     if ui.add(Button::new("Save Transcription")).clicked() {
@@ -39,6 +39,7 @@ pub fn model_stack(
     controller: WhisperAppController,
     available_models: &[ModelType],
     theme: Option<Theme>,
+    pointer_still: bool,
 ) {
     let style = ui.style_mut();
     style.interaction.show_tooltips_only_when_still = true;
@@ -53,36 +54,46 @@ pub fn model_stack(
         ui.label("Model:");
 
         if downloaded {
-            ui.add(ok_icon(None, theme)).on_hover_ui(|ui| {
-                ui.label("Model found.");
-            });
+            let resp = ui.add(ok_icon(None, theme));
+            if pointer_still {
+                resp.on_hover_ui(|ui| {
+                    ui.label("Model found.");
+                });
+            }
         } else {
-            ui.add(warning_icon(None, theme)).on_hover_ui(|ui| {
-                ui.label("Model not found");
-            });
+            let resp = ui.add(warning_icon(None, theme));
+            if pointer_still {
+                resp.on_hover_ui(|ui| {
+                    ui.label("Model not found.");
+                });
+            }
         }
     });
 
     ui.horizontal(|ui| {
-        ComboBox::from_id_source("modeltype")
+        let resp = ComboBox::from_id_source("modeltype")
             .selected_text(model.to_string())
             .show_ui(ui, |ui| {
                 for m in available_models {
                     ui.selectable_value(model, *m, m.to_string());
                 }
             })
-            .response
-            .on_hover_ui(|ui| {
-                ui.label("Select the desired model for transcribing");
-            });
+            .response;
 
-        if ui
-            .button("Open")
-            .on_hover_ui(|ui| {
+        if pointer_still {
+            resp.on_hover_ui(|ui| {
+                ui.label("Select the desired model for transcribing.");
+            });
+        }
+
+        // OPEN BUTTON
+        let mut resp = ui.button("Open");
+        if pointer_still {
+            resp = resp.on_hover_ui(|ui| {
                 ui.label(format!("Open a compatible {} model.", model.to_string()));
-            })
-            .clicked()
-        {
+            });
+        }
+        if resp.clicked() {
             // Open File dialog at HOME directory, fallback to root.
             let base_dirs = directories::BaseDirs::new();
             let dir = if let Some(dir) = base_dirs {
@@ -121,13 +132,17 @@ pub fn model_stack(
                     .expect("Thread channel should be open.")
             }
         }
-        if ui
-            .add_enabled(!downloading, Button::new("Download"))
-            .on_hover_ui(|ui| {
+
+        // DOWNLOAD BUTTON
+        let mut resp = ui.add_enabled(!downloading, Button::new("Download"));
+
+        if pointer_still {
+            resp = resp.on_hover_ui(|ui| {
                 ui.label(format!("Download compatible {} model", model.to_string()));
             })
-            .clicked()
-        {
+        }
+
+        if resp.clicked() {
             let url = m_model.url();
             let file_name = m_model.model_file_name().to_owned();
             let directory = m_model.model_directory();
@@ -136,47 +151,59 @@ pub fn model_stack(
     });
 }
 
-pub fn n_threads_stack(ui: &mut Ui, n_threads: &mut std::ffi::c_int, max_threads: std::ffi::c_int) {
+pub fn n_threads_stack(
+    ui: &mut Ui,
+    n_threads: &mut std::ffi::c_int,
+    max_threads: std::ffi::c_int,
+    pointer_still: bool,
+) {
     let style = ui.style_mut();
     style.interaction.show_tooltips_only_when_still = true;
     style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
     style.interaction.tooltip_delay = constants::TOOLTIP_DELAY;
     ui.label("Threads:");
 
-    ui.add(Slider::new(
+    let resp = ui.add(Slider::new(
         n_threads,
         1..=std::cmp::min(max_threads, constants::MAX_WHISPER_THREADS),
-    ))
-    .on_hover_ui(|ui| {
-        ui.label("Select the number of threads to allocate for transcription");
-        ui.label(format!("Recommended: {}", std::cmp::min(7, max_threads)));
-    });
+    ));
+
+    if pointer_still {
+        resp.on_hover_ui(|ui| {
+            ui.label("Select the number of threads to allocate for transcription.");
+            ui.label(format!("Recommended: {}", std::cmp::min(7, max_threads)));
+        });
+    }
 }
 
-pub fn use_gpu_stack(ui: &mut Ui, use_gpu: &mut bool, gpu_capable: bool) {
+pub fn use_gpu_stack(ui: &mut Ui, use_gpu: &mut bool, gpu_capable: bool, pointer_still: bool) {
     let style = ui.style_mut();
     style.interaction.show_tooltips_only_when_still = true;
     style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
     style.interaction.tooltip_delay = constants::TOOLTIP_DELAY;
     *use_gpu = *use_gpu & gpu_capable;
     ui.label("Hardware Acceleration (GPU):");
-    ui.add_enabled(gpu_capable, Checkbox::without_text(use_gpu))
-        .on_hover_ui(|ui| {
+
+    let resp = ui.add_enabled(gpu_capable, Checkbox::without_text(use_gpu));
+
+    if pointer_still {
+        resp.on_hover_ui(|ui| {
             ui.label("Enable hardware acceleration. Required for large models in realtime.");
         })
-        .on_disabled_hover_ui(|ui| {
-            ui.label("Hardware acceleration is not supported. Realtime model selection limited.");
-        });
+            .on_disabled_hover_ui(|ui| {
+                ui.label("Hardware acceleration is not supported. Realtime model selection limited.");
+            });
+    }
 }
 
-pub fn set_language_stack(ui: &mut Ui, language: &mut Option<String>) {
+pub fn set_language_stack(ui: &mut Ui, language: &mut Option<String>, pointer_still: bool) {
     let style = ui.style_mut();
     style.interaction.show_tooltips_only_when_still = true;
     style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
     style.interaction.tooltip_delay = constants::TOOLTIP_DELAY;
     ui.label("Language:");
 
-    ComboBox::from_id_source("language")
+    let resp = ComboBox::from_id_source("language")
         .selected_text(
             *constants::LANGUAGE_CODES
                 .get(language)
@@ -187,37 +214,47 @@ pub fn set_language_stack(ui: &mut Ui, language: &mut Option<String>) {
                 ui.selectable_value(language, v.clone(), *k);
             }
         })
-        .response
-        .on_hover_ui(|ui| {
-            ui.label("Select input language. Set to Auto for auto-detection");
+        .response;
+
+    if pointer_still {
+        resp.on_hover_ui(|ui| {
+            ui.label("Select input language. Set to Auto for auto-detection.");
         });
+    }
 }
 
-pub fn set_translate_stack(ui: &mut Ui, set_translate: &mut bool) {
+pub fn set_translate_stack(ui: &mut Ui, set_translate: &mut bool, pointer_still: bool) {
     let style = ui.style_mut();
     style.interaction.show_tooltips_only_when_still = true;
     style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
     style.interaction.tooltip_delay = constants::TOOLTIP_DELAY;
     ui.label("Translate");
 
-    ui.add(Checkbox::without_text(set_translate))
-        .on_hover_ui(|ui| {
+    let resp = ui.add(Checkbox::without_text(set_translate));
+
+    if pointer_still {
+        resp.on_hover_ui(|ui| {
             ui.label("Translate transcription into English.");
         });
+    }
 }
 
-pub fn toggle_bandpass_filter_stack(ui: &mut Ui, filter: &mut bool) {
+pub fn toggle_bandpass_filter_stack(ui: &mut Ui, filter: &mut bool, pointer_still: bool) {
     let style = ui.style_mut();
     style.interaction.show_tooltips_only_when_still = true;
     style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
     style.interaction.tooltip_delay = constants::TOOLTIP_DELAY;
     ui.label("Bandpass Filter:");
-    ui.add(Checkbox::without_text(filter)).on_hover_ui(|ui| {
-        ui.label("Run a bandpass filter to clean up audio.");
-    });
+    let resp = ui.add(Checkbox::without_text(filter));
+
+    if pointer_still {
+        resp.on_hover_ui(|ui| {
+            ui.label("Run a bandpass filter to clean up audio.");
+        });
+    }
 }
 
-pub fn f_higher_stack(ui: &mut Ui, filter: bool, f_higher: &mut f32) {
+pub fn f_higher_stack(ui: &mut Ui, filter: bool, f_higher: &mut f32, pointer_still: bool) {
     let style = ui.style_mut();
     style.interaction.show_tooltips_only_when_still = true;
     style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
@@ -228,16 +265,18 @@ pub fn f_higher_stack(ui: &mut Ui, filter: bool, f_higher: &mut f32) {
     });
 
     ui.add_enabled_ui(filter, |ui| {
-        ui.add(
+        let resp = ui.add(
             Slider::new(f_higher, constants::MIN_F_HIGHER..=constants::MAX_F_HIGHER).suffix("Hz"),
-        )
-        .on_hover_ui(|ui| {
-            ui.label("Frequencies higher than this threshold will be filtered out.");
-        });
+        );
+        if pointer_still {
+            resp.on_hover_ui(|ui| {
+                ui.label("Frequencies higher than this threshold will be filtered out.");
+            });
+        }
     });
 }
 
-pub fn f_lower_stack(ui: &mut Ui, filter: bool, f_lower: &mut f32) {
+pub fn f_lower_stack(ui: &mut Ui, filter: bool, f_lower: &mut f32, pointer_still: bool) {
     let style = ui.style_mut();
     style.interaction.show_tooltips_only_when_still = true;
     style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
@@ -247,9 +286,14 @@ pub fn f_lower_stack(ui: &mut Ui, filter: bool, f_lower: &mut f32) {
         ui.label("Low frequency cutoff:");
     });
     ui.add_enabled_ui(filter, |ui| {
-        ui.add(Slider::new(f_lower, constants::MIN_F_LOWER..=constants::MAX_F_LOWER).suffix("Hz"))
-            .on_hover_ui(|ui| {
+        let resp = ui.add(
+            Slider::new(f_lower, constants::MIN_F_LOWER..=constants::MAX_F_LOWER).suffix("Hz"),
+        );
+
+        if pointer_still {
+            resp.on_hover_ui(|ui| {
                 ui.label("Frequencies lower than this threshold will be filtered out.");
             });
+        }
     });
 }

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use egui::{Button, ComboBox, Grid, ScrollArea, Ui, WidgetText};
+use egui::{Button, ComboBox, Grid, Pos2, ScrollArea, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::IntoEnumIterator;
 
@@ -22,6 +22,8 @@ use crate::{
 pub struct RecordingTab {
     title: String,
     recorder_configs: RecorderConfigs,
+    #[serde(skip)]
+    last_mouse_pos: Pos2,
 }
 
 impl RecordingTab {
@@ -29,6 +31,7 @@ impl RecordingTab {
         Self {
             title: String::from("Recording"),
             recorder_configs: configs,
+            last_mouse_pos: Default::default(),
         }
     }
 }
@@ -54,6 +57,7 @@ impl tab_view::TabView for RecordingTab {
         let Self {
             title: _,
             recorder_configs,
+            last_mouse_pos
         } = self;
 
         let RecorderConfigs {
@@ -69,6 +73,22 @@ impl tab_view::TabView for RecordingTab {
         let recorder_running = controller.recorder_running();
         let save_recording_ready = controller.save_recording_ready();
 
+
+        let style = ui.style_mut();
+        style.interaction.show_tooltips_only_when_still = true;
+        style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
+        style.interaction.tooltip_delay = constants::TOOLTIP_DELAY;
+
+        // Workaround for egui's default tooltip behaviour.
+        // This will drop the tooltip on mouse movement.
+        // get the pointer state.
+        let new_mouse_pos = ui.ctx().input(|i| { i.pointer.latest_pos().unwrap_or_default() });
+
+        let diff = (new_mouse_pos - *last_mouse_pos).abs();
+        *last_mouse_pos = new_mouse_pos;
+
+        let pointer_still = diff.x <= f32::EPSILON && diff.y <= f32::EPSILON;
+
         ScrollArea::vertical().show(ui, |ui| {
             ui.add_enabled_ui(!recorder_running, |ui| {
                 ui.heading("Configuration");
@@ -78,12 +98,10 @@ impl tab_view::TabView for RecordingTab {
                     .show(ui, |ui| {
 
                         // SAMPLE RATE
-                        ui.label("Sample rate:").on_hover_ui(|ui| {
-                            ui.label("Set the desired sample rate (Hz). Note: this must be supported by your audio device, or it will fall back to default.");
-                        });
+                        ui.label("Sample rate:");
                         let sample_rates = SampleRate::iter();
 
-                        ComboBox::from_id_source("sample_rate").selected_text(sample_rate.to_string()).show_ui(ui, |ui| {
+                        let resp = ComboBox::from_id_source("sample_rate").selected_text(sample_rate.to_string()).show_ui(ui, |ui| {
                             for s in sample_rates {
                                 ui.selectable_value(sample_rate, s, format!("{}: {}", s.to_string(), {
                                     let rate = s.sample_rate();
@@ -93,16 +111,21 @@ impl tab_view::TabView for RecordingTab {
                                     }
                                 }));
                             }
-                        });
+                        }).response;
+
+                        if pointer_still {
+                            resp.on_hover_ui(|ui| {
+                                ui.label("Set the desired audio sample rate. Impacts performance but improves audio quality. Falls back to system defaults if unsupported.");
+                            });
+                        }
+
                         ui.end_row();
                         // BUFFER SIZE
-                        ui.label("Buffer size:").on_hover_ui(|ui| {
-                            ui.label("Set the desired audio frame size. Large buffer sizes may introduce lag. Recommended: Medium (1024) for Mono, Large(2048) for Stereo");
-                        });
+                        ui.label("Buffer size:");
 
                         let buffer_sizes = BufferSize::iter();
                         //Name: Size
-                        ComboBox::from_id_source("buffer_size").selected_text(buffer_size.to_string()).show_ui(ui, |ui| {
+                        let resp = ComboBox::from_id_source("buffer_size").selected_text(buffer_size.to_string()).show_ui(ui, |ui| {
                             for b in buffer_sizes {
                                 ui.selectable_value(buffer_size, b, format!("{}: {}", b.to_string(), {
                                     let size = b.size();
@@ -112,46 +135,59 @@ impl tab_view::TabView for RecordingTab {
                                     }
                                 }));
                             }
-                        });
+                        }).response;
+
+                        if pointer_still {
+                            resp.on_hover_ui(|ui| {
+                                ui.label("Set the desired audio frame size. Large buffer sizes may introduce lag.\nRecommended: Medium for Mono, Large for Stereo.");
+                            });
+                        }
                         ui.end_row();
                         // CHANNEL
-                        ui.label("Channels").on_hover_ui(|ui| {
-                            ui.label("Select the number of audio channels. Must be supported by your device, or this will fall back to system defaults.");
-                        });
+                        ui.label("Channels");
                         let channels = Channel::iter();
-                        ComboBox::from_id_source("channels").selected_text(channel.to_string()).show_ui(ui, |ui| {
+                        let resp = ComboBox::from_id_source("channels").selected_text(channel.to_string()).show_ui(ui, |ui| {
                             for c in channels {
                                 ui.selectable_value(channel, c, c.to_string());
                             }
-                        });
+                        }).response;
+                        if pointer_still {
+                            resp.on_hover_ui(|ui| {
+                                ui.label("Stereo or Mono. Falls back to system defaults if unsupported.");
+                            });
+                        }
                         ui.end_row();
 
                         // RECORDING FORMAT
-                        ui.label("Audio Format").on_hover_ui(|ui| {
-                            ui.label("Select WAV audio format. Must be supported by your device, or this will fallback to system defaults.");
-                        });
+                        ui.label("Audio Format");
 
                         let formats = RecordingFormat::iter();
-                        ComboBox::from_id_source("recording_format").selected_text(format.to_string()).show_ui(ui, |ui| {
+                        let resp = ComboBox::from_id_source("recording_format").selected_text(format.to_string()).show_ui(ui, |ui| {
                             for f in formats {
                                 ui.selectable_value(format, f, f.to_string().to_lowercase()).on_hover_ui(|ui| {
                                     ui.label(f.tooltip());
                                 });
                             }
-                        });
+                        }).response;
+
+                        if pointer_still {
+                            resp.on_hover_ui(|ui| {
+                                ui.label("Select WAV audio format. Falls back to system defaults if unsupported.");
+                            });
+                        }
 
                         ui.end_row();
 
                         // RUN BANDPASS FILTER
-                        toggle_bandpass_filter_stack(ui, filter);
+                        toggle_bandpass_filter_stack(ui, filter, pointer_still);
                         ui.end_row();
 
                         // BANDPASS THRESHOLDS
-                        f_higher_stack(ui, *filter, f_higher);
+                        f_higher_stack(ui, *filter, f_higher, pointer_still);
                         ui.end_row();
 
                         // Low Threshold
-                        f_lower_stack(ui, *filter, f_lower);
+                        f_lower_stack(ui, *filter, f_lower, pointer_still);
                         ui.end_row();
 
                         // DEFAULTS.
@@ -222,8 +258,7 @@ impl tab_view::TabView for RecordingTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

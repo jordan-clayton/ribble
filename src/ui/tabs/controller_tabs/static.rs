@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use egui::{Button, Grid, Label, RichText, ScrollArea, Ui, WidgetText};
+use egui::{Button, Grid, Label, Pos2, RichText, ScrollArea, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::VariantArray;
 use whisper_realtime::{
@@ -10,7 +10,6 @@ use whisper_realtime::{
 
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
-    ui::tabs::tab_view,
     ui::{
         tabs::controller_tabs::controller_common::{
             model_stack, n_threads_stack, save_transcription_button, set_language_stack,
@@ -18,6 +17,7 @@ use crate::{
         },
         widgets::icons::{ok_icon, warning_icon},
     },
+    ui::tabs::tab_view,
     utils::{constants, file_mgmt, preferences::get_app_theme, threading::get_max_threads},
 };
 
@@ -30,6 +30,8 @@ pub struct StaticTab {
     max_threads: std::ffi::c_int,
     #[serde(skip)]
     audio_path: Option<PathBuf>,
+    #[serde(skip)]
+    last_mouse_pos: Pos2,
 }
 
 impl StaticTab {
@@ -40,6 +42,7 @@ impl StaticTab {
             static_configs: configs,
             max_threads,
             audio_path: None,
+            last_mouse_pos: Default::default(),
         }
     }
 }
@@ -67,6 +70,7 @@ impl tab_view::TabView for StaticTab {
             static_configs,
             max_threads,
             audio_path,
+            last_mouse_pos,
         } = self;
 
         let Configs {
@@ -90,7 +94,6 @@ impl tab_view::TabView for StaticTab {
             print_timestamps: _,
         } = static_configs;
 
-        // Check for config-copy requests
         let (has_file, file_path) = if audio_path.is_some() {
             let path = audio_path.clone().unwrap();
             let valid_file = path.exists() & path.is_file();
@@ -119,6 +122,22 @@ impl tab_view::TabView for StaticTab {
 
         let file_name = file_path.file_name();
 
+
+        let style = ui.style_mut();
+        style.interaction.show_tooltips_only_when_still = true;
+        style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
+        style.interaction.tooltip_delay = constants::TOOLTIP_DELAY;
+
+        // Workaround for egui's default tooltip behaviour.
+        // This will drop the tooltip on mouse movement.
+        // get the pointer state.
+        let new_mouse_pos = ui.ctx().input(|i| { i.pointer.latest_pos().unwrap_or_default() });
+
+        let diff = (new_mouse_pos - *last_mouse_pos).abs();
+        *last_mouse_pos = new_mouse_pos;
+
+        let pointer_still = diff.x <= f32::EPSILON && diff.y <= f32::EPSILON;
+
         ScrollArea::vertical().show(ui, |ui| {
             ui.add_enabled_ui(!static_running, |ui| {
                 ui.heading("Configuration");
@@ -136,19 +155,20 @@ impl tab_view::TabView for StaticTab {
                             controller.clone(),
                             available_models.as_slice(),
                             Some(theme),
+                            pointer_still,
                         );
                         ui.end_row();
                         // Num_threads
-                        n_threads_stack(ui, n_threads, *max_threads);
+                        n_threads_stack(ui, n_threads, *max_threads, pointer_still);
                         ui.end_row();
                         let gpu_enabled = controller.gpu_enabled();
-                        use_gpu_stack(ui, use_gpu, gpu_enabled);
+                        use_gpu_stack(ui, use_gpu, gpu_enabled, pointer_still);
                         ui.end_row();
                         // INPUT Language -> Set to auto for language detection
-                        set_language_stack(ui, language);
+                        set_language_stack(ui, language, pointer_still);
                         ui.end_row();
                         // Translate (TO ENGLISH)
-                        set_translate_stack(ui, set_translate);
+                        set_translate_stack(ui, set_translate, pointer_still);
                         ui.end_row();
                         // Reset defaults button.
                         ui.label("Reset To Defaults");
@@ -286,8 +306,7 @@ impl tab_view::TabView for StaticTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

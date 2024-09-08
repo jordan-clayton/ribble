@@ -11,9 +11,8 @@ pub const DEFAULT_CONSOLE_HISTORY_SIZE: usize = 35;
 // 2 hours, in ms.
 pub const MAX_REALTIME_TIMEOUT: u64 = (Duration::new(7200, 0).as_millis() / 1000) as u64;
 
-pub const TOOLTIP_DELAY: f32 = 1.5;
+pub const TOOLTIP_DELAY: f32 = 0.5;
 pub const TOOLTIP_GRACE_TIME: f32 = 0.0;
-
 // NOTE: these are in seconds due to slider scaling.
 pub const MIN_AUDIO_CHUNK_SIZE: f32 = 2.0;
 pub const MAX_AUDIO_CHUNK_SIZE: f32 = 30.0;

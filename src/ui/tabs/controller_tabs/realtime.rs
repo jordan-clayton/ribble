@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use egui::{Button, Grid, Label, RichText, ScrollArea, Slider, Ui, WidgetText};
+use egui::{Button, Grid, Label, Pos2, RichText, ScrollArea, Slider, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use sdl2::log::log;
 use strum::{IntoEnumIterator, VariantArray};
@@ -32,6 +32,8 @@ pub struct RealtimeTab {
     filter: bool,
     f_lower: f32,
     f_higher: f32,
+    #[serde(skip)]
+    last_mouse_pos: Pos2,
 }
 
 impl RealtimeTab {
@@ -44,6 +46,7 @@ impl RealtimeTab {
             filter: false,
             f_lower: constants::DEFAULT_F_LOWER,
             f_higher: constants::DEFAULT_F_HIGHER,
+            last_mouse_pos: Default::default(),
         }
     }
 }
@@ -74,6 +77,7 @@ impl tab_view::TabView for RealtimeTab {
             filter,
             f_lower,
             f_higher,
+            last_mouse_pos,
         } = self;
 
         let Configs {
@@ -117,6 +121,21 @@ impl tab_view::TabView for RealtimeTab {
         let system_theme = controller.get_system_theme();
         let theme = get_app_theme(system_theme);
 
+        let style = ui.style_mut();
+        style.interaction.show_tooltips_only_when_still = true;
+        style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
+        style.interaction.tooltip_delay = constants::TOOLTIP_DELAY;
+
+        // Workaround for egui's default tooltip behaviour.
+        // This will drop the tooltip on mouse movement.
+        // get the pointer state.
+        let new_mouse_pos = ui.ctx().input(|i| { i.pointer.latest_pos().unwrap_or_default() });
+
+        let diff = (new_mouse_pos - *last_mouse_pos).abs();
+        *last_mouse_pos = new_mouse_pos;
+
+        let pointer_still = diff.x <= f32::EPSILON && diff.y <= f32::EPSILON;
+
         ScrollArea::vertical().show(ui, |ui| {
             ui.add_enabled_ui(!realtime_running, |ui| {
                 ui.heading("Configuration");
@@ -125,46 +144,50 @@ impl tab_view::TabView for RealtimeTab {
                     .num_columns(2)
                     .show(ui, |ui| {
                         // Model
-                        model_stack(ui, model, &m_model, downloaded, controller.clone(), available_models.as_slice(), Some(theme));
+                        model_stack(ui, model, &m_model, downloaded, controller.clone(), available_models.as_slice(), Some(theme), pointer_still);
                         ui.end_row();
                         // Num_threads
-                        n_threads_stack(ui, n_threads, *max_threads);
+                        n_threads_stack(ui, n_threads, *max_threads, pointer_still);
                         ui.end_row();
                         // Use gpu
                         let gpu_enabled = controller.gpu_enabled();
-                        use_gpu_stack(ui, use_gpu, gpu_enabled);
+                        use_gpu_stack(ui, use_gpu, gpu_enabled, pointer_still);
                         ui.end_row();
                         // INPUT Language -> Set to auto for language detection
-                        set_language_stack(ui, language);
+                        set_language_stack(ui, language, pointer_still);
                         ui.end_row();
                         // Translate (TO ENGLISH)
-                        set_translate_stack(ui, set_translate);
+                        set_translate_stack(ui, set_translate, pointer_still);
                         ui.end_row();
 
                         // Filter audio
-                        toggle_bandpass_filter_stack(ui, filter);
+                        toggle_bandpass_filter_stack(ui, filter, pointer_still);
                         ui.end_row();
 
-                        f_higher_stack(ui, *filter, f_higher);
+                        f_higher_stack(ui, *filter, f_higher, pointer_still);
                         ui.end_row();
 
-                        f_lower_stack(ui, *filter, f_lower);
+                        f_lower_stack(ui, *filter, f_lower, pointer_still);
                         ui.end_row();
 
                         // Transcriber Timeout
-                        ui.label("Transcription Timeout").on_hover_ui(|ui| {
-                            ui.label("Set realtime timeout? Set to 0 to disable");
-                        });
+                        ui.label("Transcription Timeout");
 
                         let mut rt_timeout = *realtime_timeout as u64 / 1000;
 
                         // MAX_REALTIME_TIMEOUT is in seconds.
                         ui.horizontal(|ui| {
-                            if ui.add(Slider::new(&mut rt_timeout, 0..=constants::MAX_REALTIME_TIMEOUT)
+                            let mut resp = ui.add(Slider::new(&mut rt_timeout, 0..=constants::MAX_REALTIME_TIMEOUT)
                                 .step_by(1.0)
                                 .drag_value_speed(1.0)
-                            )
-                                .changed() {
+                            );
+
+                            if pointer_still {
+                                resp = resp.on_hover_ui(|ui| {
+                                    ui.label("Sets timeout limit for realtime audio transcription. Set to 0 to disable.");
+                                });
+                            }
+                            if resp.changed() {
                                 *realtime_timeout = (rt_timeout * 1000) as u128;
                                 #[cfg(debug_assertions)]
                                 log(&format!("realtime_timeout: {}", realtime_timeout));
@@ -179,16 +202,23 @@ impl tab_view::TabView for RealtimeTab {
                                 format!("{h:02}h : {m:02}m : {s:02}s")
                             });
                         });
+
                         ui.end_row();
 
-                        // Audio chunk size (in ms) Min: 2s? Max: 30s
-                        ui.label("Audio Sample Size").on_hover_ui(|ui| {
-                            ui.label("Realtime audio is processed in chunks, (in ms). Tweak this value to improve transcription accuracy. Recommended: 10s / 10000ms");
-                        });
+                        // Audio chunk size
+                        ui.label("Audio Sample Size");
 
                         let mut sample_ms = *audio_sample_ms as f32 / 1000.0;
-                        if ui.add(Slider::new(&mut sample_ms, constants::MIN_AUDIO_CHUNK_SIZE..=constants::MAX_AUDIO_CHUNK_SIZE)
-                            .step_by(0.5).suffix("s")).changed() {
+                        let mut resp =
+                            ui.add(Slider::new(&mut sample_ms, constants::MIN_AUDIO_CHUNK_SIZE..=constants::MAX_AUDIO_CHUNK_SIZE)
+                                .step_by(0.5).suffix("s"));
+
+                        if pointer_still {
+                            resp = resp.on_hover_ui(|ui| {
+                                ui.label("Set the sample window size for realtime processing. Affects accuracy.\nRecommended: 10s");
+                            });
+                        }
+                        if resp.changed() {
                             *audio_sample_ms = (sample_ms * 1000.0) as usize;
 
                             #[cfg(debug_assertions)]
@@ -198,11 +228,15 @@ impl tab_view::TabView for RealtimeTab {
 
                         let mut slider_phrase_timeout = *phrase_timeout as f32 / 1000.0;
 
-                        ui.label("Phrase Timeout").on_hover_ui(|ui| {
-                            ui.label("Estimated length of time per sentence/phrase. Tweak this value to improve accuracy and reduce accidental output duplication. Recommended: 3s");
-                        });
-                        if ui.add(Slider::new(&mut slider_phrase_timeout, constants::MIN_PHRASE_TIMEOUT..=constants::MAX_PHRASE_TIMEOUT)
-                            .step_by(0.5).suffix("s")).changed() {
+                        ui.label("Phrase Timeout");
+                        let mut resp = ui.add(Slider::new(&mut slider_phrase_timeout, constants::MIN_PHRASE_TIMEOUT..=constants::MAX_PHRASE_TIMEOUT)
+                            .step_by(0.5).suffix("s"));
+                        if pointer_still {
+                            resp = resp.on_hover_ui(|ui| {
+                                ui.label("Set the approximate duration of a complete phrase. Affects transcription accuracy.\nRecommended: 3s");
+                            });
+                        }
+                        if resp.changed() {
                             *phrase_timeout = (slider_phrase_timeout * 1000.0) as usize;
                             #[cfg(debug_assertions)]
                             log(&format!("phrase_timeout: {}", phrase_timeout));
@@ -210,26 +244,26 @@ impl tab_view::TabView for RealtimeTab {
                         ui.end_row();
 
                         // Voice Activity Detection chunk size (UI in Seconds), internally ms.
-                        ui.label("Voice Activity Sample Size").on_hover_ui(|ui| {
-                            ui.label("Voice activity is processed in small sample chunks. Tweak this value to improve detection accuracy. Recommended: 0.3s");
-                        });
+                        ui.label("Voice Activity Sample Size");
 
                         let mut vad_sec = *vad_sample_ms as f32 / 1000.0;
 
-                        ui.horizontal(|ui| {
-                            if ui.add(Slider::new(&mut vad_sec, constants::MIN_VAD_SEC..=constants::MAX_VAD_SEC).step_by(0.05).suffix("s")).changed() {
-                                *vad_sample_ms = (vad_sec * 1000.0) as usize;
-                                #[cfg(debug_assertions)]
-                                log(&format!("vad_ms: {}", vad_sample_ms));
-                            }
-                        });
+                        let mut resp = ui.add(Slider::new(&mut vad_sec, constants::MIN_VAD_SEC..=constants::MAX_VAD_SEC).step_by(0.05).suffix("s"));
+                        if pointer_still {
+                            resp = resp.on_hover_ui(|ui| {
+                                ui.label("Set the sample size for voice detection. Affects accuracy, smaller is usually better.\nRecommended: 0.3s");
+                            })
+                        }
+                        if resp.changed() {
+                            *vad_sample_ms = (vad_sec * 1000.0) as usize;
+                            #[cfg(debug_assertions)]
+                            log(&format!("vad_ms: {}", vad_sample_ms));
+                        }
                         ui.end_row();
                         // Voice Activity probability threshold
                         // Label
-                        ui.label("VAD Probability Threshold").on_hover_ui(|ui| {
-                            ui.label("Set the minimum probability threshold for detecting speech. Tweak to improve detection accuracy. Recommended: 65%-80%");
-                        });
-                        ui.add(Slider::new(voice_probability_threshold, constants::MIN_VAD_PROBABILITY..=constants::MAX_VAD_PROBABILITY)
+                        ui.label("VAD Probability Threshold");
+                        let resp = ui.add(Slider::new(voice_probability_threshold, constants::MIN_VAD_PROBABILITY..=constants::MAX_VAD_PROBABILITY)
                             .custom_formatter(|n, _| {
                                 let p = n * 100f64;
                                 format!("{p:0.2}")
@@ -239,6 +273,12 @@ impl tab_view::TabView for RealtimeTab {
                                 str.parse::<f64>().ok()
                             })
                         );
+
+                        if pointer_still {
+                            resp.on_hover_ui(|ui| {
+                                ui.label("Set the minimum threshold for detecting speech. Affects accuracy.\nRecommended: 65%-80%");
+                            });
+                        }
                         ui.end_row();
                         // Reset defaults button.
                         ui.label("Reset To Defaults");
@@ -370,8 +410,7 @@ impl tab_view::TabView for RealtimeTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true
