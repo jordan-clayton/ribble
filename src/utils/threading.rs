@@ -3,11 +3,13 @@ use std::thread::JoinHandle;
 use crossbeam::channel::SendError;
 use sdl2::log::log;
 
-use crate::utils::constants;
-use crate::utils::errors::{extract_error_message, WhisperAppError, WhisperAppErrorType};
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
-    utils::console_message::{ConsoleMessage, ConsoleMessageType},
+    utils::{
+        console_message::{ConsoleMessage, ConsoleMessageType},
+        constants,
+        errors::{extract_error_message, WhisperAppError, WhisperAppErrorType},
+    },
 };
 
 pub fn get_max_threads() -> std::ffi::c_int {

@@ -29,12 +29,9 @@ use whisper_realtime::{
 };
 
 use crate::{
-    controller::{
-        utils::gpu_init::check_gpu_target,
-        utils::transcriber_utilities::{
-            init_audio_ring_buffer, init_model, init_realtime_microphone, init_whisper_ctx,
-        },
-        utils::transcriber_utilities::init_microphone,
+    controller::utils::{
+        gpu_init::check_gpu_target,
+        transcriber_utilities::{init_audio_ring_buffer, init_microphone, init_model, init_realtime_microphone, init_whisper_ctx},
     },
     ui::tabs::whisper_tab::FocusTab,
     utils::{
@@ -45,8 +42,7 @@ use crate::{
         },
         console_message::{ConsoleMessage, ConsoleMessageType},
         constants,
-        errors::{WhisperAppError, WhisperAppErrorType},
-        errors::extract_error_message,
+        errors::{extract_error_message, WhisperAppError, WhisperAppErrorType},
         file_mgmt::{
             copy_data, decode_audio, delete_temporary_audio_file, get_audio_reader,
             get_temp_file_path, get_tmp_file_writer, save_transcription, write_audio_sample,
@@ -154,9 +150,13 @@ impl WhisperAppController {
     pub fn get_analysis_type(&self) -> AnalysisType {
         self.0.analysis_type.load(Ordering::Acquire)
     }
-    pub fn rotate_analysis_type(&self) {
+    pub fn rotate_analysis_type(&self, clockwise: bool) {
         let at = self.0.analysis_type.load(Ordering::Relaxed);
-        self.set_analysis_type(at.rotate_clockwise())
+        if clockwise {
+            self.set_analysis_type(at.rotate_clockwise());
+        } else {
+            self.set_analysis_type(at.rotate_counterclockwise());
+        }
     }
 
     pub fn set_analysis_type(&self, analysis_type: AnalysisType) {
@@ -1805,7 +1805,11 @@ fn run_static_audio_transcription(
                 let progress = Progress::new(String::from(transcriber_job_name), 1, 1);
 
                 // Pump the reader thread to wake it up.
-                c_controller_runner_thread.0.transcription_text_sender.send(Ok((String::from(constants::STOP_MSG), true))).expect("Transcription channel should be open.");
+                c_controller_runner_thread
+                    .0
+                    .transcription_text_sender
+                    .send(Ok((String::from(constants::STOP_MSG), true)))
+                    .expect("Transcription channel should be open.");
 
                 c_controller_runner_thread
                     .send_progress(progress)

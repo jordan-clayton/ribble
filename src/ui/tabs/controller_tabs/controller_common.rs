@@ -7,10 +7,11 @@ use whisper_realtime::model::{Model, ModelType};
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::widgets::icons::{ok_icon, warning_icon},
-    utils::{constants, file_mgmt::copy_data},
+    utils::{
+        constants,
+        errors::{WhisperAppError, WhisperAppErrorType},
+        file_mgmt::copy_data, threading::get_max_threads},
 };
-use crate::utils::errors::{WhisperAppError, WhisperAppErrorType};
-use crate::utils::threading::get_max_threads;
 
 pub fn save_transcription_button(ui: &mut Ui, controller: WhisperAppController) {
     if ui.add(Button::new("Save Transcription")).clicked() {
@@ -199,11 +200,14 @@ pub fn use_gpu_stack(ui: &mut Ui, use_gpu: &mut bool, gpu_capable: bool, pointer
     let mut resp = ui.add_enabled(gpu_capable, Checkbox::without_text(use_gpu));
 
     if pointer_still {
-        resp = resp.on_hover_ui(|ui| {
-            ui.label("Enable hardware acceleration. Required for large models in realtime.");
-        })
+        resp = resp
+            .on_hover_ui(|ui| {
+                ui.label("Enable hardware acceleration. Required for large models in realtime.");
+            })
             .on_disabled_hover_ui(|ui| {
-                ui.label("Hardware acceleration is not supported. Realtime model selection limited.");
+                ui.label(
+                    "Hardware acceleration is not supported. Realtime model selection limited.",
+                );
             });
     }
 

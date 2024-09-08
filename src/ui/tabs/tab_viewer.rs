@@ -2,11 +2,12 @@ use std::collections::HashMap;
 
 use eframe::epaint::text::TextWrapMode;
 use egui::{Id, Ui, WidgetText};
-use egui_dock::{NodeIndex, SurfaceIndex};
+use egui_dock::{NodeIndex, SurfaceIndex, TabStyle};
 
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::{tab_view::TabView, whisper_tab::WhisperTab},
+    utils::preferences::get_app_theme,
 };
 
 pub struct WhisperTabViewer<'a> {
@@ -78,6 +79,16 @@ impl egui_dock::TabViewer for WhisperTabViewer<'_> {
                 self.added_tabs.push((surface, node, tab));
             }
         }
+    }
+    fn tab_style_override(&self, _tab: &Self::Tab, global_style: &TabStyle) -> Option<TabStyle> {
+        let system_theme = self.controller.get_system_theme();
+        let theme = get_app_theme(system_theme);
+        let mut tab_style = global_style.clone();
+        let mut focus_style = tab_style.focused.clone();
+        focus_style.outline_color = theme.lavender;
+        focus_style.bg_fill = theme.surface0;
+        tab_style.focused = focus_style;
+        Some(tab_style)
     }
 
     fn allowed_in_windows(&self, tab: &mut Self::Tab) -> bool {

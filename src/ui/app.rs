@@ -3,7 +3,7 @@ use std::thread::JoinHandle;
 
 use catppuccin_egui::Theme;
 use eframe::Storage;
-use egui::{ViewportCommand, Visuals};
+use egui::{Event, Key, ViewportCommand, Visuals};
 use egui_dock::{DockArea, DockState, NodeIndex, Style, SurfaceIndex, TabIndex};
 
 use crate::{
@@ -12,7 +12,7 @@ use crate::{
         controller_tabs::{r#static, realtime, recording},
         display_tabs::{console, progress, transcription, visualizer},
         tab_viewer,
-        whisper_tab::WhisperTab,
+        whisper_tab::{FocusTab, WhisperTab},
     },
     utils::{
         console_message::{ConsoleMessage, ConsoleMessageType},
@@ -179,6 +179,44 @@ impl eframe::App for WhisperApp {
             self.tree.set_focused_node_and_surface((surface, node));
             self.tree.push_to_focused_leaf(tab);
         });
+
+        // Process keyboard events if the visualizer is in the focus tab.
+        let focused_leaf = self.tree.find_active_focused();
+        if let Some((_, tab)) = focused_leaf {
+            if tab.matches(FocusTab::Visualizer) {
+                let events = ctx.input(|i| i.events.clone());
+                for event in events {
+                    if let Event::Key {
+                        key,
+                        physical_key: _,
+                        pressed,
+                        repeat,
+                        modifiers: _,
+                    } = event
+                    {
+                        if !pressed {
+                            continue;
+                        }
+                        if repeat {
+                            continue;
+                        }
+
+                        match key {
+                            Key::Space => {
+                                self.controller.rotate_analysis_type(true);
+                            }
+                            Key::ArrowLeft => {
+                                self.controller.rotate_analysis_type(false);
+                            }
+                            Key::ArrowRight => {
+                                self.controller.rotate_analysis_type(true);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // eframe persistence does not seem to be working in linux.

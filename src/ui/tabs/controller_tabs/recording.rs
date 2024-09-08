@@ -57,7 +57,7 @@ impl tab_view::TabView for RecordingTab {
         let Self {
             title: _,
             recorder_configs,
-            last_mouse_pos
+            last_mouse_pos,
         } = self;
 
         let RecorderConfigs {
@@ -73,7 +73,6 @@ impl tab_view::TabView for RecordingTab {
         let recorder_running = controller.recorder_running();
         let save_recording_ready = controller.save_recording_ready();
 
-
         let style = ui.style_mut();
         style.interaction.show_tooltips_only_when_still = true;
         style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
@@ -82,7 +81,9 @@ impl tab_view::TabView for RecordingTab {
         // Workaround for egui's default tooltip behaviour.
         // This will drop the tooltip on mouse movement.
         // get the pointer state.
-        let new_mouse_pos = ui.ctx().input(|i| { i.pointer.latest_pos().unwrap_or_default() });
+        let new_mouse_pos = ui
+            .ctx()
+            .input(|i| i.pointer.latest_pos().unwrap_or_default());
 
         let diff = (new_mouse_pos - *last_mouse_pos).abs();
         *last_mouse_pos = new_mouse_pos;
@@ -283,7 +284,8 @@ impl tab_view::TabView for RecordingTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

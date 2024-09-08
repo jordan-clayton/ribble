@@ -13,7 +13,7 @@ use crate::{
         widgets::{fft_visualizer::draw_fft, toggle_switch::toggle},
     },
     utils::{
-        audio_analysis::{AnalysisType, smoothing},
+        audio_analysis::{smoothing, AnalysisType},
         constants, preferences,
     },
 };
@@ -145,7 +145,7 @@ impl tab_view::TabView for VisualizerTab {
             }
         });
         if response.clicked() {
-            controller.rotate_analysis_type();
+            controller.rotate_analysis_type(true);
         }
     }
 
@@ -155,7 +155,8 @@ impl tab_view::TabView for VisualizerTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {}
+    ) {
+    }
 
     fn closeable(&mut self) -> bool {
         true

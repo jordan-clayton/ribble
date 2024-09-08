@@ -11,13 +11,15 @@ use whisper_realtime::{
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::{
-        tabs::controller_tabs::controller_common::{
-            model_stack, n_threads_stack, save_transcription_button, set_language_stack,
-            set_translate_stack, use_gpu_stack,
+        tabs::{
+            controller_tabs::controller_common::{
+                model_stack, n_threads_stack, save_transcription_button, set_language_stack,
+                set_translate_stack, use_gpu_stack,
+            },
+            tab_view,
         },
         widgets::icons::{ok_icon, warning_icon},
     },
-    ui::tabs::tab_view,
     utils::{constants, file_mgmt, preferences::get_app_theme, threading::get_max_threads},
 };
 
@@ -122,7 +124,6 @@ impl tab_view::TabView for StaticTab {
 
         let file_name = file_path.file_name();
 
-
         let style = ui.style_mut();
         style.interaction.show_tooltips_only_when_still = true;
         style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
@@ -131,7 +132,9 @@ impl tab_view::TabView for StaticTab {
         // Workaround for egui's default tooltip behaviour.
         // This will drop the tooltip on mouse movement.
         // get the pointer state.
-        let new_mouse_pos = ui.ctx().input(|i| { i.pointer.latest_pos().unwrap_or_default() });
+        let new_mouse_pos = ui
+            .ctx()
+            .input(|i| i.pointer.latest_pos().unwrap_or_default());
 
         let diff = (new_mouse_pos - *last_mouse_pos).abs();
         *last_mouse_pos = new_mouse_pos;

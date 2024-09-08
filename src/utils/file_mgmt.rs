@@ -3,8 +3,7 @@ use std::{
     fs::File,
     io::{self, BufWriter, ErrorKind, Write},
     path::{Path, PathBuf},
-    thread,
-    thread::JoinHandle,
+    thread::{self, JoinHandle},
 };
 
 use egui_dock::DockState;
@@ -13,7 +12,7 @@ use sdl2::log::log;
 use symphonia::{
     core::{
         audio::SampleBuffer,
-        codecs::{Decoder, DecoderOptions, CODEC_TYPE_NULL},
+        codecs::{CODEC_TYPE_NULL, Decoder, DecoderOptions},
         errors::Error,
         formats::{FormatOptions, FormatReader},
         io::MediaSourceStream,

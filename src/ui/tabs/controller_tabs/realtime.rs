@@ -10,13 +10,13 @@ use whisper_realtime::{
 
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
-    ui::{
-        tabs::controller_tabs::controller_common::{
+    ui::tabs::{
+        controller_tabs::controller_common::{
             f_higher_stack, f_lower_stack, model_stack, n_threads_stack, save_transcription_button,
             set_language_stack, set_translate_stack, toggle_bandpass_filter_stack, use_gpu_stack,
         },
-        tabs::tab_view,
-        tabs::whisper_tab::FocusTab,
+        tab_view,
+        whisper_tab::FocusTab,
     },
     utils::{constants, preferences::get_app_theme, threading::get_max_threads},
 };
@@ -128,7 +128,9 @@ impl tab_view::TabView for RealtimeTab {
         // Workaround for egui's default tooltip behaviour.
         // This will drop the tooltip on mouse movement.
         // get the pointer state.
-        let new_mouse_pos = ui.ctx().input(|i| { i.pointer.latest_pos().unwrap_or_default() });
+        let new_mouse_pos = ui
+            .ctx()
+            .input(|i| i.pointer.latest_pos().unwrap_or_default());
 
         let diff = (new_mouse_pos - *last_mouse_pos).abs();
         *last_mouse_pos = new_mouse_pos;
