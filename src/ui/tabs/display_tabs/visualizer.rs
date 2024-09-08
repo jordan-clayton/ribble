@@ -13,7 +13,7 @@ use crate::{
         widgets::{fft_visualizer::draw_fft, toggle_switch::toggle},
     },
     utils::{
-        audio_analysis::{smoothing, AnalysisType},
+        audio_analysis::{AnalysisType, smoothing},
         constants, preferences,
     },
 };
@@ -93,7 +93,7 @@ impl tab_view::TabView for VisualizerTab {
         smoothing(current, target, dt);
 
         // Force a repaint if the amplitudes are not zero.
-        if current.iter().any(|f| (*f - 0.0) >= f32::EPSILON) {
+        if current.iter().any(|f| *f >= f32::EPSILON) {
             ui.ctx().request_repaint();
         }
 
@@ -155,8 +155,7 @@ impl tab_view::TabView for VisualizerTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

@@ -101,7 +101,7 @@ impl tab_view::TabView for RecordingTab {
                         ui.label("Sample rate:");
                         let sample_rates = SampleRate::iter();
 
-                        let resp = ComboBox::from_id_source("sample_rate").selected_text(sample_rate.to_string()).show_ui(ui, |ui| {
+                        let mut resp = ComboBox::from_id_source("sample_rate").selected_text(sample_rate.to_string()).show_ui(ui, |ui| {
                             for s in sample_rates {
                                 ui.selectable_value(sample_rate, s, format!("{}: {}", s.to_string(), {
                                     let rate = s.sample_rate();
@@ -114,18 +114,23 @@ impl tab_view::TabView for RecordingTab {
                         }).response;
 
                         if pointer_still {
-                            resp.on_hover_ui(|ui| {
+                            resp = resp.on_hover_ui(|ui| {
                                 ui.label("Set the desired audio sample rate. Impacts performance but improves audio quality. Falls back to system defaults if unsupported.");
                             });
                         }
+                        resp.context_menu(|ui| {
+                            if ui.button(constants::DEFAULT_BUTTON_LABEL).clicked() {
+                                *sample_rate = SampleRate::default();
+                                ui.close_menu();
+                            }
+                        });
 
                         ui.end_row();
                         // BUFFER SIZE
                         ui.label("Buffer size:");
 
                         let buffer_sizes = BufferSize::iter();
-                        //Name: Size
-                        let resp = ComboBox::from_id_source("buffer_size").selected_text(buffer_size.to_string()).show_ui(ui, |ui| {
+                        let mut resp = ComboBox::from_id_source("buffer_size").selected_text(buffer_size.to_string()).show_ui(ui, |ui| {
                             for b in buffer_sizes {
                                 ui.selectable_value(buffer_size, b, format!("{}: {}", b.to_string(), {
                                     let size = b.size();
@@ -138,31 +143,44 @@ impl tab_view::TabView for RecordingTab {
                         }).response;
 
                         if pointer_still {
-                            resp.on_hover_ui(|ui| {
+                            resp = resp.on_hover_ui(|ui| {
                                 ui.label("Set the desired audio frame size. Large buffer sizes may introduce lag.\nRecommended: Medium for Mono, Large for Stereo.");
                             });
                         }
+
+                        resp.context_menu(|ui| {
+                            if ui.button(constants::DEFAULT_BUTTON_LABEL).clicked() {
+                                *buffer_size = BufferSize::default();
+                                ui.close_menu();
+                            }
+                        });
                         ui.end_row();
                         // CHANNEL
                         ui.label("Channels");
                         let channels = Channel::iter();
-                        let resp = ComboBox::from_id_source("channels").selected_text(channel.to_string()).show_ui(ui, |ui| {
+                        let mut resp = ComboBox::from_id_source("channels").selected_text(channel.to_string()).show_ui(ui, |ui| {
                             for c in channels {
                                 ui.selectable_value(channel, c, c.to_string());
                             }
                         }).response;
                         if pointer_still {
-                            resp.on_hover_ui(|ui| {
+                            resp = resp.on_hover_ui(|ui| {
                                 ui.label("Stereo or Mono. Falls back to system defaults if unsupported.");
                             });
                         }
+                        resp.context_menu(|ui| {
+                            if ui.button(constants::DEFAULT_BUTTON_LABEL).clicked() {
+                                *channel = Channel::default();
+                                ui.close_menu();
+                            }
+                        });
                         ui.end_row();
 
                         // RECORDING FORMAT
                         ui.label("Audio Format");
 
                         let formats = RecordingFormat::iter();
-                        let resp = ComboBox::from_id_source("recording_format").selected_text(format.to_string()).show_ui(ui, |ui| {
+                        let mut resp = ComboBox::from_id_source("recording_format").selected_text(format.to_string()).show_ui(ui, |ui| {
                             for f in formats {
                                 ui.selectable_value(format, f, f.to_string().to_lowercase()).on_hover_ui(|ui| {
                                     ui.label(f.tooltip());
@@ -171,10 +189,17 @@ impl tab_view::TabView for RecordingTab {
                         }).response;
 
                         if pointer_still {
-                            resp.on_hover_ui(|ui| {
+                            resp = resp.on_hover_ui(|ui| {
                                 ui.label("Select WAV audio format. Falls back to system defaults if unsupported.");
                             });
                         }
+
+                        resp.context_menu(|ui| {
+                            if ui.button(constants::DEFAULT_BUTTON_LABEL).clicked() {
+                                *format = RecordingFormat::default();
+                                ui.close_menu();
+                            }
+                        });
 
                         ui.end_row();
 
@@ -191,7 +216,7 @@ impl tab_view::TabView for RecordingTab {
                         ui.end_row();
 
                         // DEFAULTS.
-                        ui.label("Reset To Defaults:");
+                        ui.label("Reset all to defaults:");
                         if ui.button("Reset").clicked() {
                             let default = RecorderConfigs::default();
                             let RecorderConfigs {

@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use egui::{Button, Grid, Label, Pos2, RichText, ScrollArea, Slider, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
-use sdl2::log::log;
 use strum::{IntoEnumIterator, VariantArray};
 use whisper_realtime::{
     configs::Configs,
@@ -171,7 +170,7 @@ impl tab_view::TabView for RealtimeTab {
                         ui.end_row();
 
                         // Transcriber Timeout
-                        ui.label("Transcription Timeout");
+                        ui.label("Transcription Timeout:");
 
                         let mut rt_timeout = *realtime_timeout as u64 / 1000;
 
@@ -189,9 +188,14 @@ impl tab_view::TabView for RealtimeTab {
                             }
                             if resp.changed() {
                                 *realtime_timeout = (rt_timeout * 1000) as u128;
-                                #[cfg(debug_assertions)]
-                                log(&format!("realtime_timeout: {}", realtime_timeout));
                             };
+
+                            resp.context_menu(|ui| {
+                                if ui.button(constants::DEFAULT_BUTTON_LABEL).clicked() {
+                                    *realtime_timeout = whisper_realtime::constants::REALTIME_AUDIO_TIMEOUT;
+                                    ui.close_menu();
+                                }
+                            });
 
                             ui.label({
                                 let millis = *realtime_timeout;
@@ -206,7 +210,7 @@ impl tab_view::TabView for RealtimeTab {
                         ui.end_row();
 
                         // Audio chunk size
-                        ui.label("Audio Sample Size");
+                        ui.label("Audio Sample Size:");
 
                         let mut sample_ms = *audio_sample_ms as f32 / 1000.0;
                         let mut resp =
@@ -220,15 +224,19 @@ impl tab_view::TabView for RealtimeTab {
                         }
                         if resp.changed() {
                             *audio_sample_ms = (sample_ms * 1000.0) as usize;
-
-                            #[cfg(debug_assertions)]
-                            log(&format!("audio_sample_ms: {}", audio_sample_ms));
                         }
+
+                        resp.context_menu(|ui| {
+                            if ui.button(constants::DEFAULT_BUTTON_LABEL).clicked() {
+                                *audio_sample_ms = whisper_realtime::constants::AUDIO_SAMPLE_MS;
+                                ui.close_menu();
+                            }
+                        });
                         ui.end_row();
 
                         let mut slider_phrase_timeout = *phrase_timeout as f32 / 1000.0;
 
-                        ui.label("Phrase Timeout");
+                        ui.label("Phrase Timeout:");
                         let mut resp = ui.add(Slider::new(&mut slider_phrase_timeout, constants::MIN_PHRASE_TIMEOUT..=constants::MAX_PHRASE_TIMEOUT)
                             .step_by(0.5).suffix("s"));
                         if pointer_still {
@@ -238,9 +246,14 @@ impl tab_view::TabView for RealtimeTab {
                         }
                         if resp.changed() {
                             *phrase_timeout = (slider_phrase_timeout * 1000.0) as usize;
-                            #[cfg(debug_assertions)]
-                            log(&format!("phrase_timeout: {}", phrase_timeout));
                         }
+
+                        resp.context_menu(|ui| {
+                            if ui.button(constants::DEFAULT_BUTTON_LABEL).clicked() {
+                                *phrase_timeout = whisper_realtime::constants::PHRASE_TIMEOUT;
+                                ui.close_menu();
+                            }
+                        });
                         ui.end_row();
 
                         // Voice Activity Detection chunk size (UI in Seconds), internally ms.
@@ -256,14 +269,20 @@ impl tab_view::TabView for RealtimeTab {
                         }
                         if resp.changed() {
                             *vad_sample_ms = (vad_sec * 1000.0) as usize;
-                            #[cfg(debug_assertions)]
-                            log(&format!("vad_ms: {}", vad_sample_ms));
                         }
+
+                        resp.context_menu(|ui| {
+                            if ui.button(constants::DEFAULT_BUTTON_LABEL).clicked() {
+                                *vad_sample_ms = whisper_realtime::constants::VAD_SAMPLE_MS;
+                                ui.close_menu();
+                            }
+                        });
+
                         ui.end_row();
                         // Voice Activity probability threshold
                         // Label
-                        ui.label("VAD Probability Threshold");
-                        let resp = ui.add(Slider::new(voice_probability_threshold, constants::MIN_VAD_PROBABILITY..=constants::MAX_VAD_PROBABILITY)
+                        ui.label("VAD Probability Threshold:");
+                        let mut resp = ui.add(Slider::new(voice_probability_threshold, constants::MIN_VAD_PROBABILITY..=constants::MAX_VAD_PROBABILITY)
                             .custom_formatter(|n, _| {
                                 let p = n * 100f64;
                                 format!("{p:0.2}")
@@ -275,13 +294,20 @@ impl tab_view::TabView for RealtimeTab {
                         );
 
                         if pointer_still {
-                            resp.on_hover_ui(|ui| {
+                            resp = resp.on_hover_ui(|ui| {
                                 ui.label("Set the minimum threshold for detecting speech. Affects accuracy.\nRecommended: 65%-80%");
                             });
                         }
+                        resp.context_menu(|ui| {
+                            if ui.button(constants::DEFAULT_BUTTON_LABEL).clicked() {
+                                *voice_probability_threshold = whisper_realtime::constants::VOICE_PROBABILITY_THRESHOLD;
+                                ui.close_menu();
+                            }
+                        });
+
                         ui.end_row();
                         // Reset defaults button.
-                        ui.label("Reset To Defaults");
+                        ui.label("Reset all to default:");
                         if ui.button("Reset").clicked() {
                             let default = Configs::default();
                             let Configs {
@@ -294,21 +320,15 @@ impl tab_view::TabView for RealtimeTab {
                                 audio_sample_ms: default_audio_sample_ms,
                                 vad_sample_ms: default_vad_sample_ms,
                                 phrase_timeout: default_phrase_timeout,
-                                voice_probability_threshold: default_voice_probability_threshold,
-                                naive_vad_freq_threshold: _,
-                                naive_vad_energy_threshold: _,
-                                naive_window_len: _,
-                                naive_window_step: _,
-                                print_special: _,
-                                print_progress: _,
-                                print_realtime: _,
-                                print_timestamps: _,
+                                voice_probability_threshold: default_voice_probability_threshold, ..
                             } = default;
+
+                            let default_n_threads = get_max_threads().min(default_n_threads);
 
                             *n_threads = default_n_threads;
                             *set_translate = default_set_translate;
                             *language = default_language;
-                            *use_gpu = default_use_gpu;
+                            *use_gpu = default_use_gpu && gpu_enabled;
                             *model = default_model;
                             *realtime_timeout = default_realtime_timeout;
                             *audio_sample_ms = default_audio_sample_ms;

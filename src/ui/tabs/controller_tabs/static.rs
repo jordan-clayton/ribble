@@ -171,7 +171,7 @@ impl tab_view::TabView for StaticTab {
                         set_translate_stack(ui, set_translate, pointer_still);
                         ui.end_row();
                         // Reset defaults button.
-                        ui.label("Reset To Defaults");
+                        ui.label("Reset all to defaults");
                         if ui.button("Reset").clicked() {
                             let default = Configs::default();
                             let Configs {
@@ -180,25 +180,15 @@ impl tab_view::TabView for StaticTab {
                                 language: default_language,
                                 use_gpu: default_use_gpu,
                                 model: default_model,
-                                realtime_timeout: _,
-                                audio_sample_ms: _,
-                                vad_sample_ms: _,
-                                phrase_timeout: _,
-                                voice_probability_threshold: _,
-                                naive_vad_freq_threshold: _,
-                                naive_vad_energy_threshold: _,
-                                naive_window_len: _,
-                                naive_window_step: _,
-                                print_special: _,
-                                print_progress: _,
-                                print_realtime: _,
-                                print_timestamps: _,
+                                ..
                             } = default;
+
+                            let default_n_threads = get_max_threads().min(default_n_threads);
 
                             *n_threads = default_n_threads;
                             *set_translate = default_set_translate;
                             *language = default_language;
-                            *use_gpu = default_use_gpu;
+                            *use_gpu = default_use_gpu && gpu_enabled;
                             *model = default_model;
                         }
                         ui.end_row();

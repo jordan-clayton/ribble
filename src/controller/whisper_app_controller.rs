@@ -2,14 +2,14 @@ use std::{
     any::TypeId,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex, RwLock, TryLockError,
+        Arc,
+        atomic::{AtomicBool, Ordering}, Mutex, RwLock, TryLockError,
     },
     thread::{self, JoinHandle},
 };
 
 use arboard::Clipboard;
-use crossbeam::channel::{bounded, unbounded, Receiver, SendError, Sender, TryRecvError};
+use crossbeam::channel::{bounded, Receiver, Sender, SendError, TryRecvError, unbounded};
 use hound::{Sample, SampleFormat, WavSpec};
 use realfft::num_traits::{Bounded, FromPrimitive, NumCast, Zero};
 use sdl2::{audio::AudioSpecDesired, log::log};
@@ -31,22 +31,22 @@ use whisper_realtime::{
 use crate::{
     controller::{
         utils::gpu_init::check_gpu_target,
-        utils::transcriber_utilities::init_microphone,
         utils::transcriber_utilities::{
             init_audio_ring_buffer, init_model, init_realtime_microphone, init_whisper_ctx,
         },
+        utils::transcriber_utilities::init_microphone,
     },
     ui::tabs::whisper_tab::FocusTab,
     utils::{
         audio_analysis::{
-            bandpass_filter, f_central, frequency_analysis, from_f32_normalized,
-            normalized_waveform, power_analysis, to_f32_normalized, AnalysisType,
-            AtomicAnalysisType,
+            AnalysisType, AtomicAnalysisType, bandpass_filter, f_central,
+            frequency_analysis, from_f32_normalized, normalized_waveform, power_analysis,
+            to_f32_normalized,
         },
         console_message::{ConsoleMessage, ConsoleMessageType},
         constants,
-        errors::extract_error_message,
         errors::{WhisperAppError, WhisperAppErrorType},
+        errors::extract_error_message,
         file_mgmt::{
             copy_data, decode_audio, delete_temporary_audio_file, get_audio_reader,
             get_temp_file_path, get_tmp_file_writer, save_transcription, write_audio_sample,
@@ -698,17 +698,17 @@ impl WhisperAppController {
 
 fn recording_impl<
     T: Default
-        + Clone
-        + Copy
-        + FromPrimitive
-        + NumCast
-        + Bounded
-        + Zero
-        + sdl2::audio::AudioFormatNum
-        + Sample
-        + Sync
-        + Send
-        + 'static,
+    + Clone
+    + Copy
+    + FromPrimitive
+    + NumCast
+    + Bounded
+    + Zero
+    + sdl2::audio::AudioFormatNum
+    + Sample
+    + Sync
+    + Send
+    + 'static,
 >(
     controller: WhisperAppController,
     desired_audio: &AudioSpecDesired,
@@ -888,7 +888,7 @@ fn recording_impl<
 
                 write_audio_sample(&output, &mut writer, None::<fn(usize)>);
             }
-
+            #[cfg(debug_assertions)]
             log(&String::from("Recorder: writing thread done."));
         });
 
@@ -994,6 +994,7 @@ fn recording_impl<
                     }
                 }
             }
+            #[cfg(debug_assertions)]
             log(&String::from("Recorder: visualizing thread done."));
         });
         Ok(())
@@ -1329,6 +1330,7 @@ fn run_realtime_audio_transcription(
                     }
                 }
             }
+            #[cfg(debug_assertions)]
             log(&"Visualizer closed properly");
         });
 
@@ -1354,7 +1356,7 @@ fn run_realtime_audio_transcription(
             }
 
             writer.finalize().expect("Failed to close writer.");
-
+            #[cfg(debug_assertions)]
             log(&"Writer closed properly");
         });
 
@@ -1407,6 +1409,7 @@ fn run_realtime_audio_transcription(
             );
 
             // Closed properly
+            #[cfg(debug_assertions)]
             log(&"Audio reader thread closed properly");
         });
 
@@ -1500,6 +1503,7 @@ fn run_realtime_audio_transcription(
                     .clone(),
             );
             // Closed properly
+            #[cfg(debug_assertions)]
             log(&"Transcription reader thread closed properly");
             res
         });
@@ -1522,19 +1526,17 @@ fn run_realtime_audio_transcription(
             })
             .join();
 
-        let reader = match transcription_reader_thread.join() {
-            Ok(res) => res,
-            Err(e) => {
-                let e_msg = extract_error_message(e);
+        let reader = transcription_reader_thread.join().unwrap_or_else(|e| {
+            let e_msg = extract_error_message(e);
+            let fatal = e_msg.contains("channel should be open");
 
-                let err = WhisperAppError::new(
-                    WhisperAppErrorType::ThreadError,
-                    format!("Transcription reader thread panicked. Info: {}", e_msg),
-                    false,
-                );
-                Err(err)
-            }
-        };
+            let err = WhisperAppError::new(
+                WhisperAppErrorType::ThreadError,
+                format!("Transcription reader thread panicked. Info: {}", e_msg),
+                fatal,
+            );
+            Err(err)
+        });
         (transcription_runner_thread, reader)
     });
 
@@ -1709,6 +1711,11 @@ fn run_static_audio_transcription(
                 match text {
                     Ok(result) => match result {
                         Ok(text_packet) => {
+                            // Consume the stop message (will break the reader loop)
+                            if text_packet.0 == constants::STOP_MSG {
+                                continue;
+                            }
+
                             let guard = c_controller_reader_thread.0.transcription_buffer.write();
                             match guard {
                                 Ok(mut text_buffer) => {
@@ -1771,6 +1778,7 @@ fn run_static_audio_transcription(
                     .transcription_text_receiver
                     .clone(),
             );
+            #[cfg(debug_assertions)]
             log(&String::from("Transcription reader finished"));
             Ok(())
         });
@@ -1795,10 +1803,15 @@ fn run_static_audio_transcription(
                     .store(false, Ordering::Release);
                 // Final progress update -> Whisper finishes before the final callback.
                 let progress = Progress::new(String::from(transcriber_job_name), 1, 1);
+
+                // Pump the reader thread to wake it up.
+                c_controller_runner_thread.0.transcription_text_sender.send(Ok((String::from(constants::STOP_MSG), true))).expect("Transcription channel should be open.");
+
                 c_controller_runner_thread
                     .send_progress(progress)
-                    .expect("Progress channel should be open");
+                    .expect("Progress channel should be open.");
 
+                #[cfg(debug_assertions)]
                 log(&String::from("Transcription runner finished"));
                 output
             })
@@ -1811,10 +1824,11 @@ fn run_static_audio_transcription(
             },
             Err(e) => {
                 let e_msg = extract_error_message(e);
+                let fatal = e_msg.contains("channel should be open");
                 let err = WhisperAppError::new(
                     WhisperAppErrorType::ThreadError,
                     format!("Transcription reader thread panicked. Info: {}", e_msg),
-                    false,
+                    fatal,
                 );
                 Err(err)
             }
