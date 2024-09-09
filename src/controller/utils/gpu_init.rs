@@ -4,8 +4,6 @@ use std::path::Path;
 #[cfg(feature = "cuda")]
 use nvml_wrapper::{cuda_driver_version_major, cuda_driver_version_minor};
 
-use crate::utils::constants;
-
 #[cfg(all(target_os = "windows", feature = "cuda"))]
 pub fn check_gpu_target() -> bool {
     use nvml_wrapper::Nvml;
@@ -86,8 +84,8 @@ pub fn check_gpu_target() -> bool {
     use metal;
     let available_devices = metal::Device::all();
 
-    // Using raytracing as a base-minimum for running the gpu at a reasonable speed.
-    available_devices.iter().any(|d| d.supports_raytracing())
+    // Supports raytracing and has at least 4GB of working memory (for LargeV3).
+    available_devices.iter().any(|d| d.supports_raytracing() && d.recommended_max_working_set_size() > (1 << 32))
 }
 
 // Apple Silicon is fully supported by Whisper.cpp

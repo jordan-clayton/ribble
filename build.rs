@@ -5,4 +5,7 @@ fn main(){
 
     #[cfg(target_os="linux")]
     println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN");
+
+    // TODO: Once app name properly chosen, migrate the prototype folder to the
+    // new one on build.
 }

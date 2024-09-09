@@ -41,6 +41,20 @@ fn main() -> Result<(), WhisperAppError> {
     let proj_dirs = proj_dirs.unwrap();
 
     let data_dir = proj_dirs.data_dir();
+    
+    // Create the project directory if it doesn't exist
+
+    if !data_dir.exists(){
+       if let Err(e) = std::fs::create_dir_all(data_dir) {
+        let err = WhisperAppError::new(
+            WhisperAppErrorType::IOError,
+            format!("Failed to create project directory, info: {}", e.to_string()),
+            true,
+        );
+        return Err(err);
+       }
+    }
+
     let mut native_options = NativeOptions::default();
     let viewport = build_viewport();
 
