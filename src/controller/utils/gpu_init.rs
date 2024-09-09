@@ -4,6 +4,9 @@ use std::path::Path;
 #[cfg(feature = "cuda")]
 use nvml_wrapper::{cuda_driver_version_major, cuda_driver_version_minor};
 
+#[cfg(feature = "cuda")]
+use crate::constants;
+
 #[cfg(all(target_os = "windows", feature = "cuda"))]
 pub fn check_gpu_target() -> bool {
     use nvml_wrapper::Nvml;

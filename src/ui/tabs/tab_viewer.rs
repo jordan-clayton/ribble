@@ -14,6 +14,7 @@ pub struct WhisperTabViewer<'a> {
     controller: WhisperAppController,
     closed_tabs: &'a mut HashMap<String, WhisperTab>,
     added_tabs: &'a mut Vec<(SurfaceIndex, NodeIndex, WhisperTab)>,
+    n_open_tabs: usize,
 }
 
 impl<'a> WhisperTabViewer<'a> {
@@ -21,11 +22,13 @@ impl<'a> WhisperTabViewer<'a> {
         controller: WhisperAppController,
         closed_tabs: &'a mut HashMap<String, WhisperTab>,
         added_tabs: &'a mut Vec<(SurfaceIndex, NodeIndex, WhisperTab)>,
+        n_open_tabs: usize,
     ) -> Self {
         Self {
             controller,
             closed_tabs,
             added_tabs,
+            n_open_tabs,
         }
     }
 }
@@ -56,7 +59,7 @@ impl egui_dock::TabViewer for WhisperTabViewer<'_> {
     }
 
     fn closeable(&mut self, tab: &mut Self::Tab) -> bool {
-        tab.closeable()
+        tab.closeable() && self.n_open_tabs > 1
     }
 
     fn on_close(&mut self, tab: &mut Self::Tab) -> bool {

@@ -159,10 +159,13 @@ impl eframe::App for WhisperApp {
         let show_add = !closed_tabs.is_empty();
         let mut added_tabs = vec![];
 
+        let n_open_tabs = self.tree.iter_all_tabs().count();
+
         let mut tab_viewer = tab_viewer::WhisperTabViewer::new(
             self.controller.clone(),
             &mut closed_tabs,
             &mut added_tabs,
+            n_open_tabs,
         );
 
         DockArea::new(&mut self.tree)
