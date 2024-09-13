@@ -12,7 +12,7 @@ use sdl2::log::log;
 use symphonia::{
     core::{
         audio::SampleBuffer,
-        codecs::{CODEC_TYPE_NULL, Decoder, DecoderOptions},
+        codecs::{Decoder, DecoderOptions, CODEC_TYPE_NULL},
         errors::Error,
         formats::{FormatOptions, FormatReader},
         io::MediaSourceStream,

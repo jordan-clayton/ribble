@@ -87,8 +87,9 @@ pub fn check_gpu_target() -> bool {
     use metal;
     let available_devices = metal::Device::all();
 
-    // Supports raytracing and has at least 4GB of working memory (for LargeV3).
-    available_devices.iter().any(|d| d.supports_raytracing() && d.recommended_max_working_set_size() > (1 << 32))
+    available_devices
+        .iter()
+        .any(|d| d.name().to_lowercase().contains("amd"))
 }
 
 // Apple Silicon is fully supported by Whisper.cpp

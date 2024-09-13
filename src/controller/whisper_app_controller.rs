@@ -2,14 +2,14 @@ use std::{
     any::TypeId,
     path::{Path, PathBuf},
     sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering}, Mutex, RwLock, TryLockError,
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, RwLock, TryLockError,
     },
     thread::{self, JoinHandle},
 };
 
 use arboard::Clipboard;
-use crossbeam::channel::{bounded, Receiver, Sender, SendError, TryRecvError, unbounded};
+use crossbeam::channel::{bounded, unbounded, Receiver, SendError, Sender, TryRecvError};
 use hound::{Sample, SampleFormat, WavSpec};
 use realfft::num_traits::{Bounded, FromPrimitive, NumCast, Zero};
 use sdl2::{audio::AudioSpecDesired, log::log};
@@ -31,14 +31,17 @@ use whisper_realtime::{
 use crate::{
     controller::utils::{
         gpu_init::check_gpu_target,
-        transcriber_utilities::{init_audio_ring_buffer, init_microphone, init_model, init_realtime_microphone, init_whisper_ctx},
+        transcriber_utilities::{
+            init_audio_ring_buffer, init_microphone, init_model, init_realtime_microphone,
+            init_whisper_ctx,
+        },
     },
     ui::tabs::whisper_tab::FocusTab,
     utils::{
         audio_analysis::{
-            AnalysisType, AtomicAnalysisType, bandpass_filter, f_central,
-            frequency_analysis, from_f32_normalized, normalized_waveform, power_analysis,
-            to_f32_normalized,
+            bandpass_filter, f_central, frequency_analysis, from_f32_normalized,
+            normalized_waveform, power_analysis, to_f32_normalized, AnalysisType,
+            AtomicAnalysisType,
         },
         console_message::{ConsoleMessage, ConsoleMessageType},
         constants,
@@ -698,17 +701,17 @@ impl WhisperAppController {
 
 fn recording_impl<
     T: Default
-    + Clone
-    + Copy
-    + FromPrimitive
-    + NumCast
-    + Bounded
-    + Zero
-    + sdl2::audio::AudioFormatNum
-    + Sample
-    + Sync
-    + Send
-    + 'static,
+        + Clone
+        + Copy
+        + FromPrimitive
+        + NumCast
+        + Bounded
+        + Zero
+        + sdl2::audio::AudioFormatNum
+        + Sample
+        + Sync
+        + Send
+        + 'static,
 >(
     controller: WhisperAppController,
     desired_audio: &AudioSpecDesired,

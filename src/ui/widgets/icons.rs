@@ -1,8 +1,36 @@
 use catppuccin_egui::Theme;
 use eframe::epaint::Color32;
 use egui::{
-    include_image, vec2, Image, ImageSource, Response, Sense, Ui, Widget, WidgetInfo, WidgetType,
+    include_image, vec2, IconData, Image, ImageSource, Response, Sense, Ui, Widget, WidgetInfo,
+    WidgetType,
 };
+
+pub fn load_icon(image_buffer: &[u8]) -> Option<IconData> {
+    let image_data = {
+        let image = image::load_from_memory(image_buffer);
+        match image {
+            Ok(i_data) => {
+                let rgba_image = i_data.into_rgba8();
+                let (width, height) = rgba_image.dimensions();
+                let rgba_bytes = rgba_image.into_raw();
+                Some((rgba_bytes, width, height))
+            }
+            Err(_) => None,
+        }
+    };
+
+    match image_data {
+        None => None,
+        Some(image) => {
+            let (rgba, width, height) = image;
+            Some(IconData {
+                rgba,
+                width,
+                height,
+            })
+        }
+    }
+}
 
 // NOTE: egui caches image textures by default and will not evict if the image scaling changes.
 // If ever needing to scale icons larger than 1x, an eviction implementation will be required.

@@ -7,6 +7,7 @@ use egui_extras::install_image_loaders;
 use sdl2::log::log;
 use whisper_realtime::downloader::request::reqwest;
 
+use crate::ui::widgets::icons::load_icon;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::app::WhisperApp,
@@ -41,18 +42,21 @@ fn main() -> Result<(), WhisperAppError> {
     let proj_dirs = proj_dirs.unwrap();
 
     let data_dir = proj_dirs.data_dir();
-    
+
     // Create the project directory if it doesn't exist
 
-    if !data_dir.exists(){
-       if let Err(e) = std::fs::create_dir_all(data_dir) {
-        let err = WhisperAppError::new(
-            WhisperAppErrorType::IOError,
-            format!("Failed to create project directory, info: {}", e.to_string()),
-            true,
-        );
-        return Err(err);
-       }
+    if !data_dir.exists() {
+        if let Err(e) = std::fs::create_dir_all(data_dir) {
+            let err = WhisperAppError::new(
+                WhisperAppErrorType::IOError,
+                format!(
+                    "Failed to create project directory, info: {}",
+                    e.to_string()
+                ),
+                true,
+            );
+            return Err(err);
+        }
     }
 
     let mut native_options = NativeOptions::default();
@@ -174,15 +178,35 @@ fn main() -> Result<(), WhisperAppError> {
     Ok(())
 }
 
-// TODO: MacOS might require different configs to look more "Apple-y".
+#[cfg(not(target_os = "macos"))]
 fn build_viewport() -> ViewportBuilder {
-    // TODO: App title?
-    // TODO: App icon?
-    ViewportBuilder::default()
+    let image_bytes = include_bytes!("assets/whisper_app_icon_128x128@1x.png");
+    let icon = load_icon(image_bytes);
+    let mut viewport = ViewportBuilder::default()
         .with_app_id(constants::APP_ID)
         .with_title(constants::APP_ID)
         .with_resizable(true)
-        // Default window height.
-        // TODO: make a constant
-        .with_inner_size(vec2(1024.0, 768.0))
+        .with_inner_size(vec2(1024.0, 768.0));
+
+    if let Some(icon_data) = icon {
+        viewport = viewport.with_icon(icon_data);
+    }
+    viewport
+}
+
+// TODO: MacOs may require more "Apple-like" configurations.
+#[cfg(target_os = "macos")]
+fn build_viewport() -> ViewportBuilder {
+    let image_bytes = include_bytes!("assets/whisper_app_icon_1024x1024@1x.png");
+    let icon = load_icon(image_bytes);
+    let mut viewport = ViewportBuilder::default()
+        .with_app_id(constants::APP_ID)
+        .with_title(constants::APP_ID)
+        .with_resizable(true)
+        .with_inner_size(vec2(1024.0, 768.0));
+
+    if let Some(icon_data) = icon {
+        viewport = viewport.with_icon(icon_data);
+    }
+    viewport
 }

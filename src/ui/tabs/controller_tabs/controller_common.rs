@@ -10,7 +10,9 @@ use crate::{
     utils::{
         constants,
         errors::{WhisperAppError, WhisperAppErrorType},
-        file_mgmt::copy_data, threading::get_max_threads},
+        file_mgmt::copy_data,
+        threading::get_max_threads,
+    },
 };
 
 pub fn save_transcription_button(ui: &mut Ui, controller: WhisperAppController) {
