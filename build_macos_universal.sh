@@ -2,6 +2,14 @@
 # Escape on failure
 set -e
 
+function cleanup() {
+	if [[ -f "Packager.toml.bak" ]]; then
+		mv "Packager.toml.bak" "Packager.toml"
+	fi
+}
+
+trap cleanup EXIT
+
 SKIP_BUILD=$1
 
 UNIVERSAL_DIR="target/universal/release/"
@@ -42,3 +50,5 @@ mv m_Packager.toml Packager.toml
 cargo packager
 
 mv Packager.toml.bak Packager.toml
+
+mv "dist/Ribble*.dmg" "dist/Ribble.dmg"
