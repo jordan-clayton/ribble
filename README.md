@@ -4,6 +4,11 @@ App is currently functional, build with cargo with the following:
 ```cargo build --release```
 or run the appropriate buildscript.
 
+NOTE: the buildscripts also require cargo packager as a build dependency.
+
+The buildscripts will output the installer in ```./dist/```
+
+
 Use the --features flag to include support for the following features.
 
 ## Features
