@@ -3,10 +3,6 @@ name = "ribble"
 version = "0.1.0"
 edition = "2021"
 
-# TODO: remove when not needed
-[build-dependencies]
-directories = "5.0.1"
-
 [dependencies]
 atomic_enum = "0.3.0"
 biquad = "0.4.2"
