@@ -59,18 +59,13 @@ section = "rust"
 
 [package.metadata.packager.macos]
 frameworks = ["SDL2"]
-minimum-system-version = "10.13"
-# TODO: obtain from xcode
-signing-identity = "TODO"
+minimum-system-version = "10.12"
 
 [package.metadata.packager.windows]
 allow-downgrades = "true"
 
 [package.metadata.packager.nsis]
 installer-icon = "src/assets/whisper_app_icon.ico"
-
-[target.'cfg(macos)'.features]
-default = ["whisper_realtime/metal", "_gpu"]
 
 [features]
 default = []
