@@ -5,7 +5,7 @@ set -e
 SKIP_BUILD=$1
 
 UNIVERSAL_DIR="target/universal/release/"
-UNIVERSAL_BIN="target/universal/release/ribble"
+UNIVERSAL_BIN="{ path = \"$PWD/target/universal/release/ribble\", main = true }"
 
 if [ -z "$SIGNING_IDENTITY" ]; then
 	echo "SIGNING_IDENTITY env variable is not set."
@@ -36,6 +36,9 @@ codesign --verify --deep --strict target/universal/release/ribble
 
 cp Packager.toml Packager.toml.bak
 
-sed "s|\"SIGNING_IDENTITY\"|\"$SIGNING_IDENTITY\"|g; s|\"BINARY\"|\"$UNIVERSAL_BIN\"|g" Packager.toml > m_Packager.toml
+sed "s|\"SIGNING_IDENTITY\"|\"$SIGNING_IDENTITY\"|g; s|\"BINARY\"|$UNIVERSAL_BIN|g" Packager.toml > m_Packager.toml
+mv m_Packager.toml Packager.toml
 
-#cargo packager && mv Packager.toml.bak Packager.toml
+cargo packager
+
+mv Packager.toml.bak Packager.toml
