@@ -50,5 +50,3 @@ mv m_Packager.toml Packager.toml
 cargo packager
 
 mv Packager.toml.bak Packager.toml
-
-mv "dist/Ribble*.dmg" "dist/Ribble.dmg"

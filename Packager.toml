@@ -22,8 +22,11 @@ long-description = "Realtime and static (offline) audio transcription tool drive
 
 
 [deb]
-section ="rust"
-depends =["DEPENDS"]
+section = "rust"
+depends = ["DEPENDS"]
+
+[appimage]
+libs = ["LIBS"]
 
 [macos]
 minimum-system-version ="10.12"
