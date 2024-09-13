@@ -4,12 +4,12 @@ set -e
 OPTIONS=cb
 LONG_OPTIONS=cuda,both
 BUILD_FEATURES=None
-CUDA_OUTPUT="target/cuda/release/"
+CUDA_OUTPUT="target/cuda/"
 CUDA_BINARY="{ path = \"$PWD/target/cuda/release/ribble\", main = true }"
-CPU_OUTPUT="target/cpu/release/"
+CPU_OUTPUT="target/cpu/"
 CPU_BINARY="{ path = \"$PWD/target/cpu/release/ribble\", main = true }"
 CPU_DEPENDS="libstdc++6\", \"libssl3\", \"libgcc1\", \"libc6"
-CUDA_DEPENDS="libstdc++6\", \"libssl3\", \"libgcc1\", \"libc6\", \"libcublas-12.0 (>=12.4)\", \"libcudart-12.0 (>=12.4)"
+CUDA_DEPENDS="libstdc++6\", \"libssl3\", \"libgcc1\", \"libc6\", \"cuda-toolkit-12-4"
 CPU_LIBS="libstdc++.so.6\", \"libssl.so.3\", \"libcrypto.so.3\", \"libgcc_s.so.1\", \"libm.so.6\", \"libc.so.6"
 CUDA_LIBS="libstdc++.so.6\", \"libssl.so.3\", \"libcrypto.so.3\", \"libgcc_s.so.1\", \"libm.so.6\", \"libc.so.6\",  \"libcudart.so.12\", \"libcublas.so.12\", \"libcublasLt.so.12"
 
@@ -28,17 +28,20 @@ build_cuda() {
     cargo build --release --target-dir "$CUDA_OUTPUT" --features cuda
     cp Packager.toml Packager.toml.bak
     sed "s|\"DEPENDS\"|\"$CUDA_DEPENDS\"|g; s|\"LIBS\"|\"$CUDA_LIBS\"|g; ;s|\"BINARY\"|$CUDA_BINARY|g" Packager.toml > m_Packager.toml
-    cp m_Packager.toml test_cuda.toml
     mv m_Packager.toml Packager.toml
     cargo packager
 
     mv Packager.toml.bak Packager.toml
 
-    while read file; do
+    if [ ! -d "$PWD/dist/cuda" ]; then
+      mkdir -p "$PWD/dist/cuda"
+    fi
+
+    while read -r file; do
       ext="${file##*.}";
       filename="${file%.*}";
-      mv "dist/$file" "dist/${filename}_cuda.${ext}";
-    done < <(ls "dist/[Rr]ibble")
+      mv "$PWD/dist/$file" "$PWD/dist/cuda/${filename}_cuda.${ext}";
+    done < <(ls "$PWD/dist/" | grep "[Rr]ibble")
 }
 
 build_cpu(){
@@ -48,26 +51,34 @@ build_cpu(){
     cargo build --release --target-dir "$CPU_OUTPUT"
     cp Packager.toml Packager.toml.bak
     sed "s|\"DEPENDS\"|\"$CPU_DEPENDS\"|g; s|\"LIBS\"|\"$CPU_LIBS\"|g; ;s|\"BINARY\"|$CPU_BINARY|g" Packager.toml > m_Packager.toml
-    cp m_Packager.toml test_cpu.toml
     mv m_Packager.toml Packager.toml
     cargo packager
+    if [ ! -d "$PWD/dist/cpu" ]; then
+      mkdir -p "$PWD/dist/cpu"
+    fi
+
+    while read -r file; do
+      mv "$PWD/dist/$file" "$PWD/dist/cpu/$file";
+    done < <(ls "$PWD/dist/" | grep "[Rr]ibble")
 
     mv Packager.toml.bak Packager.toml
 }
 
 if PARSED=$(getopt --options "$OPTIONS" --longoptions "$LONG_OPTIONS" --name "$0" -- "$@"); then
-  eval set --"$PARSED"
+  eval set -- "$PARSED"
   else
     echo "Failed to parse options" >&2
     exit 1
 fi
 
-while $1; do
+while [ "$1" ]; do
   case "$1" in
     -c|--cuda)
+    echo "Building CUDA"
     BUILD_FEATURES=cuda
     ;;
     -b|--both)
+    echo "Building both"
     BUILD_FEATURES=both
     ;;
     --)

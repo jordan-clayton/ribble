@@ -34,7 +34,7 @@ pub fn check_gpu_target() -> bool {
     let cuda_version = cuda_version.unwrap();
     let sys_major_version = cuda_driver_version_major(cuda_version);
     let sys_minor_version = cuda_driver_version_minor(cuda_version);
-    sys_major_version >= constants::MIN_CUDA_MAJOR && sys_minor_version >= constants::MIN_CUDA_MINOR
+    sys_major_version == constants::CUDA_MAJOR
 }
 
 #[cfg(all(target_os = "linux", feature = "cuda"))]
@@ -63,8 +63,7 @@ pub fn check_gpu_target() -> bool {
 
     let cuda_version = cuda_version.unwrap();
     let sys_major_version = cuda_driver_version_major(cuda_version);
-    let sys_minor_version = cuda_driver_version_minor(cuda_version);
-    sys_major_version >= constants::MIN_CUDA_MAJOR && sys_minor_version >= constants::MIN_CUDA_MINOR
+    sys_major_version == constants::CUDA_MAJOR
 }
 
 #[cfg(all(target_os = "linux", feature = "hipblas"))]

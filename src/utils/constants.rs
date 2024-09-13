@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 // This has been tested to work with version 12.4.
-pub const MIN_CUDA_MAJOR: i32 = 12;
-pub const MIN_CUDA_MINOR: i32 = 4;
+pub const CUDA_MAJOR: i32 = 12;
+pub const CUDA_MINOR: i32 = 4;
 pub const BLANK_SEPARATOR: f32 = 8.0;
 
 // Future TODO: Consider implementing user preferences pane.

@@ -20,6 +20,12 @@ Use the --features flag to include support for the following features.
 
 Your mileage may vary with the untested feature flags. Testing is not yet complete.
 
+## Linux
+The .deb cuda release requires major version 12: [cuda-toolkit-12-4](https://developer.nvidia.com/cuda-12-4-0-download-archive).
+It has been confirmed to work with toolkits 12.4 and 12.5.
+
+The Appimage should work out of the box, provided you have nvidia driver version >= 550.28
+
 ## TODO:
 Remaining documentation.
 Release builds.
