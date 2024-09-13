@@ -30,42 +30,8 @@ log = "0.4.22"
 arboard = "3.4.0"
 ron = "0.8.1"
 image = "0.25.2"
-
 [target.x86_64-apple-darwin.dependencies]
 metal = "0.29.0"
-
-[package.metadata.packager]
-name = "ribble"
-product-name = "Ribble"
-identifier = "com.Jordan.Ribble"
-resources = ["Cargo.toml", "src", "README.md"]
-icons = ["src/assets/whisper_app_icon_1024x1024@1x.png",
-         "src/assets/whisper_app_icon_512x512@1x.png",
-         "src/assets/whisper_app_icon_256x256@1x.png",
-         "src/assets/whisper_app_icon_128x128@1x.png",
-         "src/assets/whisper_app_icon_64x64@1x.png",
-         "src/assets/whisper_app_icon_32x32@1x.png"]
-license-file = "LICENSE.md"
-category = "Utility"
-version = "0.1.0"
-out-dir = "./dist"
-copyright = "Copyright (c) 2024 - Jordan Clayton"
-description = "Audio transcription tool."
-long-description = "Realtime and static (offline) audio transcription tool using OpenAI's Whisper ATS. Includes audio recording tooling, as well as hardware acceleration (if supported)."
-
-# TODO: determine if deps need to be specified for cargo-packager
-[package.metadata.packager.deb]
-section = "rust"
-
-[package.metadata.packager.macos]
-frameworks = ["SDL2"]
-minimum-system-version = "10.12"
-
-[package.metadata.packager.windows]
-allow-downgrades = "true"
-
-[package.metadata.packager.nsis]
-installer-icon = "src/assets/whisper_app_icon.ico"
 
 [features]
 default = []

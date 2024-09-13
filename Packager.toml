@@ -1,0 +1,33 @@
+name ="ribble"
+product-name ="Ribble"
+identifier ="com.Jordan.Ribble"
+resources =["src", "READEM.md"]
+icons = ["src/assets/whisper_app_icon_1024x1024@1x.png",
+	 "src/assets/whisper_app_icon_512x512@1x.png",
+	 "src/assets/whisper_app_icon_256x256@1x.png",
+	 "src/assets/whisper_app_icon_128x128@1x.png",
+	 "src/assets/whisper_app_icon_64x64@1x.png",
+	 "src/assets/whisper_app_icon_32x32@1x.png",
+	]
+license-file ="LICENSE.md"
+category ="Utility"
+version ="0.1.0"
+out-dir ="./dist"
+copyright = "Copyright (c) 2024 - Jordan Clayton"
+description = "Audio transcription software"
+long-descrption = "Realtime and static (offline) audio transcription tool driven by OpenAI's Whisper ATS. Includes audio recording tooling, as well as hardware acceleration (if supported)."
+
+
+
+[deb]
+section ="rust"
+depends =["DEPENDS"]
+
+[macos]
+minimum-system-version ="10.12"
+
+[windows]
+allow-downgrades = true
+
+[nsis]
+installer-icon ="src/assets/whisper_app_icon.ico"

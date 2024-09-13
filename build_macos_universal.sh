@@ -2,33 +2,27 @@
 # Escape on failure
 set -e
 
-DMG_PATH="dist/Ribble.dmg"
-MOUNT_POINT="/Volumes/Ribble"
+SKIP_BUILD=$1
+
 UNIVERSAL_DIR="target/universal/release/"
-
-cleanup() {
-	if diskutil info "$MOUNT_POINT" | grep "Mounted: Yes" > /dev/null; then
-		hdiutil detach "$MOUNT_POINT"
-	fi
-
-}
-
-trap cleanup EXIT
+UNIVERSAL_BIN="target/universal/release/ribble"
 
 if [ -z "$SIGNING_IDENTITY" ]; then
 	echo "SIGNING_IDENTITY env variable is not set."
 	exit 1
 fi
 
-
-rustup target add x86_64-apple-darwin
-rustup target add aarch64-apple-darwin
-cargo build --release --target x86_64-apple-darwin --features metal
-cargo build --release --target aarch64-apple-darwin --features metal
+if [[ -z "$SKIP_BUILD" || ! "$SKIP_BUILD" == "true" ]]; then
+	rustup target add x86_64-apple-darwin
+	rustup target add aarch64-apple-darwin
+	cargo build --release --target x86_64-apple-darwin --features metal
+	cargo build --release --target aarch64-apple-darwin --features metal
+fi
 
 if [ ! -d "$UNIVERSAL_DIR" ]; then
 	mkdir -p "$UNIVERSAL_DIR"
 fi
+
 mkdir -p target/universal/release/
 
 lipo -create \
@@ -40,9 +34,8 @@ lipo -create \
 codesign --sign "$SIGNING_IDENTITY" target/universal/release/ribble
 codesign --verify --deep --strict target/universal/release/ribble
 
-cargo packager --target universal/release/ribble
+cp Packager.toml Packager.toml.bak
 
-hdiutil attach "$DMG_PATH" -mountpoint "$MOUNT_POINT"
+sed "s|\"SIGNING_IDENTITY\"|\"$SIGNING_IDENTITY\"|g; s|\"BINARY\"|\"$UNIVERSAL_BIN\"|g" Packager.toml > m_Packager.toml
 
-codesign --sign "$SIGNING_IDENTITY" --deep --force "$MOUNT_POINT/Ribble.app"
-hdiutil detach "$MOUNT_POINT"
+#cargo packager && mv Packager.toml.bak Packager.toml
