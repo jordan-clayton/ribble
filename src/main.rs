@@ -203,6 +203,7 @@ fn build_viewport() -> ViewportBuilder {
         .with_app_id(constants::APP_ID)
         .with_title(constants::APP_ID)
         .with_resizable(true)
+        .with_titlebar_shown(false)
         .with_inner_size(vec2(1024.0, 768.0));
 
     if let Some(icon_data) = icon {
