@@ -47,6 +47,7 @@ impl tab_view::TabView for TranscriptionTab {
         } = self;
 
         let audio_worker_state = controller.audio_worker_state();
+        let transcription = controller.static_running() || controller.realtime_running();
 
         // Update state.
         controller.read_transcription_buffer(text_buffer);

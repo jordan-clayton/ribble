@@ -70,6 +70,7 @@ impl tab_view::TabView for VisualizerTab {
 
         controller.set_run_visualizer(*visualize);
         let realtime_running = controller.realtime_running();
+        let transcription = realtime_running || controller.static_running();
         let recorder_running = controller.recorder_running();
         let mic_running = realtime_running || recorder_running;
         let audio_worker_state = controller.audio_worker_state();
