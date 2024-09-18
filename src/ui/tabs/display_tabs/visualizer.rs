@@ -105,7 +105,7 @@ impl tab_view::TabView for VisualizerTab {
             .resizable(false)
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let (icon, msg) = get_header_recording_icon(audio_worker_state, false, &theme);
+                    let (icon, msg) = get_header_recording_icon(audio_worker_state, transcription, &theme);
                     ui.add(icon);
                     ui.label(msg);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
