@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-
 use egui::{Button, Grid, Label, Pos2, RichText, ScrollArea, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::VariantArray;
@@ -242,7 +241,7 @@ impl tab_view::TabView for StaticTab {
                     };
                     if let Some(p) = rfd::FileDialog::new()
                         .add_filter("Wave (.wav)", &["wav"])
-                        .add_filter("mpeg (.mp3, mp4, m4v)", &["mp3, mp4, m4v"])
+                        .add_filter("mpeg (.mp3, .mp4, .m4v)", &["mp3", "mp4", "m4v"])
                         .set_directory(dir)
                         .pick_file()
                     {

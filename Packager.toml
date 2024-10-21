@@ -13,7 +13,7 @@ icons = ["src/assets/icon.icns",
 	]
 license-file ="LICENSE.md"
 category ="Utility"
-version ="0.1.0"
+version ="0.1.1"
 out-dir ="./dist"
 copyright = "Copyright (c) 2024 - Jordan Clayton"
 description = "Audio transcription software"
@@ -24,6 +24,7 @@ long-description = "Realtime and static (offline) audio transcription tool drive
 [deb]
 section = "rust"
 depends = ["DEPENDS"]
+maintainer = "Jordan Clayton"
 
 [appimage]
 libs = ["LIBS"]

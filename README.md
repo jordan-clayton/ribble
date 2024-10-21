@@ -29,3 +29,6 @@ The Appimage should work out of the box, provided you have nvidia driver version
 ## TODO:
 Remaining documentation.
 Release builds.
+Better audio cleanup; cleanup for offline transcriptions.
+Fix memory leaks.
+Handle cudaMalloc problems.
