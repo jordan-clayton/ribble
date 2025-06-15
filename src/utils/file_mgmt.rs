@@ -30,6 +30,10 @@ use crate::{
     },
 };
 
+// TODO: refactor most of this. Bring in the loading api from ribble_core which handles all
+// symphonia stuff.
+// Hound stuff can probably stay.
+
 pub fn load_app_state() -> Option<(DockState<WhisperTab>, HashMap<String, WhisperTab>)> {
     let kv: HashMap<String, String> = eframe::storage_dir(constants::APP_ID)
         .and_then(|path| {
@@ -118,6 +122,8 @@ pub fn save_app_state(
         }
     })
 }
+
+// TODO: These are very, very unnecessary; remove them and reimplement accordingly.
 
 fn qualify_save_path(dir: &Path) -> PathBuf {
     let mut path = dir.to_path_buf();

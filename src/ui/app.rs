@@ -224,6 +224,7 @@ impl eframe::App for WhisperApp {
 
     // eframe persistence does not seem to be working in linux.
     // Atm, this will not write to disk regardless of flushing.
+    // Uh,  WHAT? That's not true, afaik. TODO: look into this.
     fn save(&mut self, _storage: &mut dyn Storage) {
         if let Some(join_handle) = self.last_save_join_handle.take() {
             if let Some(result) = join_handle.join().ok() {

@@ -3,6 +3,8 @@ use std::fmt::Formatter;
 
 use strum::{Display, EnumIter};
 
+// TODO: handle this... better.
+
 #[derive(Clone, Debug)]
 pub struct WhisperAppError {
     error_type: WhisperAppErrorType,

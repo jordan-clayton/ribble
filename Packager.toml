@@ -1,7 +1,9 @@
+# TODO: get rid of this and don't use cargo-packager
 name ="ribble"
 binaries = ["BINARY"]
 product-name ="Ribble"
 identifier ="com.Jordan.Ribble"
+# TODO: add maintainer field
 resources =["Cargo.toml", "src", "README.md"]
 icons = ["src/assets/icon.icns",
 	 "src/assets/whisper_app_icon_1024x1024@1x.png",

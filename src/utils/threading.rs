@@ -1,8 +1,10 @@
 use std::thread::JoinHandle;
 
 use crossbeam::channel::SendError;
+// TODO: remove SDL.
 use sdl2::log::log;
 
+// TODO: Flatten this.
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     utils::{
@@ -12,6 +14,9 @@ use crate::{
     },
 };
 
+// TODO: remove or mark inline. Check call sites for use and determine why I wrote this.
+// It does not make sense to call this function in like 8 different places.
+// Something's up.
 pub fn get_max_threads() -> std::ffi::c_int {
     match std::thread::available_parallelism() {
         Ok(n) => n.get() as std::ffi::c_int,
@@ -19,6 +24,7 @@ pub fn get_max_threads() -> std::ffi::c_int {
     }
 }
 
+// TODO: Remove this function.
 pub fn join_threads_loop(
     msg_queue: crossbeam::channel::Receiver<JoinHandle<Result<String, WhisperAppError>>>,
     controller: WhisperAppController,
@@ -96,6 +102,8 @@ pub fn join_threads_loop(
     log("Joiner thread closed.");
 }
 
+// TODO: this does not need to be a function.
+// Just emit the console message through the controller.
 fn send_console_msg(
     msg: ConsoleMessage,
     controller: WhisperAppController,

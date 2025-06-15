@@ -1,3 +1,6 @@
+// TODO: this should probably be rethought
+// Limiting by GPU is pretty opinionated
+// This entire module should be removed.
 #[cfg(all(target_os = "linux", feature = "hipblas"))]
 use std::path::Path;
 

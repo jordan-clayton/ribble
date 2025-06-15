@@ -29,6 +29,7 @@ build_cuda() {
     cp Packager.toml Packager.toml.bak
     sed "s|\"DEPENDS\"|\"$CUDA_DEPENDS\"|g; s|\"LIBS\"|\"$CUDA_LIBS\"|g; ;s|\"BINARY\"|$CUDA_BINARY|g" Packager.toml > m_Packager.toml
     mv m_Packager.toml Packager.toml
+    # TODO: this should only package debian; appimage is too large
     cargo packager
 
     mv Packager.toml.bak Packager.toml

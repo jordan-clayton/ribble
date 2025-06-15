@@ -18,9 +18,12 @@ use crate::utils::{
     errors::{WhisperAppError, WhisperAppErrorType},
 };
 
+// TODO: migrate to LazyCell
 lazy_static! {
     static ref FFT_PLANNER: Mutex<RealFftPlanner<f32>> = Mutex::new(RealFftPlanner::<f32>::new());
 }
+
+// TODO: look over this code to try and see if there are glaring errors/opportunities to optimize.
 
 #[atomic_enum]
 #[derive(PartialEq, EnumIter, Display)]

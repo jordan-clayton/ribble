@@ -1,3 +1,4 @@
+// TODO: get rid of this if non-necessary
 fn main() {
     // for SDL2
     #[cfg(target_os = "macos")]

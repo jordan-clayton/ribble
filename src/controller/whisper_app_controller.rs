@@ -50,13 +50,33 @@ use crate::{
             copy_data, decode_audio, delete_temporary_audio_file, get_audio_reader,
             get_temp_file_path, get_tmp_file_writer, save_transcription, write_audio_sample,
         },
-        progress::Progress,
+        progress::ProgressBar,
         recorder_configs::{RecorderConfigs, RecordingFormat},
         sdl_audio_wrapper::SdlAudioWrapper,
         workers::{AtomicAudioWorkerState, AudioWorkerState},
     },
 };
 
+// TODO: rewrite all of this; the current implementation has some major architectural problems that need revising.
+// The following
+// Controller:
+// -> use a named inner instead of a tuple
+// -> refactor state flags
+// -> refactor ready flags -> some models will be packed in
+// -> Migrate sync primitives to parking lot
+// -> Remove poisoning-related state; doesn't exist in parking lot
+// -> Reduce access to run_visualizer: set to true whenever there's a visualizer tab open.
+// -> Remove FocusTabs once state has been removed from the UI.
+// TODO: DECOMPOSE STATE INTO SUB-MODULES, Progress, Console, Visualizer, Recorder, Transcriber, Worker.
+// TODO: implement drop and cleanup on drop
+// And make the following changes once decoupled.
+// Progress:
+// -> Allocate a Slab for insertion/removal. slab is Sync + Send, so there's no need for additional synchronization primitives
+// -> Add accessor methods to insert (returns ID), remove(id), and list (all current progress jobs)
+// ConsoleMessages:
+// -> Allocate a dequeue or similar with a fixed (resizeable as per user preferences) number of buckets.
+// -> Upon reaching the size limit, pop the previous dequeue
+// -> This will require a synchronization primitive (RWLock).
 #[derive(Clone)]
 pub struct WhisperAppController(Arc<WhisperAppContext>);
 
@@ -68,6 +88,7 @@ impl std::fmt::Debug for WhisperAppController {
     }
 }
 
+// TODO: redo all of this; a lot of these methods are shortened by ribble_core.
 impl WhisperAppController {
     pub fn new(
         client: reqwest::Client,
@@ -130,7 +151,7 @@ impl WhisperAppController {
         let realtime_running = self.realtime_running();
         let static_running = self.static_running();
         let recorder_running = self.recorder_running();
-        return realtime_running || static_running || recorder_running;
+        realtime_running || static_running || recorder_running
     }
 
     pub fn audio_worker_state(&self) -> AudioWorkerState {
@@ -223,11 +244,11 @@ impl WhisperAppController {
         self.0.focus_tab_receiver.try_recv()
     }
 
-    pub fn send_progress(&self, progress: Progress) -> Result<(), SendError<Progress>> {
+    pub fn send_progress(&self, progress: ProgressBar) -> Result<(), SendError<ProgressBar>> {
         self.0.progress_sender.send(progress)
     }
 
-    pub fn recv_progress(&self) -> Result<Progress, TryRecvError> {
+    pub fn recv_progress(&self) -> Result<ProgressBar, TryRecvError> {
         self.0.progress_receiver.try_recv()
     }
     pub fn send_console_message(
@@ -308,7 +329,7 @@ impl WhisperAppController {
         let job_name = "Realtime Init";
 
         // UPDATE PROGRESS BAR
-        let progress = Progress::new(String::from(job_name), 1, 100);
+        let progress = ProgressBar::new(String::from(job_name), 1, 100);
         self.send_progress(progress)
             .expect("Progress channel should be open");
 
@@ -320,7 +341,7 @@ impl WhisperAppController {
         self.0.save_recording_ready.store(false, Ordering::Release);
 
         // UPDATE PROGRESS BAR
-        let progress = Progress::new(String::from(job_name), 17, 100);
+        let progress = ProgressBar::new(String::from(job_name), 17, 100);
         self.send_progress(progress)
             .expect("Progress channel should be open");
 
@@ -328,13 +349,13 @@ impl WhisperAppController {
         let c_controller = controller.clone();
 
         // UPDATE PROGRESS BAR
-        let progress = Progress::new(String::from(job_name), 33, 100);
+        let progress = ProgressBar::new(String::from(job_name), 33, 100);
         self.send_progress(progress)
             .expect("Progress channel should be open");
 
         let rt_thread = thread::spawn(move || {
             // UPDATE PROGRESS BAR
-            let progress = Progress::new(String::from(job_name), 50, 100);
+            let progress = ProgressBar::new(String::from(job_name), 50, 100);
 
             if let Err(e) = c_controller.send_progress(progress) {
                 let err = WhisperAppError::new(
@@ -346,7 +367,7 @@ impl WhisperAppController {
             }
 
             // UPDATE PROGRESS BAR
-            let progress = Progress::new(String::from(job_name), 76, 100);
+            let progress = ProgressBar::new(String::from(job_name), 76, 100);
             if let Err(e) = c_controller.send_progress(progress) {
                 let err = WhisperAppError::new(
                     WhisperAppErrorType::IOError,
@@ -359,7 +380,7 @@ impl WhisperAppController {
             let rt_configs = Arc::new(configs);
 
             // UPDATE PROGRESS BAR
-            let progress = Progress::new(String::from(job_name), 100, 100);
+            let progress = ProgressBar::new(String::from(job_name), 100, 100);
             if let Err(e) = c_controller.send_progress(progress) {
                 let err = WhisperAppError::new(
                     WhisperAppErrorType::IOError,
@@ -386,7 +407,7 @@ impl WhisperAppController {
         let job_name = "Static Init";
         let audio_file = audio_file.to_path_buf();
 
-        let progress = Progress::new(String::from(job_name), 1, 100);
+        let progress = ProgressBar::new(String::from(job_name), 1, 100);
         self.send_progress(progress)
             .expect("Progress channel should be open.");
 
@@ -395,19 +416,19 @@ impl WhisperAppController {
             .audio_worker_state
             .store(AudioWorkerState::Loading, Ordering::Release);
 
-        let progress = Progress::new(String::from(job_name), 10, 100);
+        let progress = ProgressBar::new(String::from(job_name), 10, 100);
         self.send_progress(progress)
             .expect("Progress channel should be open.");
 
         let controller = self.clone();
         let c_controller = controller.clone();
-        let progress = Progress::new(String::from(job_name), 20, 100);
+        let progress = ProgressBar::new(String::from(job_name), 20, 100);
         self.send_progress(progress)
             .expect("Progress channel should be open.");
 
         let st_thread = thread::spawn(move || {
             let audio_file = audio_file.as_path();
-            let progress = Progress::new(String::from(job_name), 30, 100);
+            let progress = ProgressBar::new(String::from(job_name), 30, 100);
             if let Err(e) = c_controller.send_progress(progress) {
                 let err = WhisperAppError::new(
                     WhisperAppErrorType::IOError,
@@ -417,7 +438,7 @@ impl WhisperAppController {
                 return Err(err);
             }
 
-            let progress = Progress::new(String::from(job_name), 50, 100);
+            let progress = ProgressBar::new(String::from(job_name), 50, 100);
             if let Err(e) = c_controller.send_progress(progress) {
                 let err = WhisperAppError::new(
                     WhisperAppErrorType::IOError,
@@ -441,7 +462,7 @@ impl WhisperAppController {
             }
 
             let (id, format, decoder) = audio_reader.unwrap();
-            let progress = Progress::new(String::from(job_name), 60, 100);
+            let progress = ProgressBar::new(String::from(job_name), 60, 100);
             if let Err(e) = c_controller.send_progress(progress) {
                 let err = WhisperAppError::new(
                     WhisperAppErrorType::IOError,
@@ -461,7 +482,7 @@ impl WhisperAppController {
 
             let decoder_progress_callback = |total_decoded| {
                 let progress =
-                    Progress::new(String::from(decode_job_name), total_decoded, total_size);
+                    ProgressBar::new(String::from(decode_job_name), total_decoded, total_size);
                 c_controller
                     .send_progress(progress)
                     .expect("Progress channel should be open");
@@ -471,7 +492,7 @@ impl WhisperAppController {
             let decode_success = decode_audio(id, format, decoder, Some(decoder_progress_callback));
 
             // UPDATE PROGRESS
-            let progress = Progress::new(String::from(job_name), 80, 100);
+            let progress = ProgressBar::new(String::from(job_name), 80, 100);
             c_controller
                 .send_progress(progress)
                 .expect("Progress channel should be open");
@@ -489,14 +510,14 @@ impl WhisperAppController {
 
             // Final progress if not able to get file size from metadata.
             if total_size == 0 {
-                let progress = Progress::new(String::from(decode_job_name), 0, total_size);
+                let progress = ProgressBar::new(String::from(decode_job_name), 0, total_size);
                 c_controller
                     .send_progress(progress)
                     .expect("Progress channel should be open");
 
                 // In case of inexact sizes: progress task will be removed on next ui draw.
             } else if total_size != decoded.len() {
-                let progress = Progress::new(String::from(decode_job_name), 1, 1);
+                let progress = ProgressBar::new(String::from(decode_job_name), 1, 1);
                 c_controller
                     .send_progress(progress)
                     .expect("Progress channel should be open");
@@ -504,7 +525,7 @@ impl WhisperAppController {
 
             assert!(!decoded.is_empty(), "Invalid file: 0-size audio");
 
-            let progress = Progress::new(String::from(job_name), 100, 100);
+            let progress = ProgressBar::new(String::from(job_name), 100, 100);
             c_controller
                 .send_progress(progress)
                 .expect("Progress channel should be open");
@@ -564,7 +585,7 @@ impl WhisperAppController {
             let job_name = format!("Downloading: {}", c_file_name);
 
             stream.progress_callback = Some(move |n| {
-                let progress = Progress::new(job_name.clone(), n, total_size);
+                let progress = ProgressBar::new(job_name.clone(), n, total_size);
                 let _ = c_controller.send_progress(progress);
             });
 
@@ -673,7 +694,7 @@ impl WhisperAppController {
             let directory = p.parent().and_then(|path| Some(path.as_os_str()));
 
             let progress_callback = move |n: usize| {
-                let progress = Progress::new(job_name.clone(), n, total_size);
+                let progress = ProgressBar::new(job_name.clone(), n, total_size);
                 let _ = c_controller.send_progress(progress);
             };
 
@@ -722,7 +743,7 @@ fn recording_impl<
 ) -> Result<String, WhisperAppError> {
     let job_name = "Recorder Setup";
 
-    let progress = Progress::new(String::from(job_name), 1, 100);
+    let progress = ProgressBar::new(String::from(job_name), 1, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -735,7 +756,7 @@ fn recording_impl<
     let c_controller_visualizer_thread = controller.clone();
     let audio_subsystem = &controller.0.audio_wrapper.audio_subsystem;
 
-    let progress = Progress::new(String::from(job_name), 10, 100);
+    let progress = ProgressBar::new(String::from(job_name), 10, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -749,7 +770,7 @@ fn recording_impl<
 
     let mic = init_microphone(audio_subsystem, &desired_audio, sender);
 
-    let progress = Progress::new(String::from(job_name), 30, 100);
+    let progress = ProgressBar::new(String::from(job_name), 30, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -767,7 +788,7 @@ fn recording_impl<
     spec.channels = channels;
     spec.sample_rate = sample_rate;
 
-    let progress = Progress::new(String::from(job_name), 40, 100);
+    let progress = ProgressBar::new(String::from(job_name), 40, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -792,7 +813,7 @@ fn recording_impl<
     }
     let data_dir = data_dir.unwrap();
 
-    let progress = Progress::new(String::from(job_name), 60, 100);
+    let progress = ProgressBar::new(String::from(job_name), 60, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -818,7 +839,7 @@ fn recording_impl<
 
     let mut writer = writer.unwrap();
 
-    let progress = Progress::new(String::from(job_name), 80, 100);
+    let progress = ProgressBar::new(String::from(job_name), 80, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -848,7 +869,7 @@ fn recording_impl<
         .audio_worker_state
         .store(AudioWorkerState::Running, Ordering::Release);
 
-    let progress = Progress::new(String::from(job_name), 100, 100);
+    let progress = ProgressBar::new(String::from(job_name), 100, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1112,7 +1133,7 @@ fn run_realtime_audio_transcription(
 ) -> Result<String, WhisperAppError> {
     let job_name = "Realtime Setup";
 
-    let progress = Progress::new(String::from(job_name), 1, 100);
+    let progress = ProgressBar::new(String::from(job_name), 1, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1128,7 +1149,7 @@ fn run_realtime_audio_transcription(
     let f_lower = filtering.2;
     let f_central = f_central(f_lower, f_higher);
 
-    let progress = Progress::new(String::from(job_name), 10, 100);
+    let progress = ProgressBar::new(String::from(job_name), 10, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1146,7 +1167,7 @@ fn run_realtime_audio_transcription(
     let c_controller_visualizer_thread = controller.clone();
     let c_controller_transcription_reader_thread = controller.clone();
 
-    let progress = Progress::new(String::from(job_name), 20, 100);
+    let progress = ProgressBar::new(String::from(job_name), 20, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1168,7 +1189,7 @@ fn run_realtime_audio_transcription(
     let c_audio_reader = audio.clone();
     let c_audio_transcriber = audio.clone();
 
-    let progress = Progress::new(String::from(job_name), 30, 100);
+    let progress = ProgressBar::new(String::from(job_name), 30, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1192,7 +1213,7 @@ fn run_realtime_audio_transcription(
     // State Flags - This should likely be refactored.
     let c_realtime_is_running = controller.0.realtime_running.clone();
 
-    let progress = Progress::new(String::from(job_name), 40, 100);
+    let progress = ProgressBar::new(String::from(job_name), 40, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1213,7 +1234,7 @@ fn run_realtime_audio_transcription(
     let c_audio_spec = audio_spec.clone();
     let c_mic_stream = mic_stream.clone();
 
-    let progress = Progress::new(String::from(job_name), 50, 100);
+    let progress = ProgressBar::new(String::from(job_name), 50, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1236,7 +1257,7 @@ fn run_realtime_audio_transcription(
         return Err(err);
     }
 
-    let progress = Progress::new(String::from(job_name), 80, 100);
+    let progress = ProgressBar::new(String::from(job_name), 80, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1259,7 +1280,7 @@ fn run_realtime_audio_transcription(
         return Err(err);
     };
 
-    let progress = Progress::new(String::from(job_name), 100, 100);
+    let progress = ProgressBar::new(String::from(job_name), 100, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1561,7 +1582,7 @@ fn run_static_audio_transcription(
 ) -> Result<String, WhisperAppError> {
     let job_name = "Static Setup";
 
-    let progress = Progress::new(String::from(job_name), 1, 100);
+    let progress = ProgressBar::new(String::from(job_name), 1, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1574,7 +1595,7 @@ fn run_static_audio_transcription(
     // Clear the text buffer.
     controller.clear_transcription_buffer();
 
-    let progress = Progress::new(String::from(job_name), 10, 100);
+    let progress = ProgressBar::new(String::from(job_name), 10, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1587,7 +1608,7 @@ fn run_static_audio_transcription(
     let c_controller_runner_thread = controller.clone();
     let c_controller_reader_thread = controller.clone();
 
-    let progress = Progress::new(String::from(job_name), 20, 100);
+    let progress = ProgressBar::new(String::from(job_name), 20, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1598,7 +1619,7 @@ fn run_static_audio_transcription(
     }
     let model = init_model(configs.clone());
 
-    let progress = Progress::new(String::from(job_name), 30, 100);
+    let progress = ProgressBar::new(String::from(job_name), 30, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1611,7 +1632,7 @@ fn run_static_audio_transcription(
     let audio = SupportedAudioSample::F32(audio);
     let audio = Arc::new(Mutex::new(audio));
 
-    let progress = Progress::new(String::from(job_name), 40, 100);
+    let progress = ProgressBar::new(String::from(job_name), 40, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1625,7 +1646,7 @@ fn run_static_audio_transcription(
     let data_sender = Some(data_sender);
     let channels = SupportedChannels::MONO;
 
-    let progress = Progress::new(String::from(job_name), 50, 100);
+    let progress = ProgressBar::new(String::from(job_name), 50, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1647,7 +1668,7 @@ fn run_static_audio_transcription(
         return Err(err);
     }
 
-    let progress = Progress::new(String::from(job_name), 60, 100);
+    let progress = ProgressBar::new(String::from(job_name), 60, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1665,11 +1686,11 @@ fn run_static_audio_transcription(
     let total_size = 100;
 
     let progress_callback = move |n: i32| {
-        let progress = Progress::new(String::from(transcriber_job_name), n as usize, total_size);
+        let progress = ProgressBar::new(String::from(transcriber_job_name), n as usize, total_size);
         let _ = p_controller.send_progress(progress);
     };
 
-    let progress = Progress::new(String::from(job_name), 80, 100);
+    let progress = ProgressBar::new(String::from(job_name), 80, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1691,7 +1712,7 @@ fn run_static_audio_transcription(
         return Err(err);
     };
 
-    let progress = Progress::new(String::from(job_name), 100, 100);
+    let progress = ProgressBar::new(String::from(job_name), 100, 100);
     if let Err(e) = controller.send_progress(progress) {
         let err = WhisperAppError::new(
             WhisperAppErrorType::IOError,
@@ -1805,7 +1826,7 @@ fn run_static_audio_transcription(
                     .static_running
                     .store(false, Ordering::Release);
                 // Final progress update -> Whisper finishes before the final callback.
-                let progress = Progress::new(String::from(transcriber_job_name), 1, 1);
+                let progress = ProgressBar::new(String::from(transcriber_job_name), 1, 1);
 
                 // Pump the reader thread to wake it up.
                 c_controller_runner_thread
@@ -1952,8 +1973,8 @@ struct WhisperAppContext {
     transcription_buffer: RwLock<Vec<String>>,
 
     // NOTE: these might actually need to be bounded
-    progress_sender: Sender<Progress>,
-    progress_receiver: Receiver<Progress>,
+    progress_sender: Sender<ProgressBar>,
+    progress_receiver: Receiver<ProgressBar>,
 
     console_sender: Sender<ConsoleMessage>,
     console_receiver: Receiver<ConsoleMessage>,

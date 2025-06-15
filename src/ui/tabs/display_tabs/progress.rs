@@ -5,14 +5,14 @@ use egui_dock::{NodeIndex, SurfaceIndex};
 
 use crate::{
     controller::whisper_app_controller::WhisperAppController, ui::tabs::tab_view,
-    utils::progress::Progress,
+    utils::progress::ProgressBar,
 };
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ProgressTab {
     title: String,
     #[serde(skip)]
-    jobs: HashSet<Progress>,
+    jobs: HashSet<ProgressBar>,
 }
 
 impl ProgressTab {
@@ -24,7 +24,7 @@ impl ProgressTab {
         }
     }
 
-    fn progress_widget(ui: &mut Ui, progress: &Progress) {
+    fn progress_widget(ui: &mut Ui, progress: &ProgressBar) {
         let p = progress.progress();
         let total_size = progress.total_size();
         match total_size {

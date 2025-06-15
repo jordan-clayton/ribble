@@ -1,44 +1,59 @@
 [package]
 name = "ribble"
-version = "0.1.1"
-edition = "2021"
+version = "0.1.2"
+edition = "2024"
 
+# TODO: MAJOR refactor - bring in ribble-whisper core crate and fit the new API in
 [dependencies]
 atomic_enum = "0.3.0"
-biquad = "0.4.2"
+biquad = "0.5.0"
 bson = "2.11.0"
 catppuccin-egui = { version = "5.2.0", default-features = false, features = ["egui28"] }
 crossbeam = "0.8.4"
-directories = "5.0.1"
-eframe = { version = "0.28.1", features = ["persistence"] }
-egui = { version = "0.28.1", features = ["persistence", "serde", "deadlock_detection"] }
-egui_dock = { version = "0.13.0", features = ["serde"] }
-egui_extras = { version = "0.28.1", features = ["svg"] }
+directories = "6.0.0"
+eframe = { version = "0.31.1", features = ["persistence"] }
+egui = { version = "0.31.1", features = ["persistence", "serde", "deadlock_detection"] }
+egui_dock = { version = "0.16.0", features = ["serde"] }
+egui_extras = { version = "0.31.1", features = ["svg"] }
 hound = "3.5.1"
+# TODO: remove. Refactor to LazyCell
 lazy_static = "1.5.0"
 maplit = "1.0.2"
-nvml-wrapper = "0.10.0"
+nvml-wrapper = "0.11.0"
 realfft = "3.3.0"
-rfd = "0.14.1"
+rfd = "0.15.3"
+# TODO: get rid of external sdl2, should be in core crate
 sdl2 = {version = "0.37.0", features = ["static-link","bundled"]}
 serde = { version = "1.0.204", features = ["derive", "rc"] }
-strum = "0.26.3"
+strum = "0.27.1"
+# TODO: get rid of symphonia; use core crate api
 symphonia = { version = "0.5.4", features = ["opt-simd", "all-codecs"] }
 tokio = { version = "1.39.3", features = ["rt"] }
-whisper_realtime = { git = "https://github.com/jordan-clayton/whisper-realtime.git", version = "0.1.0", features = ["serde", "crossbeam", "strum"] }
+# TODO: determine whether or not to include integrity checking utilities; might be out of scope
+ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.1.1", features = ["serde", "crossbeam", "downloader", "symphonia-all"] }
 log = "0.4.22"
 arboard = "3.4.0"
-ron = "0.8.1"
+ron = "0.10.1"
 image = "0.25.2"
+# TODO: look at documentation, use for indeterminate progress bars.
+irox-egui-extras = "0.7.0"
+# TODO: Look into slab documentation, use for progress.
+slab = "0.4.9"
+parking_lot = { version = "0.12.4" , features = ["deadlock_detection"]}
 [target.x86_64-apple-darwin.dependencies]
-metal = "0.29.0"
+metal = "0.32.0"
+
+# TODO: benches to resolve performance questions re: visualizer
+[dev-dependencies]
+criterion = "0.6.0"
 
 [features]
 default = []
-_gpu = []
-cuda = ["whisper_realtime/cuda", "_gpu"]
-coreml = ["whisper_realtime/coreml", "_gpu"]
-metal = ["whisper_realtime/metal", "_gpu"]
-openblas = ["whisper_realtime/openblas"]
-opencl = ["whisper_realtime/opencl"]
-hipblas = ["whisper_realtime/hipblas", "_gpu"]
+cuda = ["ribble_whisper/cuda"]
+vulkan = ["ribble_whisper/vulkan"]
+# This implicitly pulls in metal as per ribble_whisper.
+coreml = ["ribble_whisper/coreml"]
+metal = ["ribble_whisper/metal"]
+openblas = ["ribble_whisper/openblas"]
+# This is linux-only, for ROCm/hipblas support
+hipblas = ["ribble_whisper/hipblas"]
