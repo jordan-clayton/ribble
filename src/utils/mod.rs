@@ -1,7 +1,3 @@
-use crate::utils::console_message::NewConsoleMessage;
-use crate::utils::errors::WhisperAppError;
-use crate::utils::progress::Progress;
-
 pub(crate) mod audio_analysis;
 pub(crate) mod console_message;
 pub(crate) mod constants;

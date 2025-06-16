@@ -36,6 +36,7 @@ pub const MAX_VAD_PROBABILITY: f32 = 0.9;
 // FFT CONSTANTS
 pub const FRAME_CONVERGENCE_ITERATIONS: usize = 1000;
 pub const FRAME_CONVERGENCE_TOLERANCE: usize = 2;
+// TODO: This should really be renamed.
 pub const NUM_BUCKETS: usize = 32;
 pub const SMOOTH_FACTOR: f32 = 8.0;
 

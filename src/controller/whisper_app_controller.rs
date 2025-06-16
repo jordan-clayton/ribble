@@ -58,6 +58,10 @@ use crate::{
 };
 
 // TODO: rewrite all of this; the current implementation has some major architectural problems that need revising.
+// MAJOR: Implement An EngineKernel trait, store this in a weakref in each of the engines so that the controller's internal state
+// (the kernel) can provide resources upon request in each of the engines.
+// Until an event loop becomes absolutely necessary, this is the cleanest and fastest way to go.
+
 // The following
 // Controller:
 // -> use a named inner instead of a tuple

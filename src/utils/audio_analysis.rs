@@ -24,7 +24,7 @@ lazy_static! {
 }
 
 // TODO: look over this code to try and see if there are glaring errors/opportunities to optimize.
-
+// TODO twice: this absolutely needs to be refactored -> return results wherever possible to propagate errors properly.
 #[atomic_enum]
 #[derive(PartialEq, EnumIter, Display)]
 pub enum AnalysisType {

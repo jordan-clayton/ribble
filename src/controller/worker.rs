@@ -6,13 +6,14 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-
+// TODO: remove these; they're unnecessary.
 // Types for returning output up to the controller to be pushed to its appropriate spot.
 type ConsoleCallback = Box<dyn Fn(NewConsoleMessage) + Send + Sync>;
 type TranscriptionCallback = Box<dyn Fn(String) + Send + Sync>;
 
 struct RibbleWorkerInner {
     incoming: Receiver<RibbleWorkerHandle>,
+    // TODO: refactor this to take a WeakRef to dyn EngineKernel
     on_console: Mutex<Option<ConsoleCallback>>,
     on_transcription_finish: Mutex<Option<TranscriptionCallback>>,
 }
