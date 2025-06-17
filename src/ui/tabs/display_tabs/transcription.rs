@@ -7,6 +7,15 @@ use crate::{
     utils::preferences,
 };
 
+// TODO: this will need refactoring -- here are some major notes to keep in mind.
+// The new backing API splits into confirmed (String) and segments (Vec<String>)
+// --CJK-aware breaking is not implemented yet AFAIK, so text-wrapping is... an unsolved problem
+// HOWEVER: it is wisest as far as this updated implementation goes, to break the confirmed string
+// into chunks for rendering. ie. split_whitespace(), group into chunks of n words, join(" "),
+// then render per chunks
+// *** It's worth it to look into unicode-linebreak to print at the "line" level, which might simplify the chunking logic anyway.
+
+// Treat the segments similarly: loop over the segments buffer and print the segments rather than joining.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TranscriptionTab {
     title: String,
@@ -93,8 +102,7 @@ impl tab_view::TabView for TranscriptionTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

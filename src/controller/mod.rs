@@ -1,8 +1,9 @@
-use std::thread::JoinHandle;
 use crate::utils::console_message::NewConsoleMessage;
 use crate::utils::errors::WhisperAppError;
 use crate::utils::progress::Progress;
+use std::thread::JoinHandle;
 
+// TODO: remove these excess utils; most of them are not necessary for the application.
 pub(crate) mod utils;
 pub(crate) mod whisper_app_controller;
 

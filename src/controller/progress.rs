@@ -29,7 +29,7 @@ impl ProgressEngine {
     pub(crate) fn remove_progress_job(&self, id: usize) {
         self.current_jobs.write().remove(id);
     }
-    pub(crate) fn get_current_jobs(&self, copy_buffer: &mut Vec<Progress>) {
+    pub(crate) fn try_get_current_jobs(&self, copy_buffer: &mut Vec<Progress>) {
         if let Some(jobs) = self.current_jobs.try_read() {
             copy_buffer.clear();
             copy_buffer.extend(jobs.iter().cloned())

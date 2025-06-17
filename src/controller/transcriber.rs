@@ -1,26 +1,28 @@
 use crate::controller::kernel::EngineKernel;
+use crate::controller::visualizer::AnalysisType;
 use crate::controller::{RibbleMessage, RibbleWorkerHandle};
 use crate::utils::audio_analysis::{
-    AnalysisType, bandpass_filter, frequency_analysis, normalized_waveform, power_analysis,
+    bandpass_filter, frequency_analysis, normalized_waveform, power_analysis,
 };
+use crate::utils::console_message::NewConsoleMessage;
 use crate::utils::constants::{APP_ID, NUM_BUCKETS};
 use crate::utils::file_mgmt::{get_tmp_file_writer, write_audio_sample};
 use crate::utils::progress::Progress;
 use crossbeam::channel::TrySendError;
 use crossbeam::scope;
 use hound::{SampleFormat, WavSpec};
-use parking_lot::{Mutex, RwLock};
-use ribble_whisper::audio::AudioChannelConfiguration;
+use parking_lot::RwLock;
 use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
 use ribble_whisper::audio::loading::load_normalized_audio_file;
 use ribble_whisper::audio::microphone::{FanoutMicCapture, MicCapture};
 use ribble_whisper::audio::recorder::UseArc;
+use ribble_whisper::audio::AudioChannelConfiguration;
 use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
 use ribble_whisper::transcriber::vad::Silero;
 use ribble_whisper::transcriber::{
-    CallbackTranscriber, Transcriber, WhisperCallbacks, WhisperControlPhrase, WhisperOutput,
-    redirect_whisper_logging_to_hooks,
+    redirect_whisper_logging_to_hooks, CallbackTranscriber, Transcriber, WhisperCallbacks, WhisperControlPhrase,
+    WhisperOutput,
 };
 use ribble_whisper::utils::callback::StaticProgressCallback;
 use ribble_whisper::utils::constants::{INPUT_BUFFER_CAPACITY, WHISPER_SAMPLE_RATE};
@@ -31,28 +33,38 @@ use std::ops::DerefMut;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
+
+// TODO: if there's noticeable contention, update ribble_whisper to return snapshots and look into ArcSwap
+// ArcSwap can function as a channel to cheaply handle reads/writes and would minimize any contention whatsoever.
+// In the meantime, go with the current implementation and log the hits/misses -- possibly time it.
+
+// TODO twice: ArcSwap + Snapshotting is more than likely the way to go here, so come back and re-implement (and update ribble_whisper).
+
 struct TranscriberState {
     // At the moment, going with a kernel model to avoid the overhead of an event loop.
     // This handle lets the TranscriberEngine ask for resources from the kernel and report data to it.
     engine_kernel: Weak<dyn EngineKernel>,
+    // Configs need to stay RwLocks -> the UI paint loop gets to hog the write lock; reading happens very infrequently and can likely tolerate not having the lock for a while.
+    // Since the app gets serialized on exit (provided no crashing), and the serialization happens on a background thread, so it shouldn't be too noticeable.
     realtime_configs: RwLock<WhisperRealtimeConfigs>,
     offline_configs: RwLock<WhisperConfigsV2>,
     realtime_running: Arc<AtomicBool>,
     offline_running: Arc<AtomicBool>,
-    current_transcription: Mutex<String>,
-    current_segments: Mutex<Vec<String>>,
-    current_control_phrase: Mutex<WhisperControlPhrase>, // TODO: latest_control_phrase + Accessors; needs to be mutex/rwlock protected
+    current_transcription: RwLock<String>,
+    current_segments: RwLock<Vec<String>>,
+    current_control_phrase: RwLock<WhisperControlPhrase>, // TODO: latest_control_phrase + Accessors; needs to be mutex/rwlock protected
 }
 
 impl TranscriberState {
+    // TODO: possibly rewrite this -- it's a little gnarly.
     fn clear_transcription(&self) {
-        let current = self.current_transcription.lock();
+        let current = self.current_transcription.write();
         *current = String::new();
         drop(current);
-        let segments = self.current_segments.lock();
+        let segments = self.current_segments.write();
         *segments = vec![];
         drop(segments);
-        let control = self.current_control_phrase.lock();
+        let control = self.current_control_phrase.write();
         *control = WhisperControlPhrase::GettingReady;
         drop(control);
     }
@@ -72,10 +84,10 @@ impl TranscriberEngine {
         let offline_running = Arc::new(AtomicBool::new(false));
         let realtime_configs = RwLock::new(realtime_configs);
         let offline_configs = RwLock::new(offline_configs);
-        let current_transcription = Mutex::new(String::new());
-        let current_segments = Mutex::new(Vec::<String>::new());
+        let current_transcription = RwLock::new(String::new());
+        let current_segments = RwLock::new(Vec::<String>::new());
         // NOTE TO SELF: there should probably be an "IDLE" in WhisperControlPhrase::*
-        let current_control_phrase = Mutex::new(WhisperControlPhrase::GettingReady);
+        let current_control_phrase = RwLock::new(WhisperControlPhrase::GettingReady);
 
         let inner = Arc::new(TranscriberState {
             engine_kernel: Weak::new(),
@@ -138,16 +150,34 @@ impl TranscriberEngine {
         self.inner.offline_configs.read().clone()
     }
 
+    pub(crate) fn try_read_transcription_snapshot(&self, copy_confirmed: &mut String, copy_segments: &mut Vec<String>) {
+        // Only perform the update if it's possible to get -both-
+        // TODO: as noted above -- this should be swapped out for an ArcSwap implementation
+        if let (Some(confirmed), Some(segments)) = (self.inner.current_transcription.try_read(), self.inner.current_segments.try_read()) {
+            // Consider this in-progress. I assume these operations will be as fast as they can be and faster than
+            // clear + push_str & manual resize + memcpy.
+            *copy_confirmed = confirmed.clone();
+            *copy_segments = segments.clone();
+        }
+    }
+    pub(crate) fn try_read_latest_control(&self, copy_control: &mut WhisperControlPhrase) {
+        // TODO: ibid re: ArcSwap.
+        if let Some(message) = self.inner.current_control_phrase.try_read() {
+            *copy_control = WhisperControlPhrase::GettingReady;
+        }
+    }
+
+    // TODO: clean up this code; it's looking a little gnarly
     pub(crate) fn finalize_transcription(&self, final_transcription: String) {
-        let current = self.inner.current_transcription.lock();
+        let current = self.inner.current_transcription.write();
         *current = final_transcription;
         drop(current);
         // Clear the working segments - they're joined in the final transcription
-        let segments = self.inner.current_segments.lock();
+        let segments = self.inner.current_segments.write();
         *segments = vec![];
         drop(segments);
         // Set the control phrase to "GETTING READY", really should be IDLE.
-        let control = self.inner.current_control_phrase.lock();
+        let control = self.inner.current_control_phrase.write();
         *control = WhisperControlPhrase::GettingReady;
         drop(control);
     }
@@ -191,8 +221,11 @@ impl TranscriberEngine {
             let audio_ring_buffer = AudioRingBuffer::<f32>::default();
             // Audio fanout channels
             let (audio_sender, audio_receiver) = get_channel::<Arc<[f32]>>(INPUT_BUFFER_CAPACITY);
+            // TODO: remove this fft_sender once the logic has been migrated over to the VisualizerEngine.
             let (fft_sender, fft_receiver) = get_channel::<Arc<[f32]>>(INPUT_BUFFER_CAPACITY);
+            // TODO: make a writer request to the kernel and send this receiver.
             let (write_sender, write_receiver) = get_channel::<Arc<[f32]>>(INPUT_BUFFER_CAPACITY);
+
             // Transcription channels
             let (text_sender, text_receiver) = get_channel(INPUT_BUFFER_CAPACITY);
             // TODO: Handle actual vad configurations; these should be exposed sooomewhere.
@@ -215,8 +248,6 @@ impl TranscriberEngine {
                 .with_voice_activity_detector(vad)
                 .build()?;
 
-            // Get the visualizer flag
-            let visualizer_running = kernel.visualizer_running_flag();
             // Send a clone of the kernel to the scoped thread
             let scoped_kernel = Arc::clone(&kernel);
 
@@ -229,7 +260,6 @@ impl TranscriberEngine {
                 let p_thread_run_transcription = Arc::clone(&thread_inner.realtime_running);
                 // Visualizer runner flag
                 let v_thread_run_transcription = Arc::clone(&thread_inner.realtime_running);
-                let vis_running = Arc::clone(&visualizer_running);
                 // Write thread runner flag
                 let w_thread_run_transcription = Arc::clone(&thread_inner.realtime_running);
 
@@ -238,6 +268,10 @@ impl TranscriberEngine {
 
                 // Close the "Setup" progress job
                 scoped_kernel.remove_progress_job(setup_id);
+                // Get a kernel handle for the audio thread
+                let audio_scoped_kernel = Arc::clone(&scoped_kernel);
+                // Get a kernel handle for the visualizer thread
+                let visualizer_scoped_kernel = Arc::clone(&scoped_kernel);
 
                 // Start the mic feed
                 mic.play();
@@ -270,6 +304,10 @@ impl TranscriberEngine {
                                 audio_ring_buffer.push_audio(&audio);
                                 // Fan data out to the write thread and the FFT thread
 
+                                // TODO: Come back to this once the writer impl has been refactored to request from the kernel.
+                                // This should definitely still write to the message queue,
+                                // so this probably won't need to change,
+                                // but it might have some subtleties that need to be addressed.
                                 // If the writer thread receiver is disconnected, the transcription is
                                 // most likely finished and state needs to be synchronized.
                                 // If it's full, just skip and accept there might be hiccups in the
@@ -280,9 +318,11 @@ impl TranscriberEngine {
                                     a_thread_run_transcription.store(false, Ordering::Release);
                                 }
 
+                                // TODO: get rid of these once the implementations (writer, visualizer) are finished.
+                                // Just use the kernel to pass data over to the visualizer so it can decide what to do with the data.
                                 // If the visualizer is running, fan data out to the FFT processing
                                 // thread.
-                                if !vis_running.load(Ordering::Acquire) {
+                                if !audio_scoped_kernel.visualizer_running() {
                                     continue;
                                 }
 
@@ -301,6 +341,9 @@ impl TranscriberEngine {
                     // TODO: refactor this--it's not ideal. This should instead, be an enum (AudioSignal::Stop vs AudioSignal::Data(Arc<[T]>));
                     // The print thread will always terminate because the transcriber will
                     // deallocate the channel once its transcription has stopped, so no need for monads/sentinels
+                    // TODO twice: These are most likely unnecessary and are an artifact from the old implementation
+                    // I've brought them here from the old implementation and they should be unnecessary -->
+                    // The old implementation had pre-allocated message queues (which is unnecessary); these shouldn't suffer that problem and are likely to return a TrySendError.
                     let empty_buffer = Arc::from(&[][..]);
                     let _ = fft_sender.try_send(Arc::clone(&empty_buffer));
                     let _ = write_sender.try_send(Arc::clone(&empty_buffer));
@@ -316,18 +359,18 @@ impl TranscriberEngine {
                                     WhisperOutput::ConfirmedTranscription(confirmed) => {
                                         // Update the confirmed transcription part
                                         let confirmed_guard =
-                                            print_thread_inner.current_transcription.lock();
+                                            print_thread_inner.current_transcription.write();
                                         *confirmed_guard = confirmed;
                                     }
                                     WhisperOutput::CurrentSegments(segments) => {
                                         // Update the copy of the working set of segments
                                         let segments_guard =
-                                            print_thread_inner.current_segments.lock();
+                                            print_thread_inner.current_segments.write();
                                         *segments_guard = segments;
                                     }
                                     WhisperOutput::ControlPhrase(control) => {
                                         let control_guard =
-                                            print_thread_inner.current_control_phrase.lock();
+                                            print_thread_inner.current_control_phrase.write();
                                         *control_guard = control;
                                     }
                                 }
@@ -338,8 +381,10 @@ impl TranscriberEngine {
                         }
                     }
                 });
+                // TODO IMPORTANT: Get this out of here and move it to where it makes sense to live.
+                // Like, the kernel, lol.
+                // TODO: once kernel implementation is completed (i.e. this code has been properly migrated), make the appropriate kernel request.
                 let _write_thread = s.spawn(move || {
-                    // TODO: writer setup
                     // TODO: twice: this utility method needs to be retired and replaced with something better.
                     // This should also probably be abstracted away a bit more -> Hound really should be buried.
                     // Also, there need to be hooks for errors so these can bubble-up a bit more easily.
@@ -393,6 +438,8 @@ impl TranscriberEngine {
                     let _ = writer.finalize();
                     // NOTE TO SELF: It might be of interest to include an extra log here when testing out the new implementation.
                 });
+
+                // TODO: this is out of scope -> refactor to the visualizer thread to reduce the coupling.
                 let _visualizer_thread = s.spawn(move || {
                     // Preallocate a buffer for storing the latest computation
                     // This will get passed to the kernel to update the visualizer engine.
@@ -406,7 +453,7 @@ impl TranscriberEngine {
                                 }
 
                                 // Get the current Analysis type from the kernel
-                                let analysis_type = scoped_kernel.get_visualizer_analysis_type();
+                                let analysis_type = visualizer_scoped_kernel.get_visualizer_analysis_type();
                                 match analysis_type {
                                     AnalysisType::Waveform => {
                                         normalized_waveform(&sample, &mut buffer);
@@ -429,7 +476,7 @@ impl TranscriberEngine {
                         }
 
                         // Update the visualizer via the kernel.
-                        scoped_kernel.update_visualizer(&buffer);
+                        visualizer_scoped_kernel.update_visualizer_data(&buffer);
                     }
                 });
 
@@ -439,6 +486,12 @@ impl TranscriberEngine {
                 Ok(RibbleMessage::TranscriptionOutput(res))
             })?;
             mic.pause();
+
+            // Send an info message to the console to alert the user that the transcription loop
+            // has completed.
+            let message = String::from("Finished real-time transcription.");
+            let console_message = NewConsoleMessage::Status(message);
+            kernel.send_console_message(console_message);
             result
         });
         worker
@@ -474,6 +527,7 @@ impl TranscriberEngine {
                             .to_string(),
                     ))?;
 
+            // Prep a handle to the kernel to send to the callback.
             let callback_kernel = Arc::clone(&kernel);
             // NOTE TO SELF: the callback API in the audio loading doesn't currently have a way
             // to get the number of samples...
@@ -490,8 +544,7 @@ impl TranscriberEngine {
             // Remove the progress job now that transcription is finished.
             kernel.remove_progress_job(load_audio_id);
             // Set up the offline_transcriber
-            // TODO: determine whether or not it's desired to set an on new segment
-            // callback/print thread to send out and receive data.
+            // TODO: determine whether or not it's desired to set an on new segment callback/print thread to send out and receive data.
             // I'm not 100% sold on it.
             let (sender, receiver) = get_channel(INPUT_BUFFER_CAPACITY);
             let mut offline_transcriber = OfflineTranscriberBuilder::new()
@@ -542,18 +595,18 @@ impl TranscriberEngine {
                                     WhisperOutput::ConfirmedTranscription(confirmed) => {
                                         // Update the confirmed transcription part
                                         let confirmed_guard =
-                                            print_thread_inner.current_transcription.lock();
+                                            print_thread_inner.current_transcription.write();
                                         *confirmed_guard = confirmed;
                                     }
                                     WhisperOutput::CurrentSegments(segments) => {
                                         // Update the copy of the working set of segments
                                         let segments_guard =
-                                            print_thread_inner.current_segments.lock();
+                                            print_thread_inner.current_segments.write();
                                         *segments_guard = segments;
                                     }
                                     WhisperOutput::ControlPhrase(control) => {
                                         let control_guard =
-                                            print_thread_inner.current_control_phrase.lock();
+                                            print_thread_inner.current_control_phrase.write();
                                         *control_guard = control;
                                     }
                                 }
@@ -570,6 +623,10 @@ impl TranscriberEngine {
                 })??;
                 Ok(RibbleMessage::TranscriptionOutput(res))
             })?;
+            // Send a message to the console before returning the result.
+            let message = format!("Finished transcribing: {}", audio_file_path);
+            let console_message = NewConsoleMessage::Status(message);
+            kernel.send_console_message(console_message);
             result
         });
         worker

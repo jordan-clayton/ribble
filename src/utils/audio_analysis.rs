@@ -3,7 +3,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use atomic_enum::atomic_enum;
 use biquad::{Biquad, Coefficients, DirectForm2Transposed, ToHertz, Type, Q_BUTTERWORTH_F32};
 use lazy_static::lazy_static;
 use realfft::{
@@ -11,7 +10,6 @@ use realfft::{
     num_traits::{Bounded, FromPrimitive, NumCast, ToPrimitive, Zero},
     RealFftPlanner, RealToComplex,
 };
-use strum::{Display, EnumIter};
 
 use crate::utils::{
     constants,
@@ -25,32 +23,6 @@ lazy_static! {
 
 // TODO: look over this code to try and see if there are glaring errors/opportunities to optimize.
 // TODO twice: this absolutely needs to be refactored -> return results wherever possible to propagate errors properly.
-#[atomic_enum]
-#[derive(PartialEq, EnumIter, Display)]
-pub enum AnalysisType {
-    Waveform = 0,
-    Power,
-    #[strum(to_string = "Spectrum Density")]
-    SpectrumDensity,
-}
-
-impl AnalysisType {
-    pub fn rotate_clockwise(&self) -> Self {
-        match self {
-            AnalysisType::Waveform => AnalysisType::Power,
-            AnalysisType::Power => AnalysisType::SpectrumDensity,
-            AnalysisType::SpectrumDensity => AnalysisType::Waveform,
-        }
-    }
-
-    pub fn rotate_counterclockwise(&self) -> Self {
-        match self {
-            AnalysisType::Waveform => AnalysisType::SpectrumDensity,
-            AnalysisType::Power => AnalysisType::Waveform,
-            AnalysisType::SpectrumDensity => AnalysisType::Power,
-        }
-    }
-}
 
 fn apply_gain(samples: &mut [f32], gain: f32) {
     for sample in samples.iter_mut() {
@@ -182,7 +154,7 @@ pub fn power_analysis(samples: &[f32], result: &mut [f32; constants::NUM_BUCKETS
         None,
         None,
     )
-    .expect("Failed to build frames");
+        .expect("Failed to build frames");
 
     // Init FFT
     let mut planner = FFT_PLANNER.lock().expect("Failed to get FFT Planner mutex");
