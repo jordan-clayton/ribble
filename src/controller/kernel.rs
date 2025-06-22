@@ -1,12 +1,13 @@
 use crate::controller::console::ConsoleEngine;
+use crate::controller::console::ConsoleMessage;
+use crate::controller::progress::Progress;
 use crate::controller::progress::ProgressEngine;
 use crate::controller::recorder::RecorderEngine;
 use crate::controller::transcriber::TranscriberEngine;
 use crate::controller::visualizer::{AnalysisType, VisualizerEngine};
-use crate::controller::worker::RibbleWorkerEngine;
-use crate::utils::console_message::NewConsoleMessage;
-use crate::utils::errors::WhisperAppError;
-use crate::utils::progress::Progress;
+use crate::controller::worker::WorkerEngine;
+use crate::utils::errors::RibbleAppError;
+use crate::utils::pcm_f32::IntoPcmF32;
 use crossbeam::channel::Receiver;
 use ribble_whisper::audio::microphone::AudioBackend;
 use std::path::Path;
@@ -27,27 +28,34 @@ pub trait EngineKernel: Send + Sync {
 
     // TODO: this might need a trait-bound--revisit once the RecordingEngine is finished
     // TODO: The error type needs to change once errors are refactored
-    fn request_writer<T>(&self, audio_stream: Receiver<Arc<[T]>>, path: &Path) -> Result<(), WhisperAppError>;
+    // TODO: Integer/Floating point -> not sure how best to handle -> possibly use the trait bound,
+    // Or: Make VisualizerSample into just a Sample -> not entirely sure
+    // Might be easiest to just send a RecorderConfigs or similar.
+    fn request_writer<T>(&self, audio_stream: Receiver<Arc<[T]>>, path: &Path) -> Result<(), RibbleAppError>;
     fn add_progress_job(&self, job: Progress) -> usize;
     fn update_progress_job(&self, id: usize, delta: u64);
     fn remove_progress_job(&self, id: usize);
-    fn send_console_message(&self, message: NewConsoleMessage);
+    fn send_console_message(&self, message: ConsoleMessage);
     fn finalize_transcription(&self, transcription: String);
     // TODO: this likely should not be exposed--> I don't see a use for it that doesn't indicate a coupling problem.
     // For now, leave it.
     fn visualizer_running(&self) -> bool;
-    fn update_visualizer_data(&self, buffer: &[f32]);
+    fn update_visualizer_data<T: IntoPcmF32>(&self, buffer: Arc<[T]>, sample_rate: f64);
 
     // TODO: this likely should not be exposed--> I don't see a use for it that doesn't indicate a coupling problem.
     // For now, leave it.
     fn get_visualizer_analysis_type(&self) -> AnalysisType;
+    // TODO: possibly add a "fatal"/abort app mechanism for "unrecoverable" or "should be unrecoverable" errors.
+    // If any background threads are panicking, there's an implementation error.
+    // In this instance, the app should probably crash because important work can no longer be done.
+
+    fn cleanup_progress_jobs(&self, ids: &[usize]);
 }
 
 // TODO: NOTE TO SELF, store this in the controller instead of the old spaghetti.
-// The spaghetti is now portioned onto different plates, so to speak, so that the complexity
-// becomes a little easier to reason about.
-// TODO: Consider implementing a DownloadEngine to bury the implementation.
-// TODO: Ibid if bringing in integrity-checking.
+// The spaghetti is now portioned onto different plates, to make things easier to manage.
+// TODO: Consider implementing a DownloadEngine to bury the implementation. -> It might be sufficient to just keep that in the controller & send to the WorkerEngine.
+// TODO: Ibid if bringing in integrity-checking
 // NOTE: if it becomes absolutely necessary (e.g. testing), factor the engine components out into traits.
 // The EngineKernel is mockable, but the Engine components are not (yet).
 pub struct Kernel {
@@ -59,12 +67,12 @@ pub struct Kernel {
     console_engine: ConsoleEngine,
     progress_engine: ProgressEngine,
     visualizer_engine: VisualizerEngine,
-    worker_engine: RibbleWorkerEngine,
+    worker_engine: WorkerEngine,
 }
 
 // TODO: implement trait
 // NOTE: most of these are blocking calls (as of now with concrete components).
-// Anything that involves writing involves trying to grab a write lock.
+// Anything that involves writing is almost guaranteed to involve trying to grab a write lock.
 impl EngineKernel for Kernel {
     fn get_vad_config(&self) {
         todo!()
@@ -81,11 +89,10 @@ impl EngineKernel for Kernel {
     fn get_audio_backend(&self) -> &AudioBackend {
         &self.audio_backend
     }
-
-    fn request_writer<T>(&self, audio_stream: Receiver<Arc<[T]>>, path: &Path) -> Result<(), WhisperAppError> {
+    fn request_writer<T>(&self, audio_stream: Receiver<Arc<[T]>>, path: &Path) -> Result<(), RibbleAppError> {
         todo!("Implement kernel method that handles this request")
         // NOTE TO SELF: migrate the _write_thread from the TranscriberEngine scoped thread loop
-        // to a kernel method that spawns a joinhandle.
+        // to a kernel method that spawns a joinhandle to send to the WorkerEngine.
     }
 
     fn add_progress_job(&self, job: Progress) -> usize {
@@ -100,7 +107,7 @@ impl EngineKernel for Kernel {
         self.progress_engine.remove_progress_job(id);
     }
 
-    fn send_console_message(&self, message: NewConsoleMessage) {
+    fn send_console_message(&self, message: ConsoleMessage) {
         self.console_engine.add_console_message(message);
     }
 
@@ -112,12 +119,18 @@ impl EngineKernel for Kernel {
         self.visualizer_engine.visualizer_running()
     }
 
-    fn update_visualizer_data(&self, buffer: &[f32]) {
-        self.visualizer_engine.update_visualizer_data(buffer);
+    fn update_visualizer_data<T: IntoPcmF32>(&self, buffer: Arc<[T]>, sample_rate: f64) {
+        self.visualizer_engine.update_visualizer_data(buffer, sample_rate);
     }
 
 
     fn get_visualizer_analysis_type(&self) -> AnalysisType {
         self.visualizer_engine.get_visualizer_analysis_type()
+    }
+
+    fn cleanup_progress_jobs(&self, ids: &[usize]) {
+        for id in ids {
+            self.progress_engine.remove_progress_job(*id);
+        }
     }
 }

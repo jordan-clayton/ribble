@@ -420,6 +420,7 @@ pub fn save_transcription(
     Ok(())
 }
 
+// TODO: move this logic to the kernel -> also, wtf, no callback.
 pub fn write_audio_sample<T: Sample + Clone>(
     sample: &[T],
     writer: &mut WavWriter<BufWriter<File>>,

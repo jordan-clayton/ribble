@@ -6,6 +6,7 @@ use eframe::Storage;
 use egui::{Event, Key, ViewportCommand, Visuals};
 use egui_dock::{DockArea, DockState, NodeIndex, Style, SurfaceIndex, TabIndex};
 
+use crate::controller::console::ConsoleMessage;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::{
@@ -15,7 +16,7 @@ use crate::{
         whisper_tab::{FocusTab, WhisperTab},
     },
     utils::{
-        console_message::{ConsoleMessage, ConsoleMessageType},
+        console_message::ConsoleMessageType,
         errors::WhisperAppError,
         file_mgmt::{load_app_state, save_app_state},
         preferences,

@@ -2,6 +2,7 @@ use strum::{Display, EnumIter};
 
 use crate::utils::constants;
 
+// TODO: refactor these and clean up -> but likely worth keeping.
 #[derive(
     Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter,
 )]
@@ -113,6 +114,8 @@ impl Default for BufferSize {
         Self::Default
     }
 }
+
+// TODO: rethink this & move to RecorderEngine.
 
 #[derive(Copy, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RecorderConfigs {

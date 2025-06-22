@@ -1,8 +1,5 @@
 use eframe::epaint::text::TextWrapMode;
-use egui::{
-    Align, CentralPanel, FontId, Frame, Layout, RichText, Sense, TextStyle, TopBottomPanel, Ui,
-    WidgetText,
-};
+use egui::{lerp, Align, CentralPanel, FontId, Frame, Layout, RichText, Sense, TextStyle, TopBottomPanel, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 use strum::IntoEnumIterator;
 
@@ -13,7 +10,7 @@ use crate::{
         widgets::{fft_visualizer::draw_fft, toggle_switch::toggle},
     },
     utils::{
-        audio_analysis::{smoothing, AnalysisType},
+        audio_analysis::AnalysisType,
         constants, preferences,
     },
 };
@@ -90,8 +87,12 @@ impl tab_view::TabView for VisualizerTab {
 
         // Get the frame time.
         let dt = ui.ctx().input(|i| i.stable_dt);
-        // Smooth the current position towards tgt
-        smoothing(current, target, dt);
+        // Smooth the current position towards tgt -- there's no need for the separate fn
+        for (i, sample) in current.iter_mut().enumerate() {
+            *sample = lerp(*sample..=target[i], dt);
+            // Target should never be Nan/Inf -> this is checked for in the VisualizerEngine
+        }
+        //smoothing(current, target, dt);
 
         // Force a repaint if the amplitudes are not zero.
         if current.iter().any(|f| *f >= f32::EPSILON) {
@@ -156,8 +157,7 @@ impl tab_view::TabView for VisualizerTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

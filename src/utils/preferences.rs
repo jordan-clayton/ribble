@@ -1,3 +1,4 @@
+// TODO: This needs refactoring & also is probably a good spot for "UserPreferences.".
 pub fn get_app_theme(system_theme: Option<eframe::Theme>) -> catppuccin_egui::Theme {
     match system_theme {
         None => catppuccin_egui::MOCHA,

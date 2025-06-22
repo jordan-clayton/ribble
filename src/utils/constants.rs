@@ -54,8 +54,10 @@ pub const VISUALIZER_MAX_HEIGHT_PROPORTION: f32 = 0.90;
 pub const VISUALIZER_MIN_HEIGHT_PROPORTION: f32 = 0.10;
 pub const VISUALIZER_MAX_WIDTH: f32 = 16.0;
 pub const VISUALIZER_MIN_WIDTH: f32 = 8.0;
-pub const FFT_GAIN: f32 = 30.0;
-pub const WAVEFORM_GAIN: f32 = FFT_GAIN / 2.0;
+pub const POWER_OVERLAP: f32 = 0.5;
+pub const AMPLITUDE_OVERLAP: f32 = 0.25;
+pub const POWER_GAIN: f32 = 30.0;
+pub const WAVEFORM_GAIN: f32 = POWER_GAIN / 2.0;
 
 // TODO: look into what the heck these things are doing/for
 pub const TREE_KEY: &str = "Tree";
@@ -192,6 +194,7 @@ lazy_static::lazy_static! {
         "Cantonese" => Some(String::from("yue")),
     };
 
+    // TODO: remove this
     pub static ref LANGUAGE_CODES: std::collections::HashMap<Option<String>, &'static str> = maplit::hashmap!{
         None => "Auto",
         Some(String::from("en")) => "English",

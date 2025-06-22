@@ -1,19 +1,19 @@
+use crate::controller::console::ConsoleMessage;
 use crate::controller::kernel::EngineKernel;
-use crate::controller::visualizer::AnalysisType;
+use crate::controller::progress::Progress;
 use crate::controller::{RibbleMessage, RibbleWorkerHandle};
-use crate::utils::audio_analysis::{
-    bandpass_filter, frequency_analysis, normalized_waveform, power_analysis,
-};
-use crate::utils::console_message::NewConsoleMessage;
-use crate::utils::constants::{APP_ID, NUM_BUCKETS};
+use crate::utils::audio_analysis::bandpass_filter;
+use crate::utils::constants::APP_ID;
+use crate::utils::errors::RibbleError;
 use crate::utils::file_mgmt::{get_tmp_file_writer, write_audio_sample};
-use crate::utils::progress::Progress;
-use crossbeam::channel::TrySendError;
+use arc_swap::ArcSwap;
+use atomic_enum::atomic_enum;
+use crossbeam::channel::{Receiver, TrySendError};
 use crossbeam::scope;
+use crossbeam::thread::{Scope, ScopedJoinHandle};
 use hound::{SampleFormat, WavSpec};
-use parking_lot::RwLock;
 use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
-use ribble_whisper::audio::loading::load_normalized_audio_file;
+use ribble_whisper::audio::loading::{audio_file_num_frames, load_normalized_audio_file};
 use ribble_whisper::audio::microphone::{FanoutMicCapture, MicCapture};
 use ribble_whisper::audio::recorder::UseArc;
 use ribble_whisper::audio::AudioChannelConfiguration;
@@ -21,73 +21,108 @@ use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
 use ribble_whisper::transcriber::vad::Silero;
 use ribble_whisper::transcriber::{
-    redirect_whisper_logging_to_hooks, CallbackTranscriber, Transcriber, WhisperCallbacks, WhisperControlPhrase,
-    WhisperOutput,
+    redirect_whisper_logging_to_hooks, CallbackTranscriber, Transcriber, TranscriptionSnapshot,
+    WhisperCallbacks, WhisperControlPhrase, WhisperOutput,
 };
-use ribble_whisper::utils::callback::StaticProgressCallback;
+use ribble_whisper::utils::callback::StaticRibbleWhisperCallback;
 use ribble_whisper::utils::constants::{INPUT_BUFFER_CAPACITY, WHISPER_SAMPLE_RATE};
 use ribble_whisper::utils::errors::RibbleWhisperError;
 use ribble_whisper::utils::get_channel;
 use ribble_whisper::whisper::configs::{WhisperConfigsV2, WhisperRealtimeConfigs};
-use std::ops::DerefMut;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
-
-// TODO: if there's noticeable contention, update ribble_whisper to return snapshots and look into ArcSwap
-// ArcSwap can function as a channel to cheaply handle reads/writes and would minimize any contention whatsoever.
-// In the meantime, go with the current implementation and log the hits/misses -- possibly time it.
-
-// TODO twice: ArcSwap + Snapshotting is more than likely the way to go here, so come back and re-implement (and update ribble_whisper).
+// Minimal: progress bar only (fastest)
+// Progressive: progress bar + snapshotting when new segments are decoded.
+// TODO: this might be better to move somewhere else.
+#[atomic_enum]
+#[repr(C)]
+pub(crate) enum OfflineTranscriberFeedback {
+    Minimal,
+    Progressive,
+}
 
 struct TranscriberState {
-    // At the moment, going with a kernel model to avoid the overhead of an event loop.
-    // This handle lets the TranscriberEngine ask for resources from the kernel and report data to it.
+    // Handle for interfacing with the kernel
     engine_kernel: Weak<dyn EngineKernel>,
-    // Configs need to stay RwLocks -> the UI paint loop gets to hog the write lock; reading happens very infrequently and can likely tolerate not having the lock for a while.
-    // Since the app gets serialized on exit (provided no crashing), and the serialization happens on a background thread, so it shouldn't be too noticeable.
-    realtime_configs: RwLock<WhisperRealtimeConfigs>,
-    offline_configs: RwLock<WhisperConfigsV2>,
+    // TODO: refactor configs impl in ribble_whisper.
+    realtime_configs: ArcSwap<WhisperRealtimeConfigs>,
+    offline_configs: ArcSwap<WhisperConfigsV2>,
     realtime_running: Arc<AtomicBool>,
     offline_running: Arc<AtomicBool>,
-    current_transcription: RwLock<String>,
-    current_segments: RwLock<Vec<String>>,
-    current_control_phrase: RwLock<WhisperControlPhrase>, // TODO: latest_control_phrase + Accessors; needs to be mutex/rwlock protected
+    offline_transcriber_feedback: Arc<AtomicOfflineTranscriberFeedback>,
+    current_snapshot: ArcSwap<TranscriptionSnapshot>,
+    current_control_phrase: ArcSwap<WhisperControlPhrase>,
 }
 
 impl TranscriberState {
-    // TODO: possibly rewrite this -- it's a little gnarly.
     fn clear_transcription(&self) {
-        let current = self.current_transcription.write();
-        *current = String::new();
-        drop(current);
-        let segments = self.current_segments.write();
-        *segments = vec![];
-        drop(segments);
-        let control = self.current_control_phrase.write();
-        *control = WhisperControlPhrase::GettingReady;
-        drop(control);
+        self.current_snapshot
+            .store(Arc::new(TranscriptionSnapshot::default()));
+        // TODO: implement default in whisper_rs -> needs an IDLE.
+        self.current_control_phrase
+            .store(Arc::new(WhisperControlPhrase::GettingReady))
     }
 }
 
-pub struct TranscriberEngine {
+// This is not strictly necessary, but it's more explicit than a boolean.
+enum TranscriptionType {
+    Realtime,
+    Offline,
+}
+impl TranscriberState {
+    fn print_loop<'scope>(
+        &self,
+        scope: &'scope Scope,
+        text_receiver: Receiver<WhisperOutput>,
+        transcription_type: TranscriptionType,
+    ) -> ScopedJoinHandle<'scope, ()> {
+        let running = match transcription_type {
+            TranscriptionType::Realtime => Arc::clone(&self.realtime_running),
+            TranscriptionType::Offline => Arc::clone(&self.offline_running),
+        };
+        scope.spawn(move || {
+            while running.load(Ordering::Acquire) {
+                match text_receiver.recv() {
+                    Ok(output) => match output {
+                        WhisperOutput::TranscriptionSnapshot(snapshot) => {
+                            self.current_snapshot.store(Arc::clone(&snapshot));
+                        }
+                        WhisperOutput::ControlPhrase(control) => {
+                            self.current_control_phrase.store(Arc::new(control));
+                        }
+                    },
+                    Err(_) => {
+                        running.store(false, Ordering::Release);
+                    }
+                }
+            }
+        })
+    }
+}
+
+// TODO: change this if and only if crate-visibility is required
+pub(super) struct TranscriberEngine {
     inner: Arc<TranscriberState>,
 }
 
 impl TranscriberEngine {
     // These get passed in upon construction; they should be serialized separately.
-    pub(crate) fn new(
+    pub(super) fn new(
         realtime_configs: WhisperRealtimeConfigs,
         offline_configs: WhisperConfigsV2,
+        // TODO: Revisit this once the controller implementation is further along ->
+        // might be better to just default this and set later in the initialization step.
+        // Might also be able to get away with its non-atomic equivalent re: serialization.
+        offline_transcriber_feedback: AtomicOfflineTranscriberFeedback,
     ) -> Self {
         let realtime_running = Arc::new(AtomicBool::new(false));
         let offline_running = Arc::new(AtomicBool::new(false));
-        let realtime_configs = RwLock::new(realtime_configs);
-        let offline_configs = RwLock::new(offline_configs);
-        let current_transcription = RwLock::new(String::new());
-        let current_segments = RwLock::new(Vec::<String>::new());
-        // NOTE TO SELF: there should probably be an "IDLE" in WhisperControlPhrase::*
-        let current_control_phrase = RwLock::new(WhisperControlPhrase::GettingReady);
+        let realtime_configs = ArcSwap::new(Arc::new(realtime_configs));
+        let offline_configs = ArcSwap::new(Arc::new(offline_configs));
+        let current_snapshot = ArcSwap::new(Arc::new(TranscriptionSnapshot::default()));
+        let current_control_phrase = ArcSwap::new(Arc::new(WhisperControlPhrase::GettingReady));
+        let offline_transcriber_feedback = Arc::new(offline_transcriber_feedback);
 
         let inner = Arc::new(TranscriberState {
             engine_kernel: Weak::new(),
@@ -95,97 +130,86 @@ impl TranscriberEngine {
             offline_configs,
             realtime_running,
             offline_running,
-            current_transcription,
-            current_segments,
+            current_snapshot,
             current_control_phrase,
+            offline_transcriber_feedback,
         });
         Self { inner }
     }
 
-    pub(crate) fn set_engine_kernel(&self, kernel: Weak<dyn EngineKernel>) {
+    pub(super) fn set_engine_kernel(&self, kernel: Weak<dyn EngineKernel>) {
         *self.inner.engine_kernel = kernel;
     }
 
     // TODO: remove if unused.
-    pub(crate) fn transcriber_running(&self) -> bool {
+    pub(super) fn transcriber_running(&self) -> bool {
         self.realtime_running() || self.offline_running()
     }
-    pub(crate) fn realtime_running(&self) -> bool {
+    pub(super) fn realtime_running(&self) -> bool {
         self.inner.realtime_running.load(Ordering::Acquire)
     }
-    pub(crate) fn offline_running(&self) -> bool {
+    pub(super) fn offline_running(&self) -> bool {
         self.inner.offline_running.load(Ordering::Acquire)
-    }
-
-    // NOTE TO SELF: remember to dereference the binding when calling builder methods to mutate,
-    // otherwise, it'll just change the local binding.
-    // These are for exposing a GUI-facing mutable configs reference so that UI toggles can update
-    // the information here.
-    pub(crate) fn realtime_configs_mut(&self) -> &mut WhisperRealtimeConfigs {
-        self.inner.realtime_configs.write().deref_mut()
-    }
-    pub(crate) fn offline_configs_mut(&self) -> &mut WhisperConfigsV2 {
-        self.inner.offline_configs.write().deref_mut()
-    }
-
-    pub(crate) fn try_read_realtime_configs(&self) -> Option<WhisperRealtimeConfigs> {
-        self.inner
-            .realtime_configs
-            .try_read()
-            .and_then(|configs| Some(configs.clone()))
-    }
-    pub(crate) fn try_read_offline_configs(&self) -> Option<WhisperConfigsV2> {
-        self.inner
-            .offline_configs
-            .try_read()
-            .and_then(|configs| Some(configs.clone()))
     }
 
     // These should be reserved for places where it's okay to block (e.g. serialization);
     // Otherwise try-read and accept the option.
-    pub(crate) fn read_realtime_configs_blocking(&self) -> WhisperRealtimeConfigs {
-        self.inner.realtime_configs.read().clone()
+    pub(super) fn read_realtime_configs(&self) -> Arc<WhisperRealtimeConfigs> {
+        self.inner.realtime_configs.load().clone()
     }
-    pub(crate) fn read_offline_configs_blocking(&self) -> WhisperConfigsV2 {
-        self.inner.offline_configs.read().clone()
-    }
-
-    pub(crate) fn try_read_transcription_snapshot(&self, copy_confirmed: &mut String, copy_segments: &mut Vec<String>) {
-        // Only perform the update if it's possible to get -both-
-        // TODO: as noted above -- this should be swapped out for an ArcSwap implementation
-        if let (Some(confirmed), Some(segments)) = (self.inner.current_transcription.try_read(), self.inner.current_segments.try_read()) {
-            // Consider this in-progress. I assume these operations will be as fast as they can be and faster than
-            // clear + push_str & manual resize + memcpy.
-            *copy_confirmed = confirmed.clone();
-            *copy_segments = segments.clone();
-        }
-    }
-    pub(crate) fn try_read_latest_control(&self, copy_control: &mut WhisperControlPhrase) {
-        // TODO: ibid re: ArcSwap.
-        if let Some(message) = self.inner.current_control_phrase.try_read() {
-            *copy_control = WhisperControlPhrase::GettingReady;
-        }
+    pub(super) fn read_offline_configs(&self) -> Arc<WhisperConfigsV2> {
+        self.inner.offline_configs.load().clone()
     }
 
-    // TODO: clean up this code; it's looking a little gnarly
-    pub(crate) fn finalize_transcription(&self, final_transcription: String) {
-        let current = self.inner.current_transcription.write();
-        *current = final_transcription;
-        drop(current);
-        // Clear the working segments - they're joined in the final transcription
-        let segments = self.inner.current_segments.write();
-        *segments = vec![];
-        drop(segments);
-        // Set the control phrase to "GETTING READY", really should be IDLE.
-        let control = self.inner.current_control_phrase.write();
-        *control = WhisperControlPhrase::GettingReady;
-        drop(control);
+    // Takes a closure that updates the realtime configs via builder.
+    // It should be possible to just send in builder methods by name.
+    pub(super) fn write_realtime_configs<
+        F: FnMut(WhisperRealtimeConfigs) -> WhisperRealtimeConfigs,
+    >(
+        &self,
+        update_closure: F,
+    ) {
+        let confs = (*self.inner.realtime_configs.load().clone()).clone();
+        self.inner
+            .realtime_configs
+            .store(Arc::new(update_closure(confs)));
+    }
+    // Takes a closure that updates the offline configs via builder.
+    // It should be possible to just send in builder methods by name.
+    pub(super) fn write_offline_configs<F: FnMut(WhisperConfigsV2) -> WhisperConfigsV2>(
+        &self,
+        update_closure: F,
+    ) {
+        let confs = (*self.inner.offline_configs.load().clone()).clone();
+        self.inner
+            .offline_configs
+            .store(Arc::new(update_closure(confs)));
+    }
+
+    pub(super) fn read_transcription_snapshot(&self) -> Arc<TranscriptionSnapshot> {
+        self.inner.current_snapshot.load().clone()
+    }
+    pub(super) fn try_read_latest_control(&self) -> Arc<WhisperControlPhrase> {
+        self.inner.current_control_phrase.load().clone()
+    }
+
+    pub(super) fn finalize_transcription(&self, final_transcription: String) {
+        let snapshot = TranscriptionSnapshot::new(final_transcription, Default::default());
+        self.inner.current_snapshot.store(Arc::new(snapshot));
+        // TODO: swap this to idle once implemented.
+        self.inner
+            .current_control_phrase
+            .store(Arc::new(WhisperControlPhrase::GettingReady));
     }
 
     // TODO: determine how to handle if this thread somehow panics re: removing progress jobs.
     // It might be wise to split jobs out by type, e.g. RealTime, Offline, Download, etc.
+    // OR: it could be sufficient to just clear the ProgressEngine... -> not sure.
+    // Instead: perhaps it might be of interest to manually implement From<RibbleWhisperError> for RibbleError
+    // or some similar mechanism.
+    // Such that it contains all required cleanup information PLUS the error.
     // TODO: refactor once errors finished so that the type is correct.
-    pub(crate) fn run_realtime(&self) -> RibbleWorkerHandle {
+    pub(super) fn run_realtime(&self) -> RibbleWorkerHandle {
         let thread_inner = Arc::clone(&self.inner);
         // Set the flag that the realtime runner is running so that the UI can update.
         thread_inner.realtime_running.store(true, Ordering::Release);
@@ -197,13 +221,10 @@ impl TranscriberEngine {
             // Get a handle to the kernel; this will error out if the kernel's not set properly.
             // The worker thread that joins this will blast the information to the console (provided it also has a kernel).
             // The error will eventually propagate until it's handled/logged and returned in main.
-            let kernel =
-                thread_inner
-                    .engine_kernel
-                    .upgrade()
-                    .ok_or(RibbleWhisperError::ParameterError(
-                        "Kernel not yet attached to TranscriberEngine.".to_string(),
-                    ))?;
+            let kernel = thread_inner.engine_kernel.upgrade().ok_or(
+                RibbleError::Core("Kernel not yet attached to TranscriberEngine.".to_string())
+                    .into(),
+            )?;
 
             // Send a progress job so the UI can be updated.
             let setup_progress = Progress::indeterminate("Setting up real-time transcription.");
@@ -221,8 +242,6 @@ impl TranscriberEngine {
             let audio_ring_buffer = AudioRingBuffer::<f32>::default();
             // Audio fanout channels
             let (audio_sender, audio_receiver) = get_channel::<Arc<[f32]>>(INPUT_BUFFER_CAPACITY);
-            // TODO: remove this fft_sender once the logic has been migrated over to the VisualizerEngine.
-            let (fft_sender, fft_receiver) = get_channel::<Arc<[f32]>>(INPUT_BUFFER_CAPACITY);
             // TODO: make a writer request to the kernel and send this receiver.
             let (write_sender, write_receiver) = get_channel::<Arc<[f32]>>(INPUT_BUFFER_CAPACITY);
 
@@ -234,19 +253,33 @@ impl TranscriberEngine {
             // Not 100% sure how to go about this just yet; probably an enum that can be unpacked
             // with a tight match on the builder method.
             // TODO: FIRST ORDER OF BUSINESS: GET THE VAD CONFIGS FROM THE KERNEL.
-            let vad = Silero::try_new_whisper_realtime_default()?;
+            let vad = Silero::try_new_whisper_realtime_default().map_err(|e| {
+                let cleanup_kernel = Arc::clone(&kernel);
+                e.into()
+                    .with_cleanup(cleanup_kernel.remove_progress_job(setup_id))
+            })?;
             // Set up the mic capture
             let audio_backend = kernel.get_audio_backend();
-            let mic: FanoutMicCapture<f32, UseArc> =
-                audio_backend.build_whisper_fanout_default(audio_sender)?;
-            // Get a copy of the configs
-            let configs = thread_inner.realtime_configs.read().clone();
+            let mic: FanoutMicCapture<f32, UseArc> = audio_backend
+                .build_whisper_fanout_default(audio_sender)
+                .map_err(|e| {
+                    let cleanup_kernel = Arc::clone(&kernel);
+                    e.into()
+                        .with_cleanup(cleanup_kernel.remove_progress_job(setup_id))
+                })?;
+            // Get a copy of the configs -> TODO: fix this in ribble_whisper so that configs are cheap
+            let configs = (*thread_inner.realtime_configs.load().clone()).clone();
             let (mut transcriber, transcriber_handle) = RealtimeTranscriberBuilder::new()
                 .with_configs(configs)
                 .with_audio_buffer(&audio_ring_buffer)
                 .with_output_sender(text_sender)
                 .with_voice_activity_detector(vad)
-                .build()?;
+                .build()
+                .map_err(|e| {
+                    let cleanup_kernel = Arc::clone(&kernel);
+                    e.into()
+                        .with_cleanup(cleanup_kernel.remove_progress_job(setup_id))
+                })?;
 
             // Send a clone of the kernel to the scoped thread
             let scoped_kernel = Arc::clone(&kernel);
@@ -256,10 +289,6 @@ impl TranscriberEngine {
                 let a_thread_run_transcription = Arc::clone(&thread_inner.realtime_running);
                 // Transcriber runner flag
                 let t_thread_run_transcription = Arc::clone(&thread_inner.realtime_running);
-                // Print runner (stores transcription) flag
-                let p_thread_run_transcription = Arc::clone(&thread_inner.realtime_running);
-                // Visualizer runner flag
-                let v_thread_run_transcription = Arc::clone(&thread_inner.realtime_running);
                 // Write thread runner flag
                 let w_thread_run_transcription = Arc::clone(&thread_inner.realtime_running);
 
@@ -270,9 +299,6 @@ impl TranscriberEngine {
                 scoped_kernel.remove_progress_job(setup_id);
                 // Get a kernel handle for the audio thread
                 let audio_scoped_kernel = Arc::clone(&scoped_kernel);
-                // Get a kernel handle for the visualizer thread
-                let visualizer_scoped_kernel = Arc::clone(&scoped_kernel);
-
                 // Start the mic feed
                 mic.play();
 
@@ -318,19 +344,11 @@ impl TranscriberEngine {
                                     a_thread_run_transcription.store(false, Ordering::Release);
                                 }
 
-                                // TODO: get rid of these once the implementations (writer, visualizer) are finished.
-                                // Just use the kernel to pass data over to the visualizer so it can decide what to do with the data.
-                                // If the visualizer is running, fan data out to the FFT processing
-                                // thread.
-                                if !audio_scoped_kernel.visualizer_running() {
-                                    continue;
-                                }
-
-                                if let Err(TrySendError::Disconnected(_)) =
-                                    fft_sender.try_send(Arc::clone(&audio))
-                                {
-                                    a_thread_run_transcription.store(false, Ordering::Release);
-                                }
+                                // Pass data to the visualizer through the kernel.
+                                audio_scoped_kernel.update_visualizer_data(
+                                    Arc::clone(&audio),
+                                    WHISPER_SAMPLE_RATE,
+                                );
                             }
                             Err(_) => a_thread_run_transcription.store(false, Ordering::Release),
                         }
@@ -345,42 +363,14 @@ impl TranscriberEngine {
                     // I've brought them here from the old implementation and they should be unnecessary -->
                     // The old implementation had pre-allocated message queues (which is unnecessary); these shouldn't suffer that problem and are likely to return a TrySendError.
                     let empty_buffer = Arc::from(&[][..]);
-                    let _ = fft_sender.try_send(Arc::clone(&empty_buffer));
                     let _ = write_sender.try_send(Arc::clone(&empty_buffer));
                 });
                 let transcription_thread =
                     s.spawn(move || transcriber.process_audio(t_thread_run_transcription));
-                let _print_thread = s.spawn(move || {
-                    while p_thread_run_transcription.load(Ordering::Acquire) {
-                        // TODO: this might work better with batched writes (1 confirmed + 1 segments or something along those lines).
-                        match text_receiver.recv() {
-                            Ok(output) => {
-                                match output {
-                                    WhisperOutput::ConfirmedTranscription(confirmed) => {
-                                        // Update the confirmed transcription part
-                                        let confirmed_guard =
-                                            print_thread_inner.current_transcription.write();
-                                        *confirmed_guard = confirmed;
-                                    }
-                                    WhisperOutput::CurrentSegments(segments) => {
-                                        // Update the copy of the working set of segments
-                                        let segments_guard =
-                                            print_thread_inner.current_segments.write();
-                                        *segments_guard = segments;
-                                    }
-                                    WhisperOutput::ControlPhrase(control) => {
-                                        let control_guard =
-                                            print_thread_inner.current_control_phrase.write();
-                                        *control_guard = control;
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                p_thread_run_transcription.store(false, Ordering::Release);
-                            }
-                        }
-                    }
-                });
+
+                // For updating the inner transcription
+                let _print_thread =
+                    print_thread_inner.print_loop(s, text_receiver, TranscriptionType::Realtime);
                 // TODO IMPORTANT: Get this out of here and move it to where it makes sense to live.
                 // Like, the kernel, lol.
                 // TODO: once kernel implementation is completed (i.e. this code has been properly migrated), make the appropriate kernel request.
@@ -439,50 +429,10 @@ impl TranscriberEngine {
                     // NOTE TO SELF: It might be of interest to include an extra log here when testing out the new implementation.
                 });
 
-                // TODO: this is out of scope -> refactor to the visualizer thread to reduce the coupling.
-                let _visualizer_thread = s.spawn(move || {
-                    // Preallocate a buffer for storing the latest computation
-                    // This will get passed to the kernel to update the visualizer engine.
-                    let mut buffer = [0.0; NUM_BUCKETS];
-                    // Get a handle to the analysis type enum
-                    while v_thread_run_transcription.load(Ordering::Acquire) {
-                        match fft_receiver.recv() {
-                            Ok(sample) => {
-                                if sample.is_empty() {
-                                    v_thread_run_transcription.store(false, Ordering::Release);
-                                }
-
-                                // Get the current Analysis type from the kernel
-                                let analysis_type = visualizer_scoped_kernel.get_visualizer_analysis_type();
-                                match analysis_type {
-                                    AnalysisType::Waveform => {
-                                        normalized_waveform(&sample, &mut buffer);
-                                    }
-                                    AnalysisType::Power => {
-                                        power_analysis(&sample, &mut buffer);
-                                    }
-                                    AnalysisType::SpectrumDensity => {
-                                        frequency_analysis(
-                                            &sample,
-                                            &mut buffer,
-                                            WHISPER_SAMPLE_RATE,
-                                        );
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                v_thread_run_transcription.store(false, Ordering::Release);
-                            }
-                        }
-
-                        // Update the visualizer via the kernel.
-                        visualizer_scoped_kernel.update_visualizer_data(&buffer);
-                    }
-                });
-
-                let res = transcription_thread.join().map_err(|e| {
-                    RibbleWhisperError::Unknown(format!("Thread panicked! {:?}", e))
-                })??;
+                // This -should- properly coerce into RibbleAppError, but it might need to be explicit.
+                let res = transcription_thread
+                    .join()
+                    .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e)))??;
                 Ok(RibbleMessage::TranscriptionOutput(res))
             })?;
             mic.pause();
@@ -490,14 +440,14 @@ impl TranscriberEngine {
             // Send an info message to the console to alert the user that the transcription loop
             // has completed.
             let message = String::from("Finished real-time transcription.");
-            let console_message = NewConsoleMessage::Status(message);
+            let console_message = ConsoleMessage::Status(message);
             kernel.send_console_message(console_message);
             result
         });
         worker
     }
 
-    pub(crate) fn run_offline(&self) -> RibbleWorkerHandle {
+    pub(super) fn run_offline(&self) -> RibbleWorkerHandle {
         let thread_inner = Arc::clone(&self.inner);
         // Set the flag that the offline runner is running so that the UI can update.
         thread_inner.offline_running.store(true, Ordering::Release);
@@ -505,127 +455,158 @@ impl TranscriberEngine {
         // Set up the worker.
         let worker = std::thread::spawn(move || {
             // Get a handle to the kernel.
-            let kernel =
-                thread_inner
-                    .engine_kernel
-                    .upgrade()
-                    .ok_or(RibbleWhisperError::ParameterError(
-                        "Kernel not yet attached to TranscriberEngine.".to_string(),
-                    ))?;
+            let kernel = thread_inner.engine_kernel.upgrade().ok_or(
+                RibbleError::Core("Kernel not yet attached to TranscriberEngine.".to_string())
+                    .into(),
+            )?;
+
+            // Send a progress job so the UI can be updated.
+            let setup_progress = Progress::indeterminate("Setting up real-time transcription.");
+
+            let setup_id = kernel.add_progress_job(setup_progress);
+
             // Get the vad configurations.
             // TODO: implement VadConfigs and replace -> likely should be split between realtime/offline
             // not sure about how to handle
-            let vad = Silero::try_new_whisper_offline_default()?;
+            let vad = Silero::try_new_whisper_offline_default().map_err(|e| {
+                let cleanup_kernel = Arc::clone(&kernel);
+                e.into()
+                    .with_cleanup(cleanup_kernel.remove_progress_job(setup_id))
+            })?;
             // Get the configs
-            let configs = thread_inner.offline_configs.read().clone();
+            let configs = (*thread_inner.offline_configs.load().clone()).clone();
             // Get the audio file path (TODO: figure out how to re-handle the temporary audio file)
-            let audio_file_path =
-                kernel
-                    .get_audio_file_path()
-                    .ok_or(RibbleWhisperError::ParameterError(
-                        "File path not supplied to offline transcriber. This should not happen!"
-                            .to_string(),
-                    ))?;
+            let audio_file_path = kernel.get_audio_file_path().ok_or(
+                RibbleWhisperError::ParameterError(
+                    "File path not supplied to offline transcriber. This should not happen!"
+                        .to_string(),
+                )
+                    .map_err(|e| {
+                        let cleanup_kernel = Arc::clone(&kernel);
+                        e.into()
+                            .with_cleanup(cleanup_kernel.remove_progress_job(setup_id))
+                    }),
+            )?;
 
             // Prep a handle to the kernel to send to the callback.
             let callback_kernel = Arc::clone(&kernel);
-            // NOTE TO SELF: the callback API in the audio loading doesn't currently have a way
-            // to get the number of samples...
-            // TODO: fix this in the library ASAP and expose functionality here please.
-            // 10 000 is inserted as a stub to map out the logic.
-            let load_audio_progress = Progress::determinate("Loading audio", 10000);
+            let n_frames = audio_file_num_frames(&audio_file_path).map_err(|e| {
+                let cleanup_kernel = Arc::clone(&kernel);
+                e.into()
+                    .with_cleanup(cleanup_kernel.remove_progress_job(setup_id))
+            })?;
+
+            let load_audio_progress = Progress::determinate("Loading audio", n_frames);
             let load_audio_id = kernel.add_progress_job(load_audio_progress);
             let load_audio_callback = move |progress: usize| {
                 callback_kernel.update_progress_job(load_audio_id, progress as u64)
             };
 
             // Load the audio file.
-            let audio = load_normalized_audio_file(audio_file_path, Some(load_audio_callback))?;
+            let audio = load_normalized_audio_file(audio_file_path, Some(load_audio_callback))
+                .map_err(|e| {
+                    let cleanup_kernel = Arc::clone(&kernel);
+                    e.into().with_cleanup(
+                        cleanup_kernel.cleanup_progress_jobs(&[setup_id, load_audio_id]),
+                    )
+                })?;
             // Remove the progress job now that transcription is finished.
             kernel.remove_progress_job(load_audio_id);
             // Set up the offline_transcriber
-            // TODO: determine whether or not it's desired to set an on new segment callback/print thread to send out and receive data.
-            // I'm not 100% sold on it.
+
             let (sender, receiver) = get_channel(INPUT_BUFFER_CAPACITY);
+
             let mut offline_transcriber = OfflineTranscriberBuilder::new()
                 .with_configs(configs)
                 .with_audio(audio)
                 .with_channel_configurations(AudioChannelConfiguration::Mono)
                 .with_voice_activity_detector(vad)
-                .with_sender(sender)
-                .build()?;
+                .build()
+                .map_err(|e| {
+                    let cleanup_kernel = Arc::clone(&kernel);
+                    e.into()
+                        .with_cleanup(cleanup_kernel.remove_progress_job(setup_id))
+                })?;
 
-            // -- If it's determined that it's unnecessary to set up a REPL a la realtime transcription
-            // (seeing as it's just as the segments are read), perhaps don't bother.
             let scoped_kernel = Arc::clone(&kernel);
             let run_transcription = Arc::clone(&thread_inner.offline_running);
-            let p_thread_run_transcription = Arc::clone(&run_transcription);
             let print_thread_inner = Arc::clone(&thread_inner);
-
-            let result = scope(move |s| {
+            // Remove the setup progress job.
+            kernel.remove_progress_job(setup_id);
+            let result = scope(|s| {
                 // Set up a progress callback for transcription
                 // As far as I can tell, this should be in integer percent
-                let transcription_progress = Progress::determinate("Transcrbing", 100);
+                let transcription_progress = Progress::determinate("Transcribing", 100);
                 let transcription_id = scoped_kernel.add_progress_job(transcription_progress);
                 let callback_kernel = Arc::clone(&scoped_kernel);
                 let transcription_closure = move |percent: i32| {
                     callback_kernel.update_progress_job(transcription_id, percent as u64);
                 };
                 let transcription_callback =
-                    Some(StaticProgressCallback::new(transcription_closure));
+                    Some(StaticRibbleWhisperCallback::new(transcription_closure));
+
+                let segment_closure = move |snapshot| {
+                    // Take the snapshot into an Arc (for swapping in the print loop).
+                    let a_snap = Arc::new(snapshot);
+                    // Send it off to the print loop -> This shouldn't likely ever have an issue with
+                    // a full queue--whisper dwarfs the callback, giving the print loop time to receive.
+                    // If it fails due to a dropped receiver, this sender should -also- be gone.
+                    let _ = sender.try_send(WhisperOutput::TranscriptionSnapshot(a_snap));
+                };
+
+                let feedback = thread_inner
+                    .offline_transcriber_feedback
+                    .load(Ordering::Acquire);
+                let segment_callback = match feedback {
+                    OfflineTranscriberFeedback::Minimal => None,
+                    OfflineTranscriberFeedback::Progressive => {
+                        Some(StaticRibbleWhisperCallback::new(segment_closure))
+                    }
+                };
+
+                // With how the new_segment callback works, it's not possible atm to have an
+                // early escape mechanism to avoid the heavy computation
+                // (It's also unlikely to be exposed in the UI when the transcription is running)
                 let whisper_callbacks = WhisperCallbacks {
                     progress: transcription_callback,
+                    new_segment: segment_callback,
                 };
 
                 // Spawn the threads.
+                let t_kernel = Arc::clone(&kernel);
                 let transcription_thread = s.spawn(move || {
-                    offline_transcriber.process_with_callbacks(run_transcription, whisper_callbacks)
+                    let res = offline_transcriber
+                        .process_with_callbacks(run_transcription, whisper_callbacks);
+                    t_kernel.remove_progress_job(transcription_id);
+                    res
                 });
 
-                // TODO: this is identical code to the realtime loop; please handle this.
-                // This is screaming to be factored out into a method --> or possibly removed entirely.
-                // Again, I'm not 100% sold on the transcription/print thread combo here,
-                // As these will only start spitting out as they're pulled from the whisper state.
-                let _print_thread = s.spawn(move || {
-                    while p_thread_run_transcription.load(Ordering::Acquire) {
-                        // TODO: this might work better with batched writes (1 confirmed + 1 segments or something along those lines).
-                        match receiver.recv() {
-                            Ok(output) => {
-                                match output {
-                                    WhisperOutput::ConfirmedTranscription(confirmed) => {
-                                        // Update the confirmed transcription part
-                                        let confirmed_guard =
-                                            print_thread_inner.current_transcription.write();
-                                        *confirmed_guard = confirmed;
-                                    }
-                                    WhisperOutput::CurrentSegments(segments) => {
-                                        // Update the copy of the working set of segments
-                                        let segments_guard =
-                                            print_thread_inner.current_segments.write();
-                                        *segments_guard = segments;
-                                    }
-                                    WhisperOutput::ControlPhrase(control) => {
-                                        let control_guard =
-                                            print_thread_inner.current_control_phrase.write();
-                                        *control_guard = control;
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                p_thread_run_transcription.store(false, Ordering::Release);
-                            }
-                        }
-                    }
-                });
+                // TODO: determine how best to handle this:
+                // Atm, there's no way to short-circuit the segment callback in ribble_whisper
+                // It would require more complexity to implement this behaviour -> and it's likely
+                // unwise to let the user make changes to configurations while transcription is running.
+                // This might be the best compromise.
+                if let OfflineTranscriberFeedback::Progressive = feedback {
+                    let _print_thread =
+                        print_thread_inner.print_loop(s, receiver, TranscriptionType::Offline);
+                }
 
+                // If the transcription thread panicked, it's because of an uncaught whisper error
+                // -- and thus the progress job most likely needs to be removed.
+                // It is also most likely that if this job is still in the buffer, it's the only
+                // one in the buffer, (or it did get removed and the buffer is empty).
+                // Test this, but if either prove to be true, then it shouldn't matter wrt remove_progress_job.
                 let res = transcription_thread.join().map_err(|e| {
-                    RibbleWhisperError::Unknown(format!("Thread panicked! {:?}", e))
+                    let cleanup_kernel = Arc::clone(&kernel);
+                    RibbleError::ThreadPanic(format!("{:?}", e))
+                        .into()
+                        .with_cleanup(cleanup_kernel.remove_progress_job(transcription_id))
                 })??;
                 Ok(RibbleMessage::TranscriptionOutput(res))
             })?;
             // Send a message to the console before returning the result.
             let message = format!("Finished transcribing: {}", audio_file_path);
-            let console_message = NewConsoleMessage::Status(message);
+            let console_message = ConsoleMessage::Status(message);
             kernel.send_console_message(console_message);
             result
         });

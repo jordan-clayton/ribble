@@ -3,10 +3,11 @@ use std::collections::VecDeque;
 use egui::{CentralPanel, Frame, ScrollArea, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
+use crate::controller::console::ConsoleMessage;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::tab_view,
-    utils::{console_message::ConsoleMessage, constants},
+    utils::constants,
 };
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -78,8 +79,7 @@ impl tab_view::TabView for ConsoleTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

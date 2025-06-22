@@ -9,5 +9,6 @@ pub(crate) mod recorder_configs;
 pub(crate) mod sdl_audio_wrapper;
 pub(crate) mod threading;
 pub(crate) mod workers;
+pub(crate) mod pcm_f32;
 
 

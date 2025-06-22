@@ -23,7 +23,7 @@ nvml-wrapper = "0.11.0"
 realfft = "3.3.0"
 rfd = "0.15.3"
 # TODO: get rid of external sdl2, should be in core crate
-sdl2 = {version = "0.37.0", features = ["static-link","bundled"]}
+sdl2 = { version = "0.37.0", features = ["static-link", "bundled"] }
 serde = { version = "1.0.204", features = ["derive", "rc"] }
 strum = "0.27.1"
 # TODO: get rid of symphonia; use core crate api
@@ -37,9 +37,18 @@ ron = "0.10.1"
 image = "0.25.2"
 # TODO: look at documentation, use for indeterminate progress bars.
 irox-egui-extras = "0.7.0"
-# TODO: Look into slab documentation, use for progress.
 slab = "0.4.9"
-parking_lot = { version = "0.12.4" , features = ["deadlock_detection"]}
+parking_lot = { version = "0.12.4", features = ["deadlock_detection"] }
+arc-swap = "1.7.1"
+
+# Until voice_activity_detector is updated to address breaking changes in the
+# ort crate, these two crates need to be pinned to the following versions.
+# In-case the pinning in ribble_whisper isn't respected, or I somehow make a goof-up, 
+# These will remain here until they can confidently be removed.
+ort-sys = "=2.0.0-rc.9"
+ort = { version = "=2.0.0-rc.9", features = ["ndarray"] }
+thiserror = "2.0.12"
+
 [target.x86_64-apple-darwin.dependencies]
 metal = "0.32.0"
 

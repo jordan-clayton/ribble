@@ -1,13 +1,16 @@
-use crate::utils::console_message::NewConsoleMessage;
+use crate::utils::errors::RibbleError;
+use egui::{RichText, Visuals};
 use parking_lot::RwLock;
 use std::collections::VecDeque;
 use std::num::NonZero;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use strum::Display;
 
 // NOTE: hold off on adding a reference to the kernel if it's not required in the interface.
+// TODO: if a kernel is not required, refactor these state parameters back into ConsoleEngine.
 struct ConsoleState {
-    queue: RwLock<VecDeque<NewConsoleMessage>>,
+    queue: RwLock<VecDeque<Arc<ConsoleMessage>>>,
     // Because of the way VecDeque allocates, capacity needs to be tracked such that the length is
     // essentially fixed.
     // In practice, expect the real capacity to be slightly greater (likely the next power of two),
@@ -19,7 +22,7 @@ struct ConsoleState {
 // console messages are retained.
 // NOTE: if it becomes important to retain the entire history of the program for logging purposes,
 // implement a double-buffer strategy to retain popped states.
-pub struct ConsoleEngine {
+pub(super) struct ConsoleEngine {
     inner: Arc<ConsoleState>,
 }
 
@@ -28,7 +31,7 @@ impl ConsoleEngine {
     // It is fine to resize the inner queue, but this should take an initial nonzero capacity
     // The backing buffer is fine to be zero size, but the capacity is monitored to not exceed
     // a pre-defined user limit.
-    pub(crate) fn new(capacity: NonZero<usize>) -> Self {
+    pub(super) fn new(capacity: NonZero<usize>) -> Self {
         let capacity = capacity.get();
         let console_queue = RwLock::new(VecDeque::with_capacity(capacity));
         let inner = ConsoleState {
@@ -40,7 +43,7 @@ impl ConsoleEngine {
         }
     }
 
-    pub(crate) fn add_console_message(&self, message: NewConsoleMessage) {
+    pub(super) fn add_console_message(&self, message: ConsoleMessage) {
         // Get a write lock for pushing to the buffer
         let mut queue = self.inner.queue.write();
 
@@ -50,7 +53,7 @@ impl ConsoleEngine {
         if queue.len() == capacity {
             queue.pop_front();
         }
-        queue.push_back(message);
+        queue.push_back(Arc::new(message));
         debug_assert!(
             queue.len() <= capacity,
             "Queue length greater than capacity, pop logic is incorrect. Len: {}",
@@ -59,14 +62,16 @@ impl ConsoleEngine {
         drop(queue);
     }
 
-    pub(crate) fn try_get_current_message(&self, copy_buffer: &mut Vec<NewConsoleMessage>) {
+    // Implementing Clone for ConsoleMessage would get expensive; it's cheaper to just use 
+    // shared pointers
+    pub(super) fn try_get_current_message(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
         if let Some(buffer) = self.inner.queue.try_read() {
             copy_buffer.clear();
             copy_buffer.extend(buffer.iter().cloned())
         }
     }
 
-    pub(crate) fn resize(&self, new_size: NonZero<usize>) {
+    pub(super) fn resize(&self, new_size: NonZero<usize>) {
         let new_size = new_size.get();
         // Determine whether to shrink or grow.
         let capacity = self.inner.capacity.load(Ordering::Acquire);
@@ -99,5 +104,24 @@ impl ConsoleEngine {
         let mut queue = self.inner.queue.write();
         let drain = diff.min(queue.len());
         queue.drain(..drain);
+    }
+}
+
+#[derive(Debug, Display)]
+pub(crate) enum ConsoleMessage {
+    Error(RibbleError),
+    Status(String),
+}
+
+impl ConsoleMessage {
+    // NOTE TO SELF: call ui.label(msg.to_console_text(&visuals)) in the console tab when drawing
+    pub(crate) fn to_console_text(&self, visuals: &Visuals) -> RichText {
+        let (color, msg) = match self {
+            ConsoleMessage::Error(msg) => { (visuals.error_fg_color, msg.to_string()) }
+            ConsoleMessage::Status(msg) => { (visuals.text_color(), msg.to_owned()) }
+        };
+        // This has to make at least 1 heap allocation to coerce into a string
+        // Test, but expect this to just move the string created above.
+        RichText::new(msg).color(color).monospace()
     }
 }

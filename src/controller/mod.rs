@@ -1,6 +1,6 @@
-use crate::utils::console_message::NewConsoleMessage;
-use crate::utils::errors::WhisperAppError;
-use crate::utils::progress::Progress;
+use crate::utils::errors::RibbleAppError;
+use console::ConsoleMessage;
+use progress::Progress;
 use std::thread::JoinHandle;
 
 // TODO: remove these excess utils; most of them are not necessary for the application.
@@ -16,10 +16,10 @@ mod progress;
 mod console;
 mod kernel;
 
-type RibbleWorkerHandle = JoinHandle<Result<RibbleMessage, WhisperAppError>>;
+type RibbleWorkerHandle = JoinHandle<Result<RibbleMessage, RibbleAppError>>;
 
 pub(crate) enum RibbleMessage {
-    Console(NewConsoleMessage),
+    Console(ConsoleMessage),
     Progress(Progress),
     TranscriptionOutput(String),
 }

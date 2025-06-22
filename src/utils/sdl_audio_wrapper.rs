@@ -1,3 +1,5 @@
+// TODO: Remove this file -> ribble_whisper handles this.
+
 // Sdl audio is documented to be thread safe.
 #[derive(Debug)]
 pub struct SdlAudioWrapper {

@@ -1,3 +1,4 @@
+// TODO: just remove this entire file.
 use std::thread::JoinHandle;
 
 use crossbeam::channel::SendError;
@@ -5,10 +6,12 @@ use crossbeam::channel::SendError;
 use sdl2::log::log;
 
 // TODO: Flatten this.
+use crate::controller::console::ConsoleMessage;
+// TODO: Flatten this.
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     utils::{
-        console_message::{ConsoleMessage, ConsoleMessageType},
+        console_message::ConsoleMessageType,
         constants,
         errors::{extract_error_message, WhisperAppError, WhisperAppErrorType},
     },

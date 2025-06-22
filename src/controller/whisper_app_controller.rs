@@ -28,6 +28,7 @@ use whisper_realtime::{
     },
 };
 
+use crate::controller::console::ConsoleMessage;
 use crate::{
     controller::utils::{
         gpu_init::check_gpu_target,
@@ -43,7 +44,7 @@ use crate::{
             normalized_waveform, power_analysis, to_f32_normalized, AnalysisType,
             AtomicAnalysisType,
         },
-        console_message::{ConsoleMessage, ConsoleMessageType},
+        console_message::ConsoleMessageType,
         constants,
         errors::{extract_error_message, WhisperAppError, WhisperAppErrorType},
         file_mgmt::{
@@ -56,7 +57,6 @@ use crate::{
         workers::{AtomicAudioWorkerState, AudioWorkerState},
     },
 };
-
 // TODO: rewrite all of this; the current implementation has some major architectural problems that need revising.
 // MAJOR: Implement An EngineKernel trait, store this in a weakref in each of the engines so that the controller's internal state
 // (the kernel) can provide resources upon request in each of the engines.
@@ -726,17 +726,17 @@ impl WhisperAppController {
 
 fn recording_impl<
     T: Default
-        + Clone
-        + Copy
-        + FromPrimitive
-        + NumCast
-        + Bounded
-        + Zero
-        + sdl2::audio::AudioFormatNum
-        + Sample
-        + Sync
-        + Send
-        + 'static,
+    + Clone
+    + Copy
+    + FromPrimitive
+    + NumCast
+    + Bounded
+    + Zero
+    + sdl2::audio::AudioFormatNum
+    + Sample
+    + Sync
+    + Send
+    + 'static,
 >(
     controller: WhisperAppController,
     desired_audio: &AudioSpecDesired,
@@ -920,6 +920,7 @@ fn recording_impl<
             log(&String::from("Recorder: writing thread done."));
         });
 
+        // NOTE: this will be removed; it's taken care of in the VisualizerEngine.
         let _visualizer_thread = s.spawn(|| {
             while c_controller_visualizer_thread.recorder_running() {
                 let new_audio = visualizer_r.recv();

@@ -6,4 +6,6 @@
 // -> kernel setter
 // -> Accessors (read/write locks) for Configs
 // -> The recording loop
-pub struct RecorderEngine {}
+
+struct RecorderEngineState {}
+pub(super) struct RecorderEngine {}
