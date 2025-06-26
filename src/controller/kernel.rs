@@ -7,9 +7,11 @@ use crate::controller::transcriber::TranscriberEngine;
 use crate::controller::visualizer::{AnalysisType, VisualizerEngine};
 use crate::controller::worker::WorkerEngine;
 use crate::utils::errors::RibbleAppError;
+use crate::utils::model_bank::GetSharedModelRetriever;
 use crate::utils::pcm_f32::IntoPcmF32;
 use crossbeam::channel::Receiver;
 use ribble_whisper::audio::microphone::AudioBackend;
+use ribble_whisper::whisper::model::{ConcurrentModelBank, ModelRetriever};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -50,6 +52,7 @@ pub trait EngineKernel: Send + Sync {
     // In this instance, the app should probably crash because important work can no longer be done.
 
     fn cleanup_progress_jobs(&self, ids: &[usize]);
+    fn get_model_retriever<M: ModelRetriever>(&self) -> Arc<M>;
 }
 
 // TODO: NOTE TO SELF, store this in the controller instead of the old spaghetti.
@@ -58,9 +61,14 @@ pub trait EngineKernel: Send + Sync {
 // TODO: Ibid if bringing in integrity-checking
 // NOTE: if it becomes absolutely necessary (e.g. testing), factor the engine components out into traits.
 // The EngineKernel is mockable, but the Engine components are not (yet).
-pub struct Kernel {
-    // TODO: additional state (non-engines), VadConfigs, BandpassConfigs, file paths
+pub struct Kernel<MR, MB>
+where
+    MR: ModelRetriever,
+    MB: ConcurrentModelBank + GetSharedModelRetriever<MR>,
+{
+    // TODO: additional state (non-engines), VadConfigs, BandpassConfigs, file paths,
     // Also, the audio backend.
+    // Also twice: the ModelRetriever.
     audio_backend: AudioBackend,
     transcriber_engine: TranscriberEngine,
     recorder_engine: RecorderEngine,
@@ -68,12 +76,17 @@ pub struct Kernel {
     progress_engine: ProgressEngine,
     visualizer_engine: VisualizerEngine,
     worker_engine: WorkerEngine,
+    model_bank: MB,
 }
 
 // TODO: implement trait
 // NOTE: most of these are blocking calls (as of now with concrete components).
 // Anything that involves writing is almost guaranteed to involve trying to grab a write lock.
-impl EngineKernel for Kernel {
+impl<MR, MB> EngineKernel for Kernel<MR, MB>
+where
+    MR: ModelRetriever,
+    MB: ConcurrentModelBank + GetSharedModelRetriever<MR>,
+{
     fn get_vad_config(&self) {
         todo!()
     }
@@ -132,5 +145,9 @@ impl EngineKernel for Kernel {
         for id in ids {
             self.progress_engine.remove_progress_job(*id);
         }
+    }
+
+    fn get_model_retriever<MR>(&self) -> Arc<MR> {
+        self.model_bank.get_model_retriever()
     }
 }

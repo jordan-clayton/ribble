@@ -260,20 +260,25 @@ impl TranscriberEngine {
             })?;
             // Set up the mic capture
             let audio_backend = kernel.get_audio_backend();
-            let mic: FanoutMicCapture<f32, UseArc> = audio_backend
+            let mic: FanoutMicCapture<UseArc<f32>> = audio_backend
                 .build_whisper_fanout_default(audio_sender)
                 .map_err(|e| {
                     let cleanup_kernel = Arc::clone(&kernel);
                     e.into()
                         .with_cleanup(cleanup_kernel.remove_progress_job(setup_id))
                 })?;
-            // Get a copy of the configs -> TODO: fix this in ribble_whisper so that configs are cheap
+
+            // Get a copy of the configs
             let configs = (*thread_inner.realtime_configs.load().clone()).clone();
-            let (mut transcriber, transcriber_handle) = RealtimeTranscriberBuilder::new()
+            // Get the model-retriever from the kernel.
+            let model_retriever = kernel.get_model_retriever();
+
+            let (transcriber, transcriber_handle) = RealtimeTranscriberBuilder::new()
                 .with_configs(configs)
                 .with_audio_buffer(&audio_ring_buffer)
                 .with_output_sender(text_sender)
                 .with_voice_activity_detector(vad)
+                .with_model_retriever(model_retriever)
                 .build()
                 .map_err(|e| {
                     let cleanup_kernel = Arc::clone(&kernel);
@@ -467,7 +472,9 @@ impl TranscriberEngine {
 
             // Get the vad configurations.
             // TODO: implement VadConfigs and replace -> likely should be split between realtime/offline
-            // not sure about how to handle
+            // not sure about how to handle.
+            // ALSO: should the user not wish to use VAD for offline, this should probably be an option,
+            // that will just chain the vad builder.
             let vad = Silero::try_new_whisper_offline_default().map_err(|e| {
                 let cleanup_kernel = Arc::clone(&kernel);
                 e.into()
@@ -515,12 +522,14 @@ impl TranscriberEngine {
             // Set up the offline_transcriber
 
             let (sender, receiver) = get_channel(INPUT_BUFFER_CAPACITY);
-
+            // Get the model retriever from the kernel.
+            let model_retriever = kernel.get_model_retriever();
             let mut offline_transcriber = OfflineTranscriberBuilder::new()
                 .with_configs(configs)
                 .with_audio(audio)
                 .with_channel_configurations(AudioChannelConfiguration::Mono)
                 .with_voice_activity_detector(vad)
+                .with_model_retreiver(model_retriever)
                 .build()
                 .map_err(|e| {
                     let cleanup_kernel = Arc::clone(&kernel);

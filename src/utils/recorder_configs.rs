@@ -8,7 +8,6 @@ use crate::utils::constants;
 )]
 pub enum RecordingFormat {
     I16,
-    I32,
     F32,
 }
 
@@ -22,9 +21,6 @@ impl RecordingFormat {
     pub fn tooltip(&self) -> &str {
         match self {
             RecordingFormat::I16 => "16-bit signed integer format. Audio CD quality.",
-            RecordingFormat::I32 => {
-                "32-bit signed integer format. Improved quality but slower to process."
-            }
             RecordingFormat::F32 => {
                 "32-bit floating point format. Highest dynamic range but large file size."
             }
@@ -134,6 +130,7 @@ impl Default for RecorderConfigs {
         let buffer_size = BufferSize::default();
         let channel = Channel::default();
         let format = RecordingFormat::default();
+        // TODO: move these to BandpassConfigs or similar -> Set globally and store in the kernel.
         let filter = false;
         let f_lower = constants::DEFAULT_F_LOWER;
         let f_higher = constants::DEFAULT_F_HIGHER;

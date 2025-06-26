@@ -16,7 +16,7 @@ egui = { version = "0.31.1", features = ["persistence", "serde", "deadlock_detec
 egui_dock = { version = "0.16.0", features = ["serde"] }
 egui_extras = { version = "0.31.1", features = ["svg"] }
 hound = "3.5.1"
-# TODO: remove. Refactor to LazyCell
+# TODO: remove.
 lazy_static = "1.5.0"
 maplit = "1.0.2"
 nvml-wrapper = "0.11.0"
@@ -48,6 +48,7 @@ arc-swap = "1.7.1"
 ort-sys = "=2.0.0-rc.9"
 ort = { version = "=2.0.0-rc.9", features = ["ndarray"] }
 thiserror = "2.0.12"
+scc = "2.3.4"
 
 [target.x86_64-apple-darwin.dependencies]
 metal = "0.32.0"
