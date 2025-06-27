@@ -812,6 +812,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "case_style"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0be601f05a919236af08cb96053cf9e9ebcfd08edca86cfad401591400f59896"
+
+[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2534,12 +2540,14 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.9.0"
+version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cea70ddb795996207ad57735b50c5982d8844f38ba9ee5f1aedcfb708a2aa11e"
+checksum = "fe4cd85333e22411419a0bcae1297d25e58c9443848b11dc6a86fefe8c78a661"
 dependencies = [
  "equivalent",
  "hashbrown",
+ "rayon",
+ "serde",
 ]
 
 [[package]]
@@ -2962,12 +2970,6 @@ checksum = "62bb907fe88d54d8d9ce32a3cceab4218ed2f6b7d35617cafe9adf84e43919cb"
 dependencies = [
  "libc",
 ]
-
-[[package]]
-name = "maplit"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
 
 [[package]]
 name = "matrixmultiply"
@@ -4458,6 +4460,7 @@ dependencies = [
  "atomic_enum",
  "biquad",
  "bson",
+ "case_style",
  "catppuccin-egui",
  "criterion",
  "crossbeam",
@@ -4468,10 +4471,9 @@ dependencies = [
  "egui_extras",
  "hound",
  "image",
+ "indexmap",
  "irox-egui-extras",
- "lazy_static",
  "log",
- "maplit",
  "metal 0.32.0",
  "nvml-wrapper",
  "ort",
@@ -4481,20 +4483,18 @@ dependencies = [
  "rfd",
  "ribble_whisper",
  "ron 0.10.1",
- "scc",
  "sdl2",
  "serde",
  "slab",
  "strum 0.27.1",
- "symphonia",
  "thiserror 2.0.12",
- "tokio",
+ "twox-hash",
 ]
 
 [[package]]
 name = "ribble_whisper"
 version = "0.1.1"
-source = "git+https://github.com/jordan-clayton/ribble-whisper.git#49543355e5170983f2413e0ba9e3268a15a7a567"
+source = "git+https://github.com/jordan-clayton/ribble-whisper.git#ff84af5b1260b7105bade859441657afc2bb7ab6"
 dependencies = [
  "crossbeam",
  "earshot",
@@ -4688,15 +4688,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "scc"
-version = "2.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22b2d775fb28f245817589471dd49c5edf64237f4a19d10ce9a92ff4651a27f4"
-dependencies = [
- "sdd",
-]
-
-[[package]]
 name = "schannel"
 version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4729,12 +4720,6 @@ dependencies = [
  "smithay-client-toolkit",
  "tiny-skia",
 ]
-
-[[package]]
-name = "sdd"
-version = "3.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "584e070911c7017da6cb2eb0788d09f43d789029b5877d3e5ecc8acf86ceee21"
 
 [[package]]
 name = "sdl2"
@@ -5742,6 +5727,15 @@ name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
+
+[[package]]
+name = "twox-hash"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b907da542cbced5261bd3256de1b3a1bf340a3d37f93425a07362a1d687de56"
+dependencies = [
+ "rand 0.9.1",
+]
 
 [[package]]
 name = "type-map"
