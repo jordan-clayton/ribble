@@ -14,6 +14,9 @@ use std::sync::Arc;
 use std::thread::panicking;
 use twox_hash::XxHash3_64;
 
+// TODO: since this has -very- little state to deal with, and there's some pointer
+// chasing involved already to work with RealtimeTranscriber, this should be moved
+// back into RibbleModelBank; the inner pointer is absolutely unnecessary.
 struct RibbleModelBankState {
     model_directory: PathBuf,
     model_map: RwLock<IndexMap<ModelId, Model>>,
@@ -183,10 +186,6 @@ impl Drop for RibbleModelBankState {
             self.serialize_model_map();
         }
     }
-}
-
-pub(crate) trait GetSharedModelRetriever<MR: ModelRetriever> {
-    fn get_model_retriever(&self) -> Arc<MR>;
 }
 
 // TODO! MOVE THIS TO SOMEWHERE AND THEN IMPLEMENT FOR RibbleModelBank + State -> Perhaps instead I rely on RAII semantics though, or both.
@@ -360,6 +359,7 @@ pub(crate) struct RibbleModelBank {
     inner: Arc<RibbleModelBankState>,
 }
 
+// TODO: Replace RibbleModelBank with its inner implementation.
 impl RibbleModelBank {
     pub(crate) fn new(model_directory: &Path) -> Result<Self, RibbleError> {
         let inner = Arc::new(RibbleModelBankState::new(model_directory)?);
@@ -367,11 +367,6 @@ impl RibbleModelBank {
     }
 }
 
-impl<MR: ModelRetriever> GetSharedModelRetriever<MR> for RibbleModelBank {
-    fn get_model_retriever(&self) -> Arc<MR> {
-        Arc::clone(&self.inner)
-    }
-}
 
 impl ConcurrentModelBank for RibbleModelBank {
     type Iter<'a> = RibbleModelBankIter<'a>;
@@ -418,5 +413,11 @@ impl ConcurrentModelBank for RibbleModelBank {
 
     fn refresh_model_bank(&self) -> Result<(), RibbleWhisperError> {
         self.inner.refresh_model_bank()
+    }
+}
+
+impl ModelRetriever for RibbleModelBank {
+    fn retrieve_model_path(&self, model_id: ModelId) -> Option<PathBuf> {
+        self.inner.retrieve_model_path(model_id)
     }
 }
