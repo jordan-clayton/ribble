@@ -8,13 +8,13 @@ pub(crate) mod utils;
 pub(crate) mod whisper_app_controller;
 
 // TODO: modify visibility if needed
-mod worker;
-mod transcriber;
-mod visualizer;
-mod recorder;
-mod progress;
 mod console;
 mod kernel;
+mod progress;
+mod recorder;
+mod transcriber;
+mod visualizer;
+mod worker;
 
 type RibbleWorkerHandle = JoinHandle<Result<RibbleMessage, RibbleAppError>>;
 
@@ -23,3 +23,4 @@ pub(crate) enum RibbleMessage {
     Progress(Progress),
     TranscriptionOutput(String),
 }
+

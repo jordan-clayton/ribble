@@ -1,7 +1,7 @@
 use parking_lot::RwLock;
 use slab::Slab;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 // NOTE: if the kernel is required here, migrate to an Arc<inner> state struct
 pub(super) struct ProgressEngine {
@@ -71,7 +71,8 @@ impl AtomicProgress {
     }
     // Progress in the range [0, 1] where 1 means 100% completion
     fn normalized(&self) -> f32 {
-        (self.pos.load(Ordering::Acquire) as f64 / self.capacity.load(Ordering::Acquire) as f64) as f32
+        (self.pos.load(Ordering::Acquire) as f64 / self.capacity.load(Ordering::Acquire) as f64)
+            as f32
     }
     fn is_finished(&self) -> bool {
         self.pos.load(Ordering::Acquire) == self.capacity.load(Ordering::Acquire)
@@ -100,38 +101,61 @@ impl Progress {
     }
 
     pub(crate) fn inc(&self, delta: u64) {
-        if let Self::Determinate { job_name: _, progress } = self {
+        if let Self::Determinate {
+            job_name: _,
+            progress,
+        } = self
+        {
             progress.inc(delta);
         }
     }
     pub(crate) fn dec(&self, delta: u64) {
-        if let Self::Determinate { job_name: _, progress } = self {
+        if let Self::Determinate {
+            job_name: _,
+            progress,
+        } = self
+        {
             progress.dec(delta);
         }
     }
     pub(crate) fn set(&self, pos: u64) {
-        if let Self::Determinate { job_name: _, progress } = self {
+        if let Self::Determinate {
+            job_name: _,
+            progress,
+        } = self
+        {
             progress.set(pos);
         }
     }
     pub(crate) fn reset(&self) {
-        if let Self::Determinate { job_name: _, progress } = self {
+        if let Self::Determinate {
+            job_name: _,
+            progress,
+        } = self
+        {
             progress.reset();
         }
     }
 
     pub(crate) fn progress(&self) -> f32 {
         match self {
-            Progress::Determinate { job_name: _, progress } => { progress.normalized() }
-            Progress::Indeterminate { .. } => { 1.0 }
+            Progress::Determinate {
+                job_name: _,
+                progress,
+            } => progress.normalized(),
+            Progress::Indeterminate { .. } => 1.0,
         }
     }
 
     // TODO: remove if never called
     pub(crate) fn is_finished(&self) -> bool {
         match self {
-            Progress::Determinate { job_name: _, progress } => { progress.is_finished() }
-            Progress::Indeterminate { .. } => { false }
+            Progress::Determinate {
+                job_name: _,
+                progress,
+            } => progress.is_finished(),
+            Progress::Indeterminate { .. } => false,
         }
     }
 }
+

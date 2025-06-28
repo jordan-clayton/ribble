@@ -1,32 +1,50 @@
-use crate::controller::console::ConsoleEngine;
-use crate::controller::console::ConsoleMessage;
-use crate::controller::progress::Progress;
-use crate::controller::progress::ProgressEngine;
+use crate::controller::console::{ConsoleEngine, ConsoleMessage};
+use crate::controller::progress::{Progress, ProgressEngine};
 use crate::controller::recorder::RecorderEngine;
 use crate::controller::transcriber::TranscriberEngine;
 use crate::controller::visualizer::{AnalysisType, VisualizerEngine};
 use crate::controller::worker::WorkerEngine;
-use crate::utils::errors::RibbleAppError;
+use crate::utils::audio_backend_proxy::AudioBackendProxy;
+use crate::utils::errors::{RibbleAppError, RibbleError};
 use crate::utils::model_bank::RibbleModelBank;
 use crate::utils::pcm_f32::IntoPcmF32;
-use crossbeam::channel::Receiver;
-use ribble_whisper::audio::microphone::AudioBackend;
-use ribble_whisper::whisper::model::{ModelId, ModelRetriever};
-use std::path::{Path, PathBuf};
+use crate::utils::vad_configs::VadConfigs;
+use arc_swap::ArcSwap;
+use ribble_whisper::audio::audio_backend::{AudioBackend, CaptureSpec};
+use ribble_whisper::audio::microphone::Sdl2Capture;
+use ribble_whisper::audio::recorder::SampleSink;
+use ribble_whisper::utils::Receiver;
+use ribble_whisper::whisper::model::ModelRetriever;
+use std::path::Path;
 use std::sync::Arc;
+
+pub(crate) enum TranscriberMethod {
+    Realtime,
+    Offline,
+}
 
 // TODO: add to this as necessary; these are "resource requests" and "reporting" for engine components to communicate via the Controller kernel.
 // e.g. AudioWorkerRunningState (not sold on that, but it's prooobably a good idea for the recorder icon).
-pub trait EngineKernel: Send + Sync {
-    // TODO: change return type once VAD configs is designed
-    fn get_vad_config(&self);
+//
+// TODO: If/when this trait gets too bloated, split into smaller interfaces so that types (e.g.
+// Worker, Recorder) are left with things they don't ever use.
+
+pub(crate) trait EngineKernel: Send + Sync {
+    type Retriever: ModelRetriever;
+
+    fn get_vad_configs(&self, transcriber_method: TranscriberMethod) -> VadConfigs;
     // TODO: change return type once BandpassConfigs is designed
     fn get_bandpass_config(&self);
 
     // TODO: not 100% sure about this -just yet-.
     // Also not 100% sure about how to handle the temporary audio file.
     fn get_audio_file_path(&self) -> Option<&Path>;
-    fn get_audio_backend(&self) -> &AudioBackend;
+
+    fn request_audio_capture<S: SampleSink>(
+        &self,
+        spec: CaptureSpec,
+        sink: S,
+    ) -> Result<Sdl2Capture<S>, RibbleError>;
 
     // TODO: this might need a trait-bound--revisit once the RecordingEngine is finished
     // TODO: The error type needs to change once errors are refactored
@@ -51,10 +69,11 @@ pub trait EngineKernel: Send + Sync {
     // TODO: this likely should not be exposed--> I don't see a use for it that doesn't indicate a coupling problem.
     // For now, leave it.
     fn get_visualizer_analysis_type(&self) -> AnalysisType;
+    fn get_model_retriever(&self) -> Arc<Self::Retriever>;
+
     // TODO: possibly add a "fatal"/abort app mechanism for "unrecoverable" or "should be unrecoverable" errors.
     // If any background threads are panicking, there's an implementation error.
     // In this instance, the app should probably crash because important work can no longer be done.
-
     fn cleanup_progress_jobs(&self, ids: &[usize]);
 }
 
@@ -63,79 +82,36 @@ pub trait EngineKernel: Send + Sync {
 // TODO: Consider implementing a DownloadEngine to bury the implementation. -> It might be sufficient to just keep that in the controller & send to the WorkerEngine.
 // TODO: Ibid if bringing in integrity-checking
 // NOTE: if it becomes absolutely necessary (e.g. testing), factor the engine components out into traits.
-// The EngineKernel is mockable, but the Engine components are not (yet).
-
-// NOTE: With the following implementation, the Kernel and the EngineKernel need to be of the same
-// ModelRetriever type so that the TranscriberEngine<M: ModelRetriever> can monomorphize
-// (because RealtimeTranscriber does static dispatch)
-
-// RibbleModelBank can also be generic, but that introduces a complexity problem I'm not keen to solve right now
-// Instead, when mocking, mock the Kernel itself and any necessary swappable traits ->
-// ConcurrentModelBank is mainly just a trait to keep the code structure.
-
-// TODO: All engines that take a WeakRef to the kernel, must also have the same trait bounds
-// as the kernel itself.
-// The trait bounds must be known at compile time for RealtimeTranscriber to work.
-// Since all engines with a Weak<dyn EngineKernel> have to know what type ModelRetriever is
-//
-
-// NOTE: This might be a compilation pain point.
-// All engines that have a Weak<dyn Kernel<M>> need to monomorphize.
-// EngineKernel must have a trait bound for TranscriberEngine to compile, so this means
-// that all engines must have either: Weak<dyn EngineKernel<M>>, or the engine must be *Engine<M>.
-// TranscriberEngine must statically dispatch, other engines could be dynamic, but
-// runtime dispatch is not a major architectural requirement for this project.
-
-// Ideas thus far:
-// - Delegate object:
-// Pros: Transcribers get a concrete type and compile
-// Cons: mild pointer overhead, lose freedom of generics
-
-// - Monomorphize in the Kernel implementation structs + Engine Kernel
-// Pros: Transcribers get a concrete type and compile
-// Cons: RibbleModelBankState needs to be exposed, or a delegate object -> crusty + extra overhead
-// More cons: It's really crusty to try and Monomorphize EngineKernel
-
-// - Implement ModelRetriever for Kernel, monomorphize TranscriberEngine with type Kernel
-
-// Pros: Reasonable indirection (delegate to RibbleModelBank -> Move inner state to RibbleModelbank)
-// Cons: A little couple-y and lose the freedom of generics (not that it really matters)
-// More cons: lots of shared references to the kernel.
-
-// - Implement ModelRetriever for Kernel, make a concrete struct that takes a:
-// Closure / Arc<dyn EngineKernel> to pass-through
-
-// (HOPEFULLY) WORKING SOLUTION THUS FAR.
-// Pros: Full separation of concerns, keep freedom of dynamic dispatch ->
-// dynamic hot-swappable kernels are possibly good for future features.
-
-// Cons: Slightly more indirection:
-// e.g. Arc deref -> Struct::method() -> *Arc dyn dereference -> function_call() -> RibbleModelBank
-// The last function_call() -> RibbleModelBank might be inlined, so this will still be okay.
-
+// The EngineKernel is mockable, but the Engine components are not (yet)--but likely don't need to
+// be mocked and can be used as is..
 
 pub struct Kernel {
-    // TODO: additional state (non-engines), VadConfigs, BandpassConfigs, file paths,
-    // Also, the audio backend.
-    // Also twice: the ModelRetriever.
-    audio_backend: AudioBackend,
-    transcriber_engine: TranscriberEngine,
+    // TODO: additional state (non-engines), BandpassConfigs, file paths,
+    // TODO: the VAD configs might be better to be encapsulated into an engine/component.
+    realtime_vad_configs: ArcSwap<VadConfigs>,
+    offline_vad_configs: ArcSwap<VadConfigs>,
+    audio_backend: AudioBackendProxy,
+    transcriber_engine: TranscriberEngine<RibbleModelBank, Kernel>,
     recorder_engine: RecorderEngine,
     console_engine: ConsoleEngine,
     progress_engine: ProgressEngine,
     visualizer_engine: VisualizerEngine,
-    worker_engine: WorkerEngine,
-    model_bank: RibbleModelBank,
+    worker_engine: WorkerEngine<RibbleModelBank, Kernel>,
+    // Since model bank needs to be accessed elsewhere (e.g. TranscriberEngine), this needs to be
+    // in a shared pointer.
+    model_bank: Arc<RibbleModelBank>,
 }
 
 // TODO: implement trait
 // NOTE: most of these are blocking calls (as of now with concrete components).
 // Anything that involves writing is almost guaranteed to involve trying to grab a write lock.
 impl EngineKernel for Kernel {
-    // I'm not sure that it's entirely possible to get this to monomorphize into a single VAD type
-    // It is more likely that enum-based dispatch or dynamic dispatch will be required.
-    fn get_vad_config(&self) {
-        todo!()
+    type Retriever = RibbleModelBank;
+    fn get_vad_configs(&self, transcriber_method: TranscriberMethod) -> VadConfigs {
+        match transcriber_method {
+            TranscriberMethod::Realtime => *self.realtime_vad_configs.load_full(),
+            TranscriberMethod::Offline => *self.offline_vad_configs.load_full(),
+        }
     }
 
     fn get_bandpass_config(&self) {
@@ -146,9 +122,14 @@ impl EngineKernel for Kernel {
         todo!()
     }
 
-    fn get_audio_backend(&self) -> &AudioBackend {
-        &self.audio_backend
+    fn request_audio_capture<S: SampleSink>(
+        &self,
+        spec: CaptureSpec,
+        sink: S,
+    ) -> Result<Sdl2Capture<S>, RibbleError> {
+        self.audio_backend.open_capture(spec, sink).into()
     }
+
     fn request_writer<T>(
         &self,
         audio_stream: Receiver<Arc<[T]>>,
@@ -179,7 +160,6 @@ impl EngineKernel for Kernel {
         self.transcriber_engine
             .finalize_transcription(transcription);
     }
-
     fn visualizer_running(&self) -> bool {
         self.visualizer_engine.visualizer_running()
     }
@@ -193,15 +173,13 @@ impl EngineKernel for Kernel {
         self.visualizer_engine.get_visualizer_analysis_type()
     }
 
+    fn get_model_retriever(&self) -> Arc<Self::Retriever> {
+        Arc::clone(&self.model_bank)
+    }
+
     fn cleanup_progress_jobs(&self, ids: &[usize]) {
         for id in ids {
             self.progress_engine.remove_progress_job(*id);
         }
-    }
-}
-
-impl ModelRetriever for Kernel {
-    fn retrieve_model_path(&self, model_id: ModelId) -> Option<PathBuf> {
-        self.model_bank.retrieve_model_path(model_id)
     }
 }

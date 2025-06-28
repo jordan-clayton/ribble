@@ -28,7 +28,7 @@ serde = { version = "1.0.204", features = ["derive"] }
 # If strum can be eliminated here, do so.
 strum = "0.27.1"
 # TODO: determine whether or not to include integrity checking utilities; might be out of scope
-ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.1.1", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler"] }
+ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.1.1", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler", "sdl2-static"] }
 # Implement genuine logging once the app has been rewritten.
 log = "0.4.22"
 # TODO: This is for clipboard but might be deprecated; check for alternatives
@@ -52,6 +52,7 @@ thiserror = "2.0.12"
 indexmap = { version = "2.10.0", features = ["serde", "rayon"] }
 case_style = "0.2.1"
 twox-hash = { version = "2.1.1", features = ["xxhash3_64"] }
+enum_dispatch = "0.3.13"
 
 [target.x86_64-apple-darwin.dependencies]
 metal = "0.32.0"

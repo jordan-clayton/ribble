@@ -10,24 +10,18 @@ use std::fs;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, ErrorKind};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::thread::panicking;
 use twox_hash::XxHash3_64;
 
-// TODO: since this has -very- little state to deal with, and there's some pointer
-// chasing involved already to work with RealtimeTranscriber, this should be moved
-// back into RibbleModelBank; the inner pointer is absolutely unnecessary.
-struct RibbleModelBankState {
+pub (crate) struct RibbleModelBank {
     model_directory: PathBuf,
     model_map: RwLock<IndexMap<ModelId, Model>>,
 }
 
-impl RibbleModelBankState {
-    // TODO: maybe don't include the file extension and dynamically generate if using different serializer.
+impl RibbleModelBank {
     const MODEL_SHORT_NAMES_MAP: &'static str = "model_names.ron";
     const DEFAULT_MODEL_MAP_SIZE: usize = 8;
 
-    // TODO: pick an actual seed value, can even just be zero.
     const MODEL_ID_SEED: u64 = 0;
     pub fn new(model_directory: &Path) -> Result<Self, RibbleError> {
         let model_map = RwLock::new(IndexMap::with_capacity(Self::DEFAULT_MODEL_MAP_SIZE));
@@ -180,7 +174,7 @@ impl RibbleModelBankState {
     }
 }
 
-impl Drop for RibbleModelBankState {
+impl Drop for RibbleModelBank {
     fn drop(&mut self) {
         if !panicking() {
             self.serialize_model_map();
@@ -205,7 +199,7 @@ impl<'a> Iterator for RibbleModelBankIter<'a> {
     }
 }
 
-impl ConcurrentModelBank for RibbleModelBankState {
+impl ConcurrentModelBank for RibbleModelBank {
     // TODO: this very obviously will not compile, but it gets the point across.
     // Make a wrapper struct that implements Iterator that holds the write guard.
     type Iter<'a>
@@ -346,78 +340,11 @@ impl ConcurrentModelBank for RibbleModelBankState {
     }
 }
 
-impl ModelRetriever for RibbleModelBankState {
+impl ModelRetriever for RibbleModelBank {
     fn retrieve_model_path(&self, model_id: ModelId) -> Option<PathBuf> {
         self.model_map
             .read()
             .get(&model_id)
             .and_then(|model| Some(self.model_directory.join(model.file_name())))
-    }
-}
-
-pub(crate) struct RibbleModelBank {
-    inner: Arc<RibbleModelBankState>,
-}
-
-// TODO: Replace RibbleModelBank with its inner implementation.
-impl RibbleModelBank {
-    pub(crate) fn new(model_directory: &Path) -> Result<Self, RibbleError> {
-        let inner = Arc::new(RibbleModelBankState::new(model_directory)?);
-        Ok(Self { inner })
-    }
-}
-
-
-impl ConcurrentModelBank for RibbleModelBank {
-    type Iter<'a> = RibbleModelBankIter<'a>;
-
-    fn model_directory(&self) -> &Path {
-        self.inner.model_directory()
-    }
-
-    fn insert_model(&self, model: Model) -> Result<ModelId, RibbleWhisperError> {
-        self.inner.insert_model(model)
-    }
-
-    fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError> {
-        self.inner.model_exists_in_storage(model_id)
-    }
-
-    fn get_model(&self, model_id: ModelId) -> Option<&Model> {
-        self.inner.get_model(model_id)
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        self.inner.iter()
-    }
-
-    fn rename_model(
-        &self,
-        model_id: ModelId,
-        new_name: String,
-    ) -> Result<Option<ModelId>, RibbleWhisperError> {
-        self.inner.rename_model(model_id, new_name)
-    }
-
-    fn change_model_file_name(
-        &self,
-        model_id: ModelId,
-        new_file_name: String,
-    ) -> Result<Option<ModelId>, RibbleWhisperError> {
-        self.inner.change_model_file_name(model_id, new_file_name)
-    }
-
-    fn remove_model(&self, model_id: ModelId) -> Result<Option<Model>, RibbleWhisperError> {
-        self.inner.remove_model(model_id)
-    }
-
-    fn refresh_model_bank(&self) -> Result<(), RibbleWhisperError> {
-        self.inner.refresh_model_bank()
-    }
-}
-
-impl ModelRetriever for RibbleModelBank {
-    fn retrieve_model_path(&self, model_id: ModelId) -> Option<PathBuf> {
-        self.inner.retrieve_model_path(model_id)
     }
 }

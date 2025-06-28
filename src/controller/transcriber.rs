@@ -1,5 +1,5 @@
 use crate::controller::console::ConsoleMessage;
-use crate::controller::kernel::EngineKernel;
+use crate::controller::kernel::{EngineKernel, TranscriberMethod};
 use crate::controller::progress::Progress;
 use crate::controller::{RibbleMessage, RibbleWorkerHandle};
 use crate::utils::audio_analysis::bandpass_filter;
@@ -12,25 +12,25 @@ use crossbeam::channel::{Receiver, TrySendError};
 use crossbeam::scope;
 use crossbeam::thread::{Scope, ScopedJoinHandle};
 use hound::{SampleFormat, WavSpec};
+use ribble_whisper::audio::AudioChannelConfiguration;
+use ribble_whisper::audio::audio_backend::CaptureSpec;
 use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
 use ribble_whisper::audio::loading::{audio_file_num_frames, load_normalized_audio_file};
-use ribble_whisper::audio::microphone::{FanoutMicCapture, MicCapture};
-use ribble_whisper::audio::recorder::UseArc;
-use ribble_whisper::audio::AudioChannelConfiguration;
+use ribble_whisper::audio::microphone::MicCapture;
+use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
 use ribble_whisper::transcriber::vad::Silero;
 use ribble_whisper::transcriber::{
-    redirect_whisper_logging_to_hooks, CallbackTranscriber, Transcriber, TranscriptionSnapshot,
-    WhisperCallbacks, WhisperControlPhrase, WhisperOutput,
+    CallbackTranscriber, Transcriber, TranscriptionSnapshot, WhisperCallbacks,
+    WhisperControlPhrase, WhisperOutput, redirect_whisper_logging_to_hooks,
 };
 use ribble_whisper::utils::callback::StaticRibbleWhisperCallback;
 use ribble_whisper::utils::constants::{INPUT_BUFFER_CAPACITY, WHISPER_SAMPLE_RATE};
 use ribble_whisper::utils::errors::RibbleWhisperError;
 use ribble_whisper::utils::get_channel;
 use ribble_whisper::whisper::configs::{WhisperConfigsV2, WhisperRealtimeConfigs};
-use ribble_whisper::whisper::model::{ModelId, ModelRetriever};
-use std::path::PathBuf;
+use ribble_whisper::whisper::model::ModelRetriever;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
@@ -44,24 +44,9 @@ pub(crate) enum OfflineTranscriberFeedback {
     Progressive,
 }
 
-trait ModelRetrievingEngineKernel: EngineKernel + ModelRetriever {}
-impl<T: EngineKernel + ModelRetriever> ModelRetrievingEngineKernel for T {}
-
-// Probably just ModelRetriever is sufficient here.
-struct KernelModelRetriever {
-    retriever: Arc<dyn ModelRetriever>,
-}
-
-impl ModelRetriever for KernelModelRetriever {
-    fn retrieve_model_path(&self, model_id: ModelId) -> Option<PathBuf> {
-        self.retriever.retrieve_model_path(model_id)
-    }
-}
-
-
-struct TranscriberState {
+struct TranscriberState<M: ModelRetriever, E: EngineKernel<Retriever = M>> {
     // Handle for interfacing with the kernel
-    engine_kernel: Weak<dyn ModelRetrievingEngineKernel>,
+    engine_kernel: Weak<E>,
     // TODO: refactor configs impl in ribble_whisper.
     realtime_configs: ArcSwap<WhisperRealtimeConfigs>,
     offline_configs: ArcSwap<WhisperConfigsV2>,
@@ -72,7 +57,7 @@ struct TranscriberState {
     current_control_phrase: ArcSwap<WhisperControlPhrase>,
 }
 
-impl TranscriberState {
+impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberState<M, E> {
     fn clear_transcription(&self) {
         self.current_snapshot
             .store(Arc::new(TranscriptionSnapshot::default()));
@@ -87,7 +72,7 @@ enum TranscriptionType {
     Realtime,
     Offline,
 }
-impl TranscriberState {
+impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberState<M, E> {
     fn print_loop<'scope>(
         &self,
         scope: &'scope Scope,
@@ -118,11 +103,11 @@ impl TranscriberState {
     }
 }
 
-pub(super) struct TranscriberEngine {
-    inner: Arc<TranscriberState>,
+pub(super) struct TranscriberEngine<M: ModelRetriever, E: EngineKernel<Retriever = M>> {
+    inner: Arc<TranscriberState<M, E>>,
 }
 
-impl TranscriberEngine {
+impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> {
     // These get passed in upon construction; they should be serialized separately.
     pub(super) fn new(
         realtime_configs: WhisperRealtimeConfigs,
@@ -153,8 +138,8 @@ impl TranscriberEngine {
         Self { inner }
     }
 
-    pub(super) fn set_engine_kernel(&self, kernel: Weak<dyn ModelRetrievingEngineKernel>) {
-        *self.inner.engine_kernel = kernel;
+    pub(super) fn set_engine_kernel(&self, kernel_handle: Weak<E>) {
+        *self.inner.engine_kernel = kernel_handle;
     }
 
     // TODO: remove if unused.
@@ -180,7 +165,7 @@ impl TranscriberEngine {
     // Takes a closure that updates the realtime configs via builder.
     // It should be possible to just send in builder methods by name.
     pub(super) fn write_realtime_configs<
-        F: FnMut(WhisperRealtimeConfigs) -> WhisperRealtimeConfigs,
+        F: FnOnce(WhisperRealtimeConfigs) -> WhisperRealtimeConfigs,
     >(
         &self,
         update_closure: F,
@@ -192,7 +177,7 @@ impl TranscriberEngine {
     }
     // Takes a closure that updates the offline configs via builder.
     // It should be possible to just send in builder methods by name.
-    pub(super) fn write_offline_configs<F: FnMut(WhisperConfigsV2) -> WhisperConfigsV2>(
+    pub(super) fn write_offline_configs<F: FnOnce(WhisperConfigsV2) -> WhisperConfigsV2>(
         &self,
         update_closure: F,
     ) {
@@ -263,42 +248,31 @@ impl TranscriberEngine {
 
             // Transcription channels
             let (text_sender, text_receiver) = get_channel(INPUT_BUFFER_CAPACITY);
-            // TODO: Handle actual vad configurations; these should be exposed sooomewhere.
-            // Once configs are hammered out, read and convert to VAD object.
-            // NOTE: this might get tricky with dyn impl + the type of the realtime transcriber.
-            // Not 100% sure how to go about this just yet; probably an enum that can be unpacked
-            // with a tight match on the builder method.
-            // TODO: FIRST ORDER OF BUSINESS: FIGURE THIS OUT!
-            // *** EITHER WRITE AN ENUM + DYNAMIC DISPATCH, OR MATCH CLOSER TO STARTING TRANSCRIPTION.
-            let vad = Silero::try_new_whisper_realtime_default().map_err(|e| {
+            let vad_configs = kernel.get_vad_configs(TranscriberMethod::Realtime);
+            let vad = vad_configs.build_vad().map_err(|e| {
                 let cleanup_kernel = Arc::clone(&kernel);
                 e.into()
                     .with_cleanup(cleanup_kernel.remove_progress_job(setup_id))
             })?;
+
             // Set up the mic capture
-            let audio_backend = kernel.get_audio_backend();
-            let mic: FanoutMicCapture<UseArc<f32>> = audio_backend
-                .build_whisper_fanout_default(audio_sender)
-                .map_err(|e| {
-                    let cleanup_kernel = Arc::clone(&kernel);
-                    e.into()
-                        .with_cleanup(cleanup_kernel.remove_progress_job(setup_id))
-                })?;
+            let spec = CaptureSpec::default();
+            let sink = ArcChannelSink::new(audio_sender);
+
+            let mic = kernel.request_audio_capture(spec, sink)?;
 
             // Get a copy of the configs
             let configs = (*thread_inner.realtime_configs.load().clone()).clone();
 
             // Set the model retriever
-            // Since the retriever is dynamic, it has to be wrapped in an adapter for the duration of transcription
-            let model_retriever = Arc::clone(&kernel);
-            let wrapped_model_retriever = KernelModelRetriever { retriever: Arc::clone(&model_retriever) };
+            let model_retriever = kernel.get_model_retriever();
 
             let (transcriber, transcriber_handle) = RealtimeTranscriberBuilder::new()
                 .with_configs(configs)
                 .with_audio_buffer(&audio_ring_buffer)
                 .with_output_sender(text_sender)
                 .with_voice_activity_detector(vad)
-                .with_model_retriever(wrapped_model_retriever)
+                .with_shared_model_retriever(model_retriever)
                 .build()
                 .map_err(|e| {
                     let cleanup_kernel = Arc::clone(&kernel);
@@ -490,19 +464,8 @@ impl TranscriberEngine {
 
             let setup_id = kernel.add_progress_job(setup_progress);
 
-            // Get the vad configurations.
-            // TODO: implement VadConfigs and replace -> likely should be split between realtime/offline
-            // not sure about how to handle.
-            // ALSO: should the user not wish to use VAD for offline, this should probably be an option,
-            // that will just chain the vad builder.
-
-            // TODO: if this needs to be monomorphized, this will need to be matched a lot closer to the transcription loop, either
-            // through enum matching lower down, or by accepting dynamic dispatch in the hot transcription loop.
-            // OR the method needs to pass the VAD object from the kernel.
-
-            // TODO: FIRST ORDER OF BUSINESS: FIGURE THIS OUT!
-            // *** EITHER WRITE AN ENUM + DYNAMIC DISPATCH, OR MATCH CLOSER TO STARTING TRANSCRIPTION.
-            let vad = Silero::try_new_whisper_offline_default().map_err(|e| {
+            let vad_configs = kernel.get_vad_configs(TranscriberMethod::Offline);
+            let vad = vad_configs.build_vad().map_err(|e| {
                 let cleanup_kernel = Arc::clone(&kernel);
                 e.into()
                     .with_cleanup(cleanup_kernel.remove_progress_job(setup_id))
@@ -510,17 +473,17 @@ impl TranscriberEngine {
             // Get the configs
             let configs = (*thread_inner.offline_configs.load().clone()).clone();
             // Get the audio file path (TODO: figure out how to re-handle the temporary audio file)
-            let audio_file_path = kernel.get_audio_file_path().ok_or(
-                RibbleWhisperError::ParameterError(
+            let audio_file_path = kernel
+                .get_audio_file_path()
+                .ok_or(RibbleWhisperError::ParameterError(
                     "File path not supplied to offline transcriber. This should not happen!"
                         .to_string(),
-                )
-                    .map_err(|e| {
-                        let cleanup_kernel = Arc::clone(&kernel);
-                        e.into()
-                            .with_cleanup(cleanup_kernel.remove_progress_job(setup_id))
-                    }),
-            )?;
+                ))
+                .map_err(|e| {
+                    let cleanup_kernel = Arc::clone(&kernel);
+                    e.into()
+                        .with_cleanup(cleanup_kernel.remove_progress_job(setup_id))
+                })?;
 
             // Prep a handle to the kernel to send to the callback.
             let callback_kernel = Arc::clone(&kernel);
@@ -551,15 +514,14 @@ impl TranscriberEngine {
             let (sender, receiver) = get_channel(INPUT_BUFFER_CAPACITY);
             // Set the model retriever
             // Since the retriever is dynamic, it has to be wrapped in an adapter for the duration of transcription
-            let model_retriever = Arc::clone(&kernel);
-            let wrapped_model_retriever = KernelModelRetriever { retriever: Arc::clone(&model_retriever) };
 
-            let mut offline_transcriber = OfflineTranscriberBuilder::<Silero, _>::new()
+            let model_retriever = kernel.get_model_retriever();
+            let offline_transcriber = OfflineTranscriberBuilder::<Silero, _>::new()
                 .with_configs(configs)
                 .with_audio(audio)
                 .with_channel_configurations(AudioChannelConfiguration::Mono)
                 .with_voice_activity_detector(vad)
-                .with_model_retreiver(wrapped_model_retriever)
+                .with_shared_model_retriever(model_retriever)
                 .build()
                 .map_err(|e| {
                     let cleanup_kernel = Arc::clone(&kernel);

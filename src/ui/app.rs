@@ -5,12 +5,17 @@ use catppuccin_egui::Theme;
 use eframe::Storage;
 use egui::{Event, Key, ViewportCommand, Visuals};
 use egui_dock::{DockArea, DockState, NodeIndex, Style, SurfaceIndex, TabIndex};
+use ribble_whisper::audio::recorder::ArcChannelSink;
+use ribble_whisper::audio::audio_backend::{AudioBackend, Sdl2Backend, default_backend}
+use crate::utils::audio_backend_proxy::{AudioCaptureRequest, AudioBackendProxy};
+use crate::utils::errors::RibbleError;
+use ribble_whisper::utils::{Sender, Receiver, get_channel};
 
 use crate::controller::console::ConsoleMessage;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::{
-        controller_tabs::{r#static, realtime, recording},
+        controller_tabs::{realtime, recording, r#static},
         display_tabs::{console, progress, transcription, visualizer},
         tab_viewer,
         whisper_tab::{FocusTab, WhisperTab},
@@ -23,6 +28,48 @@ use crate::{
     },
 };
 
+pub struct Ribble {
+    // TODO: rename tabs
+    tree: DockState<WhisperTab>,
+    // TODO: rewrite controller
+    //controller: RibbleController,
+    sdl: sdl2::Sdl,
+    backend: Sdl2Backend,
+    // This needs to be polled in the UI loop to handle
+    capture_requests: Receiver<AudioCaptureRequest>,
+    // TODO: background thread for saving, RAII
+}
+
+impl Ribble {
+    // NOTE: this should really only take the system theme if it's... necessary?
+    // I do not remember what the heck I was doing.
+    pub fn new() -> Result<Self, RibbleError> {
+        // Pack these in the app struct so they live on the main thread.
+        let (sdl_ctx, backend) = default_backend()?;
+
+        // This channel allows the kernel to request a mic capture from SDL.
+        let (request_sender, request_receiver) = get_channel(1);
+
+        // Send this to the kernel
+        let backend_proxy = AudioBackendProxy::new(request_sender);
+
+
+        todo!("App Constructor");
+        // Deserialize the app tree
+    }
+}
+
+
+impl eframe::App for Ribble {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        while let Ok(request) = self.capture_requests.try_recv() {
+            request(&self.backend);
+        }
+        todo!("Finish draw loop.")
+    }
+}
+
+// OLD IMPLEMENTATION -> REMOVE ONCE APP REWRITTEN
 pub struct WhisperApp {
     tree: DockState<WhisperTab>,
     closed_tabs: HashMap<String, WhisperTab>,
