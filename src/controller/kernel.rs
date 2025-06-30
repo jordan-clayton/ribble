@@ -28,6 +28,7 @@ pub(crate) enum TranscriberMethod {
 //
 // TODO: If/when this trait gets too bloated, split into smaller interfaces so that types (e.g.
 // Worker, Recorder) are left with things they don't ever use.
+// TODO TWICE: Remove the EngineKernel -> it's not the right way to communicate.
 
 pub(crate) trait EngineKernel: Send + Sync {
     type Retriever: ModelRetriever;
@@ -60,7 +61,6 @@ pub(crate) trait EngineKernel: Send + Sync {
     fn update_progress_job(&self, id: usize, delta: u64);
     fn remove_progress_job(&self, id: usize);
     fn send_console_message(&self, message: ConsoleMessage);
-    fn finalize_transcription(&self, transcription: String);
     // TODO: this likely should not be exposed--> I don't see a use for it that doesn't indicate a coupling problem.
     // For now, leave it.
     fn visualizer_running(&self) -> bool;
@@ -85,6 +85,9 @@ pub(crate) trait EngineKernel: Send + Sync {
 // The EngineKernel is mockable, but the Engine components are not (yet)--but likely don't need to
 // be mocked and can be used as is..
 
+// TODO: remove the monomorphization -> do it at the function level.
+//
+// Instead, write delegate methods here that the controller will call
 pub struct Kernel {
     // TODO: additional state (non-engines), BandpassConfigs, file paths,
     // TODO: the VAD configs might be better to be encapsulated into an engine/component.
@@ -92,7 +95,7 @@ pub struct Kernel {
     offline_vad_configs: ArcSwap<VadConfigs>,
     audio_backend: AudioBackendProxy,
     transcriber_engine: TranscriberEngine<RibbleModelBank, Kernel>,
-    recorder_engine: RecorderEngine,
+    recorder_engine: RecorderEngine<RibbleModelBank, Kernel>,
     console_engine: ConsoleEngine,
     progress_engine: ProgressEngine,
     visualizer_engine: VisualizerEngine,
@@ -156,14 +159,11 @@ impl EngineKernel for Kernel {
         self.console_engine.add_console_message(message);
     }
 
-    fn finalize_transcription(&self, transcription: String) {
-        self.transcriber_engine
-            .finalize_transcription(transcription);
-    }
     fn visualizer_running(&self) -> bool {
         self.visualizer_engine.visualizer_running()
     }
 
+    // TODO: this should just be a single message queue.
     fn update_visualizer_data<T: IntoPcmF32>(&self, buffer: Arc<[T]>, sample_rate: f64) {
         self.visualizer_engine
             .update_visualizer_data(buffer, sample_rate);

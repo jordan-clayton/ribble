@@ -1,147 +1,233 @@
-use strum::{Display, EnumIter};
+use ribble_whisper::audio::audio_backend::CaptureSpec;
+use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
 
-use crate::utils::constants;
-
-// TODO: refactor these and clean up -> but likely worth keeping.
 #[derive(
-    Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter,
+    Default,
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    EnumString,
+    Display,
+    EnumIter,
+    AsRefStr,
+    IntoStaticStr,
 )]
-pub enum RecordingFormat {
-    I16,
+pub(crate) enum RibbleRecordingFormat {
+    #[default]
     F32,
+    I16,
 }
 
-impl Default for RecordingFormat {
-    fn default() -> Self {
-        Self::I16
-    }
-}
-
-impl RecordingFormat {
+impl RibbleRecordingFormat {
     pub fn tooltip(&self) -> &str {
         match self {
-            RecordingFormat::I16 => "16-bit signed integer format. Audio CD quality.",
-            RecordingFormat::F32 => {
+            RibbleRecordingFormat::F32 => {
                 "32-bit floating point format. Highest dynamic range but large file size."
             }
+
+            RibbleRecordingFormat::I16 => "16-bit signed integer format. Audio CD quality.",
         }
     }
 }
 
 #[derive(
-    Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter,
-)]
-pub enum Channel {
     Default,
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    EnumString,
+    Display,
+    EnumIter,
+    AsRefStr,
+    IntoStaticStr,
+)]
+pub(crate) enum RibbleChannels {
+    #[default]
+    Auto,
     Mono,
     Stereo,
 }
 
-impl Channel {
-    pub fn num_channels(&self) -> Option<u8> {
+impl RibbleChannels {
+    pub(crate) fn into_num_channels(self) -> Option<u8> {
         match self {
-            Channel::Default => None,
-            Channel::Mono => Some(1),
-            Channel::Stereo => Some(2),
+            RibbleChannels::Auto => None,
+            RibbleChannels::Mono => Some(1),
+            RibbleChannels::Stereo => Some(2),
         }
     }
 }
 
-impl Default for Channel {
-    fn default() -> Self {
-        Self::Default
+impl From<Option<u8>> for RibbleChannels {
+    fn from(value: Option<u8>) -> Self {
+        match value {
+            Some(1) => RibbleChannels::Mono,
+            Some(2) => RibbleChannels::Stereo,
+            None | _ => RibbleChannels::Auto,
+        }
+    }
+}
+
+impl From<RibbleChannels> for Option<u8> {
+    fn from(value: RibbleChannels) -> Self {
+        value.into_num_channels()
     }
 }
 
 #[derive(
-    Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter,
-)]
-pub enum SampleRate {
     Default,
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    EnumString,
+    Display,
+    EnumIter,
+    AsRefStr,
+    IntoStaticStr,
+)]
+pub(crate) enum RibbleSampleRate {
+    #[default]
+    Auto,
     Low,
     Medium,
     High,
     Highest,
 }
 
-impl SampleRate {
-    pub fn sample_rate(&self) -> Option<i32> {
+impl RibbleSampleRate {
+    pub(crate) fn into_sample_rate(self) -> Option<usize> {
         match self {
-            SampleRate::Default => None,
-            SampleRate::Low => Some(8000),
-            SampleRate::Medium => Some(16000),
-            SampleRate::High => Some(22050),
-            SampleRate::Highest => Some(44100),
+            RibbleSampleRate::Auto => None,
+            RibbleSampleRate::Low => Some(8000),
+            RibbleSampleRate::Medium => Some(16000),
+            RibbleSampleRate::High => Some(22050),
+            RibbleSampleRate::Highest => Some(44100),
         }
     }
 }
 
-impl Default for SampleRate {
-    fn default() -> Self {
-        Self::Default
+impl From<Option<usize>> for RibbleSampleRate {
+    fn from(value: Option<usize>) -> Self {
+        match value {
+            Some(8000) => RibbleSampleRate::Low,
+            Some(16000) => RibbleSampleRate::Medium,
+            Some(22050) => RibbleSampleRate::High,
+            Some(44100) => RibbleSampleRate::Highest,
+            None | _ => RibbleSampleRate::Auto,
+        }
+    }
+}
+
+impl From<RibbleSampleRate> for Option<usize> {
+    fn from(value: RibbleSampleRate) -> Self {
+        value.into_sample_rate()
     }
 }
 
 #[derive(
-    Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Display, EnumIter,
-)]
-pub enum BufferSize {
     Default,
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    EnumString,
+    Display,
+    EnumIter,
+    AsRefStr,
+    IntoStaticStr,
+)]
+pub enum RibblePeriod {
+    #[default]
+    Auto,
     Small,
     Medium,
     Large,
     Huge,
 }
 
-impl BufferSize {
-    pub fn size(&self) -> Option<u16> {
+impl RibblePeriod {
+    pub(crate) fn into_period(self) -> Option<usize> {
         match self {
-            BufferSize::Default => None,
-            BufferSize::Small => Some(512),
-            BufferSize::Medium => Some(1024),
-            BufferSize::Large => Some(2048),
-            BufferSize::Huge => Some(4096),
+            RibblePeriod::Auto => None,
+            RibblePeriod::Small => Some(512),
+            RibblePeriod::Medium => Some(1024),
+            RibblePeriod::Large => Some(2048),
+            RibblePeriod::Huge => Some(4096),
         }
     }
 }
 
-impl Default for BufferSize {
-    fn default() -> Self {
-        Self::Default
+impl From<Option<usize>> for RibblePeriod {
+    fn from(value: Option<usize>) -> Self {
+        match value {
+            Some(512) => RibblePeriod::Small,
+            Some(1024) => RibblePeriod::Medium,
+            Some(2048) => RibblePeriod::Large,
+            Some(4096) => RibblePeriod::Huge,
+        }
     }
 }
 
-// TODO: rethink this & move to RecorderEngine.
-
-#[derive(Copy, Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct RecorderConfigs {
-    pub sample_rate: SampleRate,
-    pub buffer_size: BufferSize,
-    pub channel: Channel,
-    pub format: RecordingFormat,
-    pub filter: bool,
-    pub f_lower: f32,
-    pub f_higher: f32,
+impl From<RibblePeriod> for Option<usize> {
+    fn from(value: RibblePeriod) -> Self {
+        value.into_period()
+    }
 }
 
-impl Default for RecorderConfigs {
-    fn default() -> Self {
-        let sample_rate = SampleRate::default();
-        let buffer_size = BufferSize::default();
-        let channel = Channel::default();
-        let format = RecordingFormat::default();
-        // TODO: move these to BandpassConfigs or similar -> Set globally and store in the kernel.
-        let filter = false;
-        let f_lower = constants::DEFAULT_F_LOWER;
-        let f_higher = constants::DEFAULT_F_HIGHER;
-        Self {
-            sample_rate,
-            buffer_size,
-            channel,
-            format,
-            filter,
-            f_lower,
-            f_higher,
-        }
+#[derive(Default, Copy, Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct RibbleRecordingConfigs {
+    sample_rate: RibbleSampleRate,
+    channel_configs: RibbleChannels,
+    period: RibblePeriod,
+}
+
+impl RibbleRecordingConfigs {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn with_sample_rate(mut self, sample_rate: RibbleSampleRate) -> Self {
+        self.sample_rate = sample_rate;
+        self
+    }
+    pub(crate) fn with_num_channels(mut self, channel_configs: RibbleChannels) -> Self {
+        self.channel_configs = channel_configs;
+        self
+    }
+    pub(crate) fn with_period(mut self, period: RibblePeriod) -> Self {
+        self.period = period;
+        self
+    }
+}
+
+impl From<CaptureSpec> for RibbleRecordingConfigs {
+    fn from(value: CaptureSpec) -> Self {
+        let sample_rate = value.sample_rate().into();
+        let num_channels = value.channels().into();
+        let period = value.period().into();
+        Self::new()
+            .with_sample_rate(sample_rate)
+            .with_num_channels(num_channels)
+            .with_period(period)
+    }
+}
+
+impl From<RibbleRecordingConfigs> for CaptureSpec {
+    fn from(value: RibbleRecordingConfigs) -> Self {
+        Self::new()
+            .with_sample_rate(value.sample_rate.into())
+            .with_num_channels(value.channel_configs.into())
+            .with_period(value.period.into())
     }
 }

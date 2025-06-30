@@ -9,26 +9,8 @@ use std::{
 use egui_dock::DockState;
 use hound::{Sample, WavSpec, WavWriter};
 use sdl2::log::log;
-use symphonia::{
-    core::{
-        audio::SampleBuffer,
-        codecs::{Decoder, DecoderOptions, CODEC_TYPE_NULL},
-        errors::Error,
-        formats::{FormatOptions, FormatReader},
-        io::MediaSourceStream,
-        meta::MetadataOptions,
-        probe::Hint,
-    },
-    default::get_probe,
-};
 
-use crate::{
-    ui::tabs::whisper_tab::WhisperTab,
-    utils::{
-        constants,
-        errors::{WhisperAppError, WhisperAppErrorType},
-    },
-};
+use crate::{ui::tabs::whisper_tab::WhisperTab, utils::constants};
 
 // TODO: refactor most of this. Bring in the loading api from ribble_core which handles all
 // symphonia stuff.

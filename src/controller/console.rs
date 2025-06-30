@@ -1,14 +1,16 @@
+use crate::utils::constants::{MAX_NUM_MESSAGES, MIN_NUM_MESSAGES};
 use crate::utils::errors::RibbleError;
 use egui::{RichText, Visuals};
 use parking_lot::RwLock;
 use std::collections::VecDeque;
-use std::num::NonZero;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use strum::Display;
 
 // NOTE: hold off on adding a reference to the kernel if it's not required in the interface.
 // TODO: if a kernel is not required, refactor these state parameters back into ConsoleEngine.
+//
+// TODO: spawn a background thread and use message queues instead.
 struct ConsoleState {
     queue: RwLock<VecDeque<Arc<ConsoleMessage>>>,
     // Because of the way VecDeque allocates, capacity needs to be tracked such that the length is
@@ -28,11 +30,16 @@ pub(super) struct ConsoleEngine {
 
 // Provide access to inner
 impl ConsoleEngine {
+    // These are going to be
+    const DEFAULT_NUM_MESSAGES: usize = 32;
     // It is fine to resize the inner queue, but this should take an initial nonzero capacity
     // The backing buffer is fine to be zero size, but the capacity is monitored to not exceed
     // a pre-defined user limit.
-    pub(super) fn new(capacity: NonZero<usize>) -> Self {
-        let capacity = capacity.get();
+    //
+    // TODO: -> Have this return a tuple (Self::Engine, Self::Port(sender))
+    pub(super) fn new(capacity: usize) -> Self {
+        let capacity = capacity.max(MIN_NUM_MESSAGES);
+
         let console_queue = RwLock::new(VecDeque::with_capacity(capacity));
         let inner = ConsoleState {
             queue: console_queue,
@@ -43,6 +50,7 @@ impl ConsoleEngine {
         }
     }
 
+    // TODO: remove this method -> migrate the logic to a background thread.
     pub(super) fn add_console_message(&self, message: ConsoleMessage) {
         // Get a write lock for pushing to the buffer
         let mut queue = self.inner.queue.write();
@@ -62,7 +70,7 @@ impl ConsoleEngine {
         drop(queue);
     }
 
-    // Implementing Clone for ConsoleMessage would get expensive; it's cheaper to just use 
+    // Implementing Clone for ConsoleMessage would get expensive; it's cheaper to just use
     // shared pointers
     pub(super) fn try_get_current_message(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
         if let Some(buffer) = self.inner.queue.try_read() {
@@ -71,8 +79,9 @@ impl ConsoleEngine {
         }
     }
 
-    pub(super) fn resize(&self, new_size: NonZero<usize>) {
-        let new_size = new_size.get();
+    pub(super) fn resize(&self, new_size: usize) {
+        // Clamp the size between min/max
+        let new_size = new_size.max(MIN_NUM_MESSAGES).min(MAX_NUM_MESSAGES);
         // Determine whether to shrink or grow.
         let capacity = self.inner.capacity.load(Ordering::Acquire);
         if new_size > capacity {
@@ -117,11 +126,13 @@ impl ConsoleMessage {
     // NOTE TO SELF: call ui.label(msg.to_console_text(&visuals)) in the console tab when drawing
     pub(crate) fn to_console_text(&self, visuals: &Visuals) -> RichText {
         let (color, msg) = match self {
-            ConsoleMessage::Error(msg) => { (visuals.error_fg_color, msg.to_string()) }
-            ConsoleMessage::Status(msg) => { (visuals.text_color(), msg.to_owned()) }
+            ConsoleMessage::Error(msg) => (visuals.error_fg_color, msg.to_string()),
+            ConsoleMessage::Status(msg) => (visuals.text_color(), msg.to_owned()),
         };
         // This has to make at least 1 heap allocation to coerce into a string
         // Test, but expect this to just move the string created above.
         RichText::new(msg).color(color).monospace()
     }
 }
+
+// TODO: implement drop

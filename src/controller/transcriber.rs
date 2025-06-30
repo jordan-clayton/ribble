@@ -2,8 +2,8 @@ use crate::controller::console::ConsoleMessage;
 use crate::controller::kernel::{EngineKernel, TranscriberMethod};
 use crate::controller::progress::Progress;
 use crate::controller::{RibbleMessage, RibbleWorkerHandle};
-use crate::utils::audio_analysis::bandpass_filter;
 use crate::utils::constants::APP_ID;
+use crate::utils::dc_block::DCBlock;
 use crate::utils::errors::RibbleError;
 use crate::utils::file_mgmt::{get_tmp_file_writer, write_audio_sample};
 use arc_swap::ArcSwap;
@@ -13,6 +13,7 @@ use crossbeam::scope;
 use crossbeam::thread::{Scope, ScopedJoinHandle};
 use hound::{SampleFormat, WavSpec};
 use ribble_whisper::audio::AudioChannelConfiguration;
+use ribble_whisper::audio::WhisperAudioSample;
 use ribble_whisper::audio::audio_backend::CaptureSpec;
 use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
 use ribble_whisper::audio::loading::{audio_file_num_frames, load_normalized_audio_file};
@@ -43,7 +44,10 @@ pub(crate) enum OfflineTranscriberFeedback {
     Minimal,
     Progressive,
 }
-
+// TODO: Take a Visualizer queue, A Writer Queue (send the specs + the receiver + file name) + A
+// Progress queue (id + NAMED METHOD).
+// TODO: take the VAD configs + Model retriever at the function site to monomorphize the function.
+// THEN: get rid of the monomorphizing here.
 struct TranscriberState<M: ModelRetriever, E: EngineKernel<Retriever = M>> {
     // Handle for interfacing with the kernel
     engine_kernel: Weak<E>,
@@ -153,13 +157,20 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> 
         self.inner.offline_running.load(Ordering::Acquire)
     }
 
+    pub(super) fn stop_realtime(&self) {
+        self.inner.realtime_running.store(false, Ordering::Release);
+    }
+    pub(super) fn stop_offline(&self) {
+        self.inner.offline_running.store(false, Ordering::Release);
+    }
+
     // These should be reserved for places where it's okay to block (e.g. serialization);
     // Otherwise try-read and accept the option.
     pub(super) fn read_realtime_configs(&self) -> Arc<WhisperRealtimeConfigs> {
-        self.inner.realtime_configs.load().clone()
+        self.inner.realtime_configs.load_full()
     }
     pub(super) fn read_offline_configs(&self) -> Arc<WhisperConfigsV2> {
-        self.inner.offline_configs.load().clone()
+        self.inner.offline_configs.load_full()
     }
 
     // Takes a closure that updates the realtime configs via builder.
@@ -170,7 +181,7 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> 
         &self,
         update_closure: F,
     ) {
-        let confs = (*self.inner.realtime_configs.load().clone()).clone();
+        let confs = *self.inner.realtime_configs.load_full();
         self.inner
             .realtime_configs
             .store(Arc::new(update_closure(confs)));
@@ -181,20 +192,20 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> 
         &self,
         update_closure: F,
     ) {
-        let confs = (*self.inner.offline_configs.load().clone()).clone();
+        let confs = *self.inner.offline_configs.load_full();
         self.inner
             .offline_configs
             .store(Arc::new(update_closure(confs)));
     }
 
     pub(super) fn read_transcription_snapshot(&self) -> Arc<TranscriptionSnapshot> {
-        self.inner.current_snapshot.load().clone()
+        self.inner.current_snapshot.load_full()
     }
     pub(super) fn try_read_latest_control(&self) -> Arc<WhisperControlPhrase> {
-        self.inner.current_control_phrase.load().clone()
+        self.inner.current_control_phrase.load_full()
     }
 
-    pub(super) fn finalize_transcription(&self, final_transcription: String) {
+    fn finalize_transcription(&self, final_transcription: String) {
         let snapshot = TranscriptionSnapshot::new(final_transcription, Default::default());
         self.inner.current_snapshot.store(Arc::new(snapshot));
         // TODO: swap this to idle once implemented.
@@ -228,7 +239,7 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> 
             )?;
 
             // Send a progress job so the UI can be updated.
-            let setup_progress = Progress::indeterminate("Setting up real-time transcription.");
+            let setup_progress = Progress::new_indeterminate("Setting up real-time transcription.");
 
             let setup_id = kernel.add_progress_job(setup_progress);
 
@@ -262,7 +273,7 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> 
             let mic = kernel.request_audio_capture(spec, sink)?;
 
             // Get a copy of the configs
-            let configs = (*thread_inner.realtime_configs.load().clone()).clone();
+            let configs = *thread_inner.realtime_configs.load_full();
 
             // Set the model retriever
             let model_retriever = kernel.get_model_retriever();
@@ -310,25 +321,17 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> 
                                     continue;
                                 }
 
-                                // If filtering is toggled on, copy and run the bandpass over the filter
-                                // and re-wrap in an Arc<[F32]>.
-                                let audio = if f_central.is_some() {
-                                    let mut to_filter = *audio;
-                                    bandpass_filter(
-                                        &mut to_filter,
-                                        WHISPER_SAMPLE_RATE as f32,
-                                        f_central.unwrap(),
-                                    );
-                                    let new_audio = Arc::new(to_filter);
-                                    new_audio
-                                } else {
-                                    audio
-                                };
+                                // Run a cheap DCBlock filter before pushing to the ring buffer
+                                let mut dc_block =
+                                    DCBlock::new().with_sample_rate(WHISPER_SAMPLE_RATE as f32);
+
+                                let filtered =
+                                    audio.iter().copied().map(|f| dc_block.process(f)).collect();
 
                                 // Write into the ringbuffer
-                                audio_ring_buffer.push_audio(&audio);
+                                audio_ring_buffer.push_audio(&filtered);
                                 // Fan data out to the write thread and the FFT thread
-
+                                //
                                 // TODO: Come back to this once the writer impl has been refactored to request from the kernel.
                                 // This should definitely still write to the message queue,
                                 // so this probably won't need to change,
@@ -432,16 +435,16 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> 
                 let res = transcription_thread
                     .join()
                     .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e)))??;
-                Ok(RibbleMessage::TranscriptionOutput(res))
-            })?;
-            mic.pause();
+                Ok(res)
+            })??;
 
-            // Send an info message to the console to alert the user that the transcription loop
-            // has completed.
-            let message = String::from("Finished real-time transcription.");
+            mic.pause();
+            self.finalize_transcription(result);
+
+            // Send a message to the console before returning the result.
+            let message = String::from("Finished real-time transcription!");
             let console_message = ConsoleMessage::Status(message);
-            kernel.send_console_message(console_message);
-            result
+            Ok(RibbleMessage::Console(console_message))
         });
         worker
     }
@@ -460,7 +463,7 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> 
             )?;
 
             // Send a progress job so the UI can be updated.
-            let setup_progress = Progress::indeterminate("Setting up real-time transcription.");
+            let setup_progress = Progress::new_indeterminate("Setting up real-time transcription.");
 
             let setup_id = kernel.add_progress_job(setup_progress);
 
@@ -493,7 +496,7 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> 
                     .with_cleanup(cleanup_kernel.remove_progress_job(setup_id))
             })?;
 
-            let load_audio_progress = Progress::determinate("Loading audio", n_frames);
+            let load_audio_progress = Progress::new_determinate("Loading audio", n_frames);
             let load_audio_id = kernel.add_progress_job(load_audio_progress);
             let load_audio_callback = move |progress: usize| {
                 callback_kernel.update_progress_job(load_audio_id, progress as u64)
@@ -506,7 +509,24 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> 
                     e.into().with_cleanup(
                         cleanup_kernel.cleanup_progress_jobs(&[setup_id, load_audio_id]),
                     )
+                })
+                .and_then(|audio| {
+                    match audio {
+                        WhisperAudioSample::F32(audio) => {
+                            // Run a filter over the audio.
+                            let mut dc_block =
+                                DCBlock::new().with_sample_rate(WHISPER_SAMPLE_RATE as f32);
+
+                            let filtered =
+                                audio.iter().copied().map(|f| dc_block.process(f)).collect();
+                            Ok(WhisperAudioSample::F32(Arc::from(filtered)))
+                        }
+                        WhisperAudioSample::I16(..) => {
+                            unreachable!("OfflineTranscriber should never receive integer audio.")
+                        }
+                    }
                 })?;
+
             // Remove the progress job now that transcription is finished.
             kernel.remove_progress_job(load_audio_id);
             // Set up the offline_transcriber
@@ -537,7 +557,7 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> 
             let result = scope(|s| {
                 // Set up a progress callback for transcription
                 // As far as I can tell, this should be in integer percent
-                let transcription_progress = Progress::determinate("Transcribing", 100);
+                let transcription_progress = Progress::new_determinate("Transcribing", 100);
                 let transcription_id = scoped_kernel.add_progress_job(transcription_progress);
                 let callback_kernel = Arc::clone(&scoped_kernel);
                 let transcription_closure = move |percent: i32| {
@@ -607,13 +627,15 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> 
                         .into()
                         .with_cleanup(cleanup_kernel.remove_progress_job(transcription_id))
                 })??;
-                Ok(RibbleMessage::TranscriptionOutput(res))
-            })?;
+                Ok(res)
+            })??;
+
+            self.finalize_transcription(result);
+
             // Send a message to the console before returning the result.
-            let message = format!("Finished transcribing: {}", audio_file_path);
+            let message = format!("Finished transcribing: {}!", audio_file_path);
             let console_message = ConsoleMessage::Status(message);
-            kernel.send_console_message(console_message);
-            result
+            Ok(RibbleMessage::Console(console_message))
         });
         worker
     }

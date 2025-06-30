@@ -1,9 +1,36 @@
 use parking_lot::RwLock;
+use ribble_whisper::utils::Sender;
 use slab::Slab;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-// NOTE: if the kernel is required here, migrate to an Arc<inner> state struct
+pub(super) enum ProgressMessage {
+    Request {
+        job: Progress,
+        source: Sender<usize>,
+    },
+
+    Increment {
+        job_id: usize,
+        delta: u64,
+    },
+    Decrement {
+        job_id: usize,
+        delta: u64,
+    },
+    Set {
+        job_id: usize,
+        pos: u64,
+    },
+    Reset {
+        job_id: usize,
+    },
+    Remove {
+        job_id: usize,
+    },
+}
+
+// TODO: migrate to an inner state struct and use RAII bg threads to get new messages.
 pub(super) struct ProgressEngine {
     current_jobs: Arc<RwLock<Slab<Progress>>>,
 }
@@ -91,10 +118,10 @@ pub(crate) enum Progress {
 }
 
 impl Progress {
-    pub(crate) fn indeterminate(job_name: &'static str) -> Self {
+    pub(crate) fn new_indeterminate(job_name: &'static str) -> Self {
         Self::Indeterminate { job_name }
     }
-    pub(crate) fn determinate(job_name: &'static str, total_size: u64) -> Self {
+    pub(crate) fn new_determinate(job_name: &'static str, total_size: u64) -> Self {
         let progress = AtomicProgress::new().with_capacity(total_size);
         let progress = Arc::new(progress);
         Self::Determinate { job_name, progress }
@@ -158,4 +185,3 @@ impl Progress {
         }
     }
 }
-

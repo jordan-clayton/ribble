@@ -1,6 +1,6 @@
-pub(crate) mod audio_analysis;
 pub(crate) mod audio_backend_proxy;
 pub(crate) mod constants;
+pub(crate) mod dc_block;
 pub(crate) mod errors;
 pub(crate) mod file_mgmt;
 pub(crate) mod model_bank;
