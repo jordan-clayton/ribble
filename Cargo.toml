@@ -53,6 +53,7 @@ indexmap = { version = "2.10.0", features = ["serde", "rayon"] }
 case_style = "0.2.1"
 twox-hash = { version = "2.1.1", features = ["xxhash3_64"] }
 enum_dispatch = "0.3.13"
+mimalloc = "0.1.47"
 
 [target.x86_64-apple-darwin.dependencies]
 metal = "0.32.0"

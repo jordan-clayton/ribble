@@ -8,7 +8,10 @@ use ribble_whisper::whisper::model::ModelRetriever;
 use std::sync::{Arc, Weak};
 use std::thread::JoinHandle;
 
-struct WorkerInner<M: ModelRetriever, E: EngineKernel<Retriever = M>> {
+// TODO: this should instead construct with a queue to send 
+// console messages; it doesn't ever need to touch TranscriberEngine
+
+struct WorkerInner<M: ModelRetriever, E: EngineKernel<Retriever=M>> {
     engine_kernel: Weak<E>,
     incoming: Receiver<RibbleWorkerHandle>,
     // Inner channel to forward incoming jobs to a joiner.
@@ -17,7 +20,7 @@ struct WorkerInner<M: ModelRetriever, E: EngineKernel<Retriever = M>> {
     forward_incoming: Receiver<RibbleWorkerHandle>,
     forward_outgoing: Sender<RibbleWorkerHandle>,
 }
-impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> WorkerInner<M, E> {
+impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> WorkerInner<M, E> {
     fn handle_result(
         &self,
         message: Result<RibbleMessage, RibbleAppError>,
@@ -36,7 +39,6 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> WorkerInner<M, E> {
             // NOTE: if for some reason a Progress message needs to be returned via thread,
             // this will panic and need refactoring.
             RibbleMessage::Progress(_) => unreachable!(),
-            RibbleMessage::TranscriptionOutput(msg) => Ok(kernel.finalize_transcription(msg)),
         }
     }
     fn handle_error(&self, mut error: RibbleAppError) -> Result<(), RibbleAppError> {
@@ -56,14 +58,14 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> WorkerInner<M, E> {
     }
 }
 
-pub(super) struct WorkerEngine<M: ModelRetriever, E: EngineKernel<Retriever = M> {
+pub(super) struct WorkerEngine<M: ModelRetriever, E: EngineKernel<Retriever=M>> {
     outgoing: Sender<RibbleWorkerHandle>,
     inner: Arc<WorkerInner<M, E>>,
     // TODO: swap the error type here once errors have been reimplemented.
     work_thread: Option<JoinHandle<Result<(), RibbleAppError>>>,
 }
 
-impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> WorkerEngine<M, E> {
+impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> WorkerEngine<M, E> {
     pub(super) fn new() -> Self {
         // TODO: factor out a constant for the number of workers this can hold
         let (outgoing, incoming) = channel::bounded::<RibbleWorkerHandle>(100);
@@ -103,8 +105,8 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> WorkerEngine<M, E> {
                                     RibbleError::ThreadPanic(format!("{:?}", err)).into();
                                 thread_inner.handle_error(ribble_error)
                             } // Since handle_result/handle_error only return Err when the kernel's
-                              // not set, unwrapping here will panic the worker thread and information
-                              // should bubble up accordingly.
+                            // not set, unwrapping here will panic the worker thread and information
+                            // should bubble up accordingly.
                         }?;
                     }
                     Ok(())
@@ -113,7 +115,7 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> WorkerEngine<M, E> {
                     .join()
                     .map_err(|e| RibbleError::ThreadPanic(format!("{}", e)).into())
             })
-            .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e)).into())??;
+                .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e)).into())??;
             res
         }));
 
@@ -137,7 +139,7 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> WorkerEngine<M, E> {
     }
 }
 
-impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> Drop for WorkerEngine<M, E> {
+impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> Drop for WorkerEngine<M, E> {
     fn drop(&mut self) {
         if let Some(handle) = self.work_thread.take() {
             handle

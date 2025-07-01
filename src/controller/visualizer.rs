@@ -100,7 +100,7 @@ impl VisualizerEngineState {
     // TODO: maybe return RibbleAppError? Might not matter.
     fn power_analysis(&self, samples: &[f32]) -> Result<(), RibbleError> {
         // True = apply gain
-        let mut window_samples = hann_window(samples, true);
+        let window_samples = hann_window(samples, true);
 
         let (frame_size, step_size) =
             compute_welch_frames(window_samples.len() as f32, POWER_OVERLAP);
@@ -215,7 +215,7 @@ impl VisualizerEngineState {
 
     fn frequency_analysis(&self, samples: &[f32], sample_rate: f64) -> Result<(), RibbleError> {
         // I don't remember why I'm not applying gain...
-        let mut window_samples = hann_window(samples, false);
+        let window_samples = hann_window(samples, false);
         // TODO: look at precomputing on changing settings/running transcriber, etc.
         // Assert nonzero frame size
         let (frame_size, step_size) = compute_welch_frames(samples.len() as f32, POWER_OVERLAP);
@@ -234,7 +234,7 @@ impl VisualizerEngineState {
         let mut output = fft.make_output_vec();
         let mut spectrum_samples = vec![0.0; NUM_BUCKETS];
 
-        let n = output.len();
+        let frame_size = output.len();
         let min_freq = sample_rate / (frame_size as f64);
         let max_freq = sample_rate / 2.0;
 
@@ -242,17 +242,17 @@ impl VisualizerEngineState {
         let log_max = max_freq.log10();
 
         let log_range = log_max - log_min;
-        // TODO:
         debug_assert!(
             !(log_min.is_nan()
                 || log_min.is_infinite()
                 || log_range.is_nan()
                 || log_range.is_infinite())
         );
+
         // Compute edges -> map frequency bins to log-spaced buckets
         // (human perception; low frequencies = tighter resolution).
         let bucket_edges: Vec<f64> = (0..=NUM_BUCKETS)
-            .map(|n| 10.0.powf(log_min + log_range * (n as f64) / (NUM_BUCKETS as f64)))
+            .map(|k| 10.0f64.powf(log_min + log_range * (k as f64) / (NUM_BUCKETS as f64)))
             .collect();
 
         for frame in frames {
@@ -261,7 +261,7 @@ impl VisualizerEngineState {
 
             for (i, &value) in output.iter().enumerate() {
                 // Convert each bin index to a frequency
-                let freq = (i as f64) * sample_rate / (n as f64);
+                let freq = (i as f64) * sample_rate / (frame_size as f64);
                 // Check if the frequency falls within log_range
                 if freq < min_freq || freq > max_freq {
                     continue;
@@ -273,7 +273,7 @@ impl VisualizerEngineState {
 
                 // Find the bucket.
                 let closest =
-                    bucket_edges.binary_search_by(|edge| edge.partial_cmp(&value).unwrap());
+                    bucket_edges.binary_search_by(|edge| edge.partial_cmp(&freq).unwrap());
                 let bucket = match closest {
                     // Falls right on an edge -> needs to be 1 less.
                     Ok(index) => index.saturating_sub(1),
@@ -341,6 +341,10 @@ impl VisualizerEngine {
         let visualizer_running = AtomicBool::new(false);
         let analysis_type = AtomicAnalysisType::new(AnalysisType::Waveform);
         // TODO: determine what the actual size of this should be.
+
+        // TODO TWICE: MIGRATE THIS CHANNEL INITIALIZATION OUTSIDE OF THE CONSTRUCTOR HERE FOR THE
+        // "BUS".
+        // TAKE THE INNER IN AS AN ARGUMENT.
         let (sender, receiver) = get_channel(INPUT_BUFFER_CAPACITY);
         let planner = RwLock::new(RealFftPlanner::new());
         let inner = Arc::new(VisualizerEngineState {
@@ -425,8 +429,13 @@ impl VisualizerEngine {
         sample_rate: f64,
     ) {
         // TODO: If the public method gets removed, just make the atomic load here.
+
         if self.visualizer_running() {
+            //----
+            // TODO TWICE: put this logic in whomever is using the visualizer engine
+            // (Transcriber/Recorder) and delete this method.
             let sample: VisualizerSample = Arc::clone(&buffer).into();
+
             let packet = VisualizerSamplePacket {
                 sample,
                 sample_rate,

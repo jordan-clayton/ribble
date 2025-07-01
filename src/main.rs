@@ -1,3 +1,5 @@
+use mimalloc::MiMalloc;
+
 use std::{io::ErrorKind, thread};
 
 use directories::ProjectDirs;
@@ -18,6 +20,9 @@ use crate::{
         threading::join_threads_loop,
     },
 };
+
+// Faster allocator, good for short strings and allocation churn.
+static GLOBAL: MiMalloc = MiMalloc;
 
 mod controller;
 mod ui;

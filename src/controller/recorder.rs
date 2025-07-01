@@ -1,114 +1,41 @@
-// TODO: RecorderEngine -> handle recording stuff here
-// NOTE: use the kernel to spawn the write thread, only run the audio fanout in the recording loop
-// API needs:
-// -> (Possibly) an exposed output file handle
-// -> constructors
-// -> kernel setter
-// -> Accessors (read/write locks) for Configs
-// -> The recording loop
-use crate::controller::ConsoleMessage;
-use crate::controller::Progress;
-use crate::controller::RibbleMessage;
-use crate::controller::RibbleWorkerHandle;
+use crate::controller::console::ConsoleMessage;
 use crate::controller::kernel::EngineKernel;
-use crate::utils::errors::{RibbleAppError, RibbleError};
+use crate::controller::progress::Progress;
+use crate::controller::writer::WriteRequest;
+use crate::controller::{RibbleMessage, RibbleWorkerHandle};
+use crate::utils::errors::RibbleError;
 use crate::utils::pcm_f32::PcmF32Convertible;
-use crate::utils::recorder_configs::{
-    RibbleChannels, RibblePeriod, RibbleRecordingFormat, RibbleSampleRate,
-};
+use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExportFormat};
 use arc_swap::ArcSwap;
-use crossbeam::channel::{Receiver, TrySendError};
+use crossbeam::channel::TrySendError;
 use ribble_whisper::audio::audio_backend::CaptureSpec;
 use ribble_whisper::audio::microphone::MicCapture;
 use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::audio::recorder::RecorderSample;
 use ribble_whisper::utils::constants::INPUT_BUFFER_CAPACITY;
-use ribble_whisper::utils::get_channel;
+use ribble_whisper::utils::{get_channel, Sender};
 use ribble_whisper::whisper::model::ModelRetriever;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
-
-#[derive(Default, Copy, Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct RibbleRecordingConfigs {
-    sample_rate: RibbleSampleRate,
-    channel_configs: RibbleChannels,
-    period: RibblePeriod,
-    format: RibbleRecordingFormat,
-}
-
-impl RibbleRecordingConfigs {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn with_sample_rate(mut self, sample_rate: RibbleSampleRate) -> Self {
-        self.sample_rate = sample_rate;
-        self
-    }
-    pub(crate) fn with_num_channels(mut self, channel_configs: RibbleChannels) -> Self {
-        self.channel_configs = channel_configs;
-        self
-    }
-    pub(crate) fn with_period(mut self, period: RibblePeriod) -> Self {
-        self.period = period;
-        self
-    }
-    pub(crate) fn with_recordingformat(mut self, format: RibbleRecordingFormat) -> Self {
-        self.format = format;
-        self
-    }
-
-    pub(crate) fn sample_rate(&self) -> RibbleSampleRate {
-        self.sample_rate
-    }
-    pub(crate) fn num_channels(&self) -> RibbleChannels {
-        self.channel_configs
-    }
-    pub(crate) fn period(&self) -> RibblePeriod {
-        self.period
-    }
-    pub(crate) fn format(&self) -> RibbleRecordingFormat {
-        self.format
-    }
-}
-
-impl From<CaptureSpec> for RibbleRecordingConfigs {
-    fn from(value: CaptureSpec) -> Self {
-        let sample_rate = value.sample_rate().into();
-        let num_channels = value.channels().into();
-        let period = value.period().into();
-        Self::new()
-            .with_sample_rate(sample_rate)
-            .with_num_channels(num_channels)
-            .with_period(period)
-    }
-}
-
-impl From<RibbleRecordingConfigs> for CaptureSpec {
-    fn from(value: RibbleRecordingConfigs) -> Self {
-        Self::new()
-            .with_sample_rate(value.sample_rate.into())
-            .with_num_channels(value.channel_configs.into())
-            .with_period(value.period.into())
-    }
-}
 
 // TODO: migrate to message queues -> if Inner is no longer relevant, migrate the inner struct to
 // the outer one.
-struct RecorderEngineState<M: ModelRetriever, E: EngineKernel<Retriever = M>> {
+struct RecorderEngineState<M: ModelRetriever, E: EngineKernel<Retriever=M>> {
     engine_kernel: Weak<E>,
     recorder_running: Arc<AtomicBool>,
     recorder_configs: ArcSwap<RibbleRecordingConfigs>,
+    write_request_handle: Sender<WriteRequest>,
+    // TODO: this also needs a visualizer request handle
 }
 
-impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> RecorderEngineState<M, E> {
-    fn new() -> Self {
+impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> RecorderEngineState<M, E> {
+    fn new(write_requester: Sender<WriteRequest>) -> Self {
         let configs = Arc::new(Default::default());
         Self {
             engine_kernel: Weak::new(),
             recorder_running: Arc::new(AtomicBool::new(false)),
             recorder_configs: ArcSwap::from(configs),
+            write_request_handle: write_requester,
         }
     }
 
@@ -121,13 +48,28 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> RecorderEngineState<M, E
             "Kernel not attached to RecorderEngine.".to_string(),
         ))?;
 
+        // TODO: set up the progress engine message queue
+        let setup_progress = Progress::new_indeterminate("Setting up recording.");
+
         let (audio_sender, audio_receiver) = get_channel::<Arc<[T]>>(INPUT_BUFFER_CAPACITY);
         let sink = ArcChannelSink::new(audio_sender);
         let mic = kernel.request_audio_capture(spec, sink)?;
         // TODO: send a write job through a channel -> Send the receiver.
         let (write_sender, write_receiver) = get_channel::<Arc<[T]>>(INPUT_BUFFER_CAPACITY);
+        let confirmed_specs = RibbleRecordingConfigs::from_mic_capture(&mic);
+
+        let request = WriteRequest::new(write_receiver, confirmed_specs);
+
+        // Send off the request to write the file
+        if self.write_request_handle.send(request).is_err() {
+            let ribble_error = RibbleError::Core("Writing engine no longer receiving write requests.".to_string());
+            self.recorder_running.store(false, Ordering::Release);
+            return Err(ribble_error);
+        }
+
 
         let sample_rate = mic.sample_rate();
+        // TODO: end the setup progress job here and send it.
         mic.play();
         while self.recorder_running.load(Ordering::Acquire) {
             match audio_receiver.recv() {
@@ -156,14 +98,15 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> RecorderEngineState<M, E
     }
 }
 
-pub(super) struct RecorderEngine<M: ModelRetriever, E: EngineKernel<Retriever = M>> {
+pub(super) struct RecorderEngine<M: ModelRetriever, E: EngineKernel<Retriever=M>> {
     inner: Arc<RecorderEngineState<M, E>>,
 }
 
-impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> RecorderEngine<M, E> {
-    pub(super) fn new() -> Self {
+impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> RecorderEngine<M, E> {
+    // TODO: refactor this to take a "BUS"
+    pub(super) fn new(write_request_handle: Sender<WriteRequest>) -> Self {
         Self {
-            inner: Arc::new(RecorderEngineState::new()),
+            inner: Arc::new(RecorderEngineState::new(write_request_handle)),
         }
     }
 
@@ -172,17 +115,14 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> RecorderEngine<M, E> {
 
         let worker = std::thread::spawn(move || {
             let configs = *thread_inner.recorder_configs.load_full();
-            let setup_progress = Progress::Indeterminate("Setting up recording.");
 
-            // TODO: send the recorder job -> figure out the best way to actually send this.
-            // Perhaps instead it should return a message queue with an enumerated Response type?
             let format = configs.format();
             let spec: CaptureSpec = configs.into();
 
             // Match on the format, send the configs in as an arg to avoid the extra copy.
             match format {
-                RibbleRecordingFormat::F32 => thread_inner.run_recorder_loop::<f32>(spec),
-                RibbleRecordingFormat::I16 => thread_inner.run_recorder_loop::<i16>(spec),
+                RibbleRecordingExportFormat::F32 => thread_inner.run_recorder_loop::<f32>(spec),
+                RibbleRecordingExportFormat::I16 => thread_inner.run_recorder_loop::<i16>(spec),
             }?;
 
             let message = String::from("Finished recording!");
@@ -195,7 +135,7 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> RecorderEngine<M, E> {
     pub(super) fn recorder_running(&self) -> bool {
         self.inner
             .recorder_running
-            .load(std::sync::atomic::Ordering::Acquire)
+            .load(Ordering::Acquire)
     }
 
     pub(super) fn read_recorder_configs(&self) -> Arc<RibbleRecordingConfigs> {

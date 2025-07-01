@@ -6,25 +6,25 @@ use crate::utils::constants::APP_ID;
 use crate::utils::dc_block::DCBlock;
 use crate::utils::errors::RibbleError;
 use crate::utils::file_mgmt::{get_tmp_file_writer, write_audio_sample};
+use crate::utils::vad_configs::RibbleVAD;
 use arc_swap::ArcSwap;
 use atomic_enum::atomic_enum;
 use crossbeam::channel::{Receiver, TrySendError};
 use crossbeam::scope;
 use crossbeam::thread::{Scope, ScopedJoinHandle};
 use hound::{SampleFormat, WavSpec};
-use ribble_whisper::audio::AudioChannelConfiguration;
-use ribble_whisper::audio::WhisperAudioSample;
 use ribble_whisper::audio::audio_backend::CaptureSpec;
 use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
 use ribble_whisper::audio::loading::{audio_file_num_frames, load_normalized_audio_file};
 use ribble_whisper::audio::microphone::MicCapture;
 use ribble_whisper::audio::recorder::ArcChannelSink;
+use ribble_whisper::audio::AudioChannelConfiguration;
+use ribble_whisper::audio::WhisperAudioSample;
 use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
-use ribble_whisper::transcriber::vad::Silero;
 use ribble_whisper::transcriber::{
-    CallbackTranscriber, Transcriber, TranscriptionSnapshot, WhisperCallbacks,
-    WhisperControlPhrase, WhisperOutput, redirect_whisper_logging_to_hooks,
+    redirect_whisper_logging_to_hooks, CallbackTranscriber, Transcriber, TranscriptionSnapshot,
+    WhisperCallbacks, WhisperControlPhrase, WhisperOutput,
 };
 use ribble_whisper::utils::callback::StaticRibbleWhisperCallback;
 use ribble_whisper::utils::constants::{INPUT_BUFFER_CAPACITY, WHISPER_SAMPLE_RATE};
@@ -48,7 +48,7 @@ pub(crate) enum OfflineTranscriberFeedback {
 // Progress queue (id + NAMED METHOD).
 // TODO: take the VAD configs + Model retriever at the function site to monomorphize the function.
 // THEN: get rid of the monomorphizing here.
-struct TranscriberState<M: ModelRetriever, E: EngineKernel<Retriever = M>> {
+struct TranscriberState<M: ModelRetriever, E: EngineKernel<Retriever=M>> {
     // Handle for interfacing with the kernel
     engine_kernel: Weak<E>,
     // TODO: refactor configs impl in ribble_whisper.
@@ -61,7 +61,7 @@ struct TranscriberState<M: ModelRetriever, E: EngineKernel<Retriever = M>> {
     current_control_phrase: ArcSwap<WhisperControlPhrase>,
 }
 
-impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberState<M, E> {
+impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> TranscriberState<M, E> {
     fn clear_transcription(&self) {
         self.current_snapshot
             .store(Arc::new(TranscriptionSnapshot::default()));
@@ -76,7 +76,7 @@ enum TranscriptionType {
     Realtime,
     Offline,
 }
-impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberState<M, E> {
+impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> TranscriberState<M, E> {
     fn print_loop<'scope>(
         &self,
         scope: &'scope Scope,
@@ -107,11 +107,24 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberState<M, E> {
     }
 }
 
-pub(super) struct TranscriberEngine<M: ModelRetriever, E: EngineKernel<Retriever = M>> {
+pub(super) struct TranscriberEngine<M: ModelRetriever, E: EngineKernel<Retriever=M>> {
     inner: Arc<TranscriberState<M, E>>,
 }
 
-impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> {
+// TODO: Refactor this -> move the bulk of the logic to the inner state struct
+// Only spawn the threads in the TranscriberEngine
+//
+// ALSO: move to message queues, don't monomorphize, move ModelRetriever<M> to the call site of
+// run_realtime and run_offline by passing IN the model retriever to the method.
+// (Ie. take in the "BUS")
+// ALSO TWICE: pass the VadConfigs IN instead of trying to get
+// ALSO THRICE: Use only one set of configurations -> change the offline configurations mutator to
+// just modify the whisper half & also change from FnOnce callback to just take the new clone
+//
+// ALSO FOURCE: Instead of using ? on operations that can return an error, call or_else() first
+// and send a progress message to remove the old jobs.
+// the progress queue to send a remove request instead of relying on the callback.
+impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> TranscriberEngine<M, E> {
     // These get passed in upon construction; they should be serialized separately.
     pub(super) fn new(
         realtime_configs: WhisperRealtimeConfigs,
@@ -243,11 +256,6 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> 
 
             let setup_id = kernel.add_progress_job(setup_progress);
 
-            // TODO: read the bandpassconfigurations (should have a "filtering").
-            // Get the bandpass configs from the kernel.
-            // Set up f_central as an optional f32 based on "filtering" flag
-            let f_central: Option<f32> = None;
-
             // Inner state handles for threads
             let print_thread_inner = Arc::clone(&thread_inner);
 
@@ -259,6 +267,7 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> 
 
             // Transcription channels
             let (text_sender, text_receiver) = get_channel(INPUT_BUFFER_CAPACITY);
+            // TODO: instead, pass these in an argument
             let vad_configs = kernel.get_vad_configs(TranscriberMethod::Realtime);
             let vad = vad_configs.build_vad().map_err(|e| {
                 let cleanup_kernel = Arc::clone(&kernel);
@@ -468,11 +477,17 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> 
             let setup_id = kernel.add_progress_job(setup_progress);
 
             let vad_configs = kernel.get_vad_configs(TranscriberMethod::Offline);
-            let vad = vad_configs.build_vad().map_err(|e| {
-                let cleanup_kernel = Arc::clone(&kernel);
-                e.into()
-                    .with_cleanup(cleanup_kernel.remove_progress_job(setup_id))
-            })?;
+            // Unpack the VAD settings and build a VAD if the user wants to optimize.
+            let vad = if !vad_configs.use_vad() {
+                Some(vad_configs.build_vad().map_err(|e| {
+                    let cleanup_kernel = Arc::clone(&kernel);
+                    e.into()
+                        .with_cleanup(cleanup_kernel.remove_progress_job(setup_id))
+                })?)
+            } else {
+                None
+            };
+
             // Get the configs
             let configs = (*thread_inner.offline_configs.load().clone()).clone();
             // Get the audio file path (TODO: figure out how to re-handle the temporary audio file)
@@ -536,12 +551,16 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever = M>> TranscriberEngine<M, E> 
             // Since the retriever is dynamic, it has to be wrapped in an adapter for the duration of transcription
 
             let model_retriever = kernel.get_model_retriever();
-            let offline_transcriber = OfflineTranscriberBuilder::<Silero, _>::new()
+            let mut offline_transcriber_builder = OfflineTranscriberBuilder::<RibbleVAD, _>::new()
                 .with_configs(configs)
                 .with_audio(audio)
                 .with_channel_configurations(AudioChannelConfiguration::Mono)
-                .with_voice_activity_detector(vad)
-                .with_shared_model_retriever(model_retriever)
+                .with_shared_model_retriever(model_retriever);
+            if vad.is_some() {
+                offline_transcriber_builder = offline_transcriber_builder.with_voice_activity_detector(vad.unwrap());
+            }
+
+            let offline_transcriber = offline_transcriber_builder
                 .build()
                 .map_err(|e| {
                     let cleanup_kernel = Arc::clone(&kernel);

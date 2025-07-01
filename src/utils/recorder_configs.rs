@@ -1,6 +1,9 @@
+use crate::utils::errors::RibbleError;
 use ribble_whisper::audio::audio_backend::CaptureSpec;
+use ribble_whisper::audio::microphone::MicCapture;
 use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
 
+// TODO: rename this to RibbleRecordingExportFormat
 #[derive(
     Default,
     Copy,
@@ -15,20 +18,36 @@ use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
     AsRefStr,
     IntoStaticStr,
 )]
-pub(crate) enum RibbleRecordingFormat {
+pub(crate) enum RibbleRecordingExportFormat {
     #[default]
     F32,
     I16,
 }
 
-impl RibbleRecordingFormat {
-    pub fn tooltip(&self) -> &str {
+impl RibbleRecordingExportFormat {
+    pub(crate) fn tooltip(&self) -> &str {
         match self {
-            RibbleRecordingFormat::F32 => {
+            RibbleRecordingExportFormat::F32 => {
                 "32-bit floating point format. Highest dynamic range but large file size."
             }
 
-            RibbleRecordingFormat::I16 => "16-bit signed integer format. Audio CD quality.",
+            RibbleRecordingExportFormat::I16 => "16-bit signed integer format. Audio CD quality.",
+        }
+    }
+
+    pub(crate) fn bits_per_sample(&self) -> u16 {
+        match self {
+            RibbleRecordingExportFormat::F32 => 32,
+            RibbleRecordingExportFormat::I16 => 16,
+        }
+    }
+}
+
+impl From<hound::SampleFormat> for RibbleRecordingExportFormat {
+    fn from(data: hound::SampleFormat) -> Self {
+        match data {
+            hound::SampleFormat::Float => RibbleRecordingExportFormat::F32,
+            hound::SampleFormat::Int => RibbleRecordingExportFormat::I16,
         }
     }
 }
@@ -175,6 +194,7 @@ impl From<Option<usize>> for RibblePeriod {
             Some(1024) => RibblePeriod::Medium,
             Some(2048) => RibblePeriod::Large,
             Some(4096) => RibblePeriod::Huge,
+            _ => RibblePeriod::Auto,
         }
     }
 }
@@ -197,6 +217,18 @@ impl RibbleRecordingConfigs {
         Self::default()
     }
 
+    pub(crate) fn from_mic_capture<M: MicCapture>(capture: &M) -> Self {
+        let sample_rate = Some(capture.sample_rate()).into();
+        let channel_configs = Some(capture.channels()).into();
+        let period = Some(capture.buffer_size()).into();
+
+        Self {
+            sample_rate,
+            channel_configs,
+            period,
+        }
+    }
+
     pub(crate) fn with_sample_rate(mut self, sample_rate: RibbleSampleRate) -> Self {
         self.sample_rate = sample_rate;
         self
@@ -208,6 +240,37 @@ impl RibbleRecordingConfigs {
     pub(crate) fn with_period(mut self, period: RibblePeriod) -> Self {
         self.period = period;
         self
+    }
+
+    pub(crate) fn sample_rate(&self) -> RibbleSampleRate {
+        self.sample_rate
+    }
+    pub(crate) fn num_channels(&self) -> RibbleChannels {
+        self.channel_configs
+    }
+    pub(crate) fn period(&self) -> RibblePeriod {
+        self.period
+    }
+
+    pub(crate) fn into_wav_spec(
+        self,
+        format: RibbleRecordingExportFormat,
+    ) -> Result<hound::WavSpec, RibbleError> {
+        let bits_per_sample = format.bits_per_sample();
+        let sample_format = format.into();
+        let channels = self.channel_configs.into().ok_or(RibbleError::Core(
+            "Invalid channel options passed to file writer.".to_string(),
+        ))? as u16;
+        let sample_rate = self.channel_configs.into().ok_or(RibbleError::Core(
+            "Invalid sample rate options passed to file writer.".to_string(),
+        ))? as u32;
+
+        Ok(hound::WavSpec {
+            channels,
+            sample_rate,
+            bits_per_sample,
+            sample_format,
+        })
     }
 }
 
