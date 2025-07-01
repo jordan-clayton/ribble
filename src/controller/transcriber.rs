@@ -140,6 +140,7 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> TranscriberEngine<M, E> {
         let offline_configs = ArcSwap::new(Arc::new(offline_configs));
         let current_snapshot = ArcSwap::new(Arc::new(TranscriptionSnapshot::default()));
         let current_control_phrase = ArcSwap::new(Arc::new(WhisperControlPhrase::GettingReady));
+        // NOTE: this should come from the serialized user_preferences struct.
         let offline_transcriber_feedback = Arc::new(offline_transcriber_feedback);
 
         let inner = Arc::new(TranscriberState {

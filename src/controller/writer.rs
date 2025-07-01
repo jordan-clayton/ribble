@@ -45,6 +45,9 @@ struct CompletedJobs {
     sample_rate: usize,
 }
 
+// NOTE: this is only send when using mpmc (crossbeam)
+// If for whatever reason the std::mpsc is required,
+// this will need to have a lock on the Receiver
 struct WriterEngineState {
     ticket: AtomicUsize,
     clearing: AtomicBool,
@@ -56,8 +59,8 @@ struct WriterEngineState {
 
 impl WriterEngineState {
     const DEFAULT_CACHE_SIZE: usize = 5;
-    const TMP_FILE: &str = "tmp_recording";
-    const FILE_EXTENSION: &str = ".wav";
+    const TMP_FILE: &'static str = "tmp_recording";
+    const FILE_EXTENSION: &'static str = ".wav";
     fn new(
         data_directory: PathBuf,
         incoming_jobs: Receiver<WriteRequest>,
@@ -81,7 +84,9 @@ impl WriterEngineState {
 
     fn try_get_latest(&self) -> Result<PathBuf, RibbleError> {
         // Try and get the last inserted key
-        let latest = self.completed_jobs.read().last().ok_or(RibbleError::Core("Latest cached recording missing!".to_string()))?;
+        let latest = self.completed_jobs.read().last().ok_or(RibbleError::Core(
+            "Latest cached recording missing!".to_string(),
+        ))?;
         Ok(self.data_directory.join(latest))
     }
 
@@ -322,6 +327,16 @@ impl WriterEngine {
     // (if this fails, it means there are no recordings, or there was an issue writing to a temp file).
     pub(super) fn try_get_latest(&self) -> Result<PathBuf, RibbleError> {
         self.inner.try_get_latest()
+    }
+
+    pub(super) fn get_recording_path(&self, file_name: &String) -> Option<&String> {
+        todo!("Finish this.")
+        // Do the logic in inner.
+        // Test the key (internal temp file_name -> is in the completed jobs list)
+        // If the key exists on disk, return Some(file_name)
+        // The caller can decide what to do with the file_name.
+        // (This most likely involves a clone, but the frequency with which it happens is low enough)
+        // And the strings are very, very small that the allocation should be nearly free.
     }
 
     // Use this to disable a clear cache button in the UI thread.

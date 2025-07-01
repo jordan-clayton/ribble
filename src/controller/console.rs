@@ -135,4 +135,4 @@ impl ConsoleMessage {
     }
 }
 
-// TODO: implement drop
+// TODO: implement drop once background thread impl is done.

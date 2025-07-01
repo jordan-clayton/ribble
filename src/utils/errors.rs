@@ -15,8 +15,12 @@ pub(crate) enum RibbleError {
     VisualizerError(#[from] realfft::FftError),
     #[error("IO Error: {}")]
     IOError(#[from] std::io::Error),
+    #[error("WavError: {}")]
+    WavError(#[from] hound::Error),
 }
 
+
+// TODO: this is a bad idea -> remove RibbleAppError and just use Err(...).or_else(|e| ...) to do cleanup before returning the error
 #[derive(Debug)]
 pub(crate) enum Cleanup {
     Dirty(Box<dyn FnMut()>),

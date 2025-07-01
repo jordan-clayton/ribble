@@ -89,11 +89,16 @@ pub(crate) trait EngineKernel: Send + Sync {
 //
 // Instead, write delegate methods here that the controller will call
 pub struct Kernel {
-    // TODO: additional state (non-engines), BandpassConfigs, file paths,
-    // TODO: the VAD configs might be better to be encapsulated into an engine/component.
+    // The configs are Serializable -> derive serialize on the struct and write a routine for
+    // save/load -> possibly pass the configs in via some large structure.
+
     realtime_vad_configs: ArcSwap<VadConfigs>,
     offline_vad_configs: ArcSwap<VadConfigs>,
+
     audio_backend: AudioBackendProxy,
+
+    // The Whisper configs are also serializeable -> derive serialize on the struct and write
+    // a routine in Transcriber engine or pass the configs in.
     transcriber_engine: TranscriberEngine<RibbleModelBank, Kernel>,
     recorder_engine: RecorderEngine<RibbleModelBank, Kernel>,
     console_engine: ConsoleEngine,
@@ -104,6 +109,10 @@ pub struct Kernel {
     // in a shared pointer.
     model_bank: Arc<RibbleModelBank>,
 }
+
+// TODO: impl Kernel -> the main guts, controller delegates to these methods
+// NOTE: the constructor's going to get a liiiiittle gnarly.
+// Use the Bus abstraction to try and keep things sane-ish.
 
 // TODO: implement trait
 // NOTE: most of these are blocking calls (as of now with concrete components).

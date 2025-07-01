@@ -8,17 +8,31 @@ use ribble_whisper::whisper::model::ModelRetriever;
 use std::sync::{Arc, Weak};
 use std::thread::JoinHandle;
 
-// TODO: this should instead construct with a queue to send 
+// TODO: this should instead construct with a queue to send
 // console messages; it doesn't ever need to touch TranscriberEngine
+
+// TODO TWICE: Split the joiner thread into 2: 1 for long, 1 for short jobs.
+// Change the Receiver to Receiver<WorkRequest> where WorkRequest is an enum
+// WorkRequest::Long(RibbleWorkerHandle), WorkRequest::Short(RibbleWorkerHandle), to help mitigate
+// starvation.
+
+pub(crate) enum WorkerJob {
+    Short(Receiver<RibbleWorkerHandle>),
+    Long(Receiver<RibbleWorkerHandle>),
+}
 
 struct WorkerInner<M: ModelRetriever, E: EngineKernel<Retriever=M>> {
     engine_kernel: Weak<E>,
+    // TODO: tweak this this a bit more: take in a receiver as an arg, of type WorkerJob.
+    // Match based on which one and forward into the correct queue.
     incoming: Receiver<RibbleWorkerHandle>,
     // Inner channel to forward incoming jobs to a joiner.
     // TODO: If double-buffering is not sufficient, look at implementing a priority system
     // Possibly look at rayon for work-stealing if thrashing starts to become an issue.
+    // TODO: use these for Short, call it something like to_short_queue (send out) / from_short_queue (join here)
     forward_incoming: Receiver<RibbleWorkerHandle>,
     forward_outgoing: Sender<RibbleWorkerHandle>,
+    // TODO: add more queues for Long, call it something like to_long_queue(send out) /from_long_queue (join here)
 }
 impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> WorkerInner<M, E> {
     fn handle_result(
@@ -92,6 +106,8 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> WorkerEngine<M, E> {
                         let _ = forwarder_inner.forward_outgoing.send(work);
                     }
                 });
+
+                // TODO: two workers: long_queue/short_queue
                 let worker = s.spawn(move || {
                     while let Ok(work) = worker_inner.forward_incoming.recv() {
                         match work.join() {

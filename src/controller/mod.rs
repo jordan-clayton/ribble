@@ -9,14 +9,15 @@ pub(crate) mod whisper_app_controller;
 
 // TODO: determine visibility and fix this later.
 pub(crate) mod console;
+mod downloader;
 mod kernel;
 pub(crate) mod progress;
 mod recorder;
-mod transcriber;
+// TODO: move transcriber feedback out of this module and stick in user_preferences.
+pub(crate) mod transcriber;
 mod visualizer;
 mod worker;
 mod writer;
-mod downloader;
 
 type RibbleWorkerHandle = JoinHandle<Result<RibbleMessage, RibbleAppError>>;
 
@@ -34,5 +35,7 @@ struct Bus {
     // channel.
     progress_sender: Sender<progress::ProgressMessage>,
     worker_sender: Sender<RibbleWorkerHandle>,
+    // TODO: future thing -> possibly stick this in a data structure with the sample rate.
+    // Pre-computing and re-initializing the FFT thingy might get a little sticky.
     visualizer_sender: Sender<Arc<[f32]>>,
 }
