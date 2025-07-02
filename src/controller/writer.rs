@@ -1,7 +1,9 @@
 // Basic idea: spawn a thread on construction time that waits for new requests for writing.
 // Upon one, send a worker job (via message queues once the kernel stuff is refactored out).
 // Store a limited number of temporary file recordings (keep an accumulator modulo num recordings).
+use crate::controller::Bus;
 use crate::controller::console::ConsoleMessage;
+use crate::controller::worker::WorkRequest;
 use crate::controller::{RibbleMessage, RibbleWorkerHandle};
 use crate::utils::errors::RibbleError;
 use crate::utils::recorder_configs::RibbleRecordingConfigs;
@@ -12,8 +14,8 @@ use parking_lot::RwLock;
 use ribble_whisper::audio::pcm::IntoPcmS16;
 use ribble_whisper::utils::{Receiver, Sender};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -54,18 +56,14 @@ struct WriterEngineState {
     data_directory: PathBuf,
     completed_jobs: RwLock<IndexMap<String, CompletedJobs>>,
     incoming_jobs: Receiver<WriteRequest>,
-    worker_engine_channel: Sender<RibbleWorkerHandle>,
+    work_request_sender: Sender<WorkRequest>,
 }
 
 impl WriterEngineState {
     const DEFAULT_CACHE_SIZE: usize = 5;
     const TMP_FILE: &'static str = "tmp_recording";
     const FILE_EXTENSION: &'static str = ".wav";
-    fn new(
-        data_directory: PathBuf,
-        incoming_jobs: Receiver<WriteRequest>,
-        worker_engine_channel: Sender<RibbleWorkerHandle>,
-    ) -> Self {
+    fn new(data_directory: PathBuf, incoming_jobs: Receiver<WriteRequest>, bus: Bus) -> Self {
         let ticket = AtomicUsize::new(0);
         let clearing = AtomicBool::new(false);
         let completed_jobs = RwLock::new(IndexMap::with_capacity(Self::DEFAULT_CACHE_SIZE));
@@ -75,50 +73,75 @@ impl WriterEngineState {
             data_directory,
             completed_jobs,
             incoming_jobs,
-            worker_engine_channel,
+            work_request_sender: bus.work_request_sender(),
         }
     }
     fn is_clearing(&self) -> bool {
         self.clearing.load(Ordering::Acquire)
     }
 
-    fn try_get_latest(&self) -> Result<PathBuf, RibbleError> {
+    fn try_get_latest(&self) -> Option<PathBuf> {
         // Try and get the last inserted key
-        let latest = self.completed_jobs.read().last().ok_or(RibbleError::Core(
-            "Latest cached recording missing!".to_string(),
-        ))?;
-        Ok(self.data_directory.join(latest))
+        self.completed_jobs
+            .read()
+            .last()
+            .and_then(|(file_name, _)| Some(self.data_directory.join(file_name)))
     }
 
-    fn clear_cache(&self) -> Result<RibbleMessage, RibbleError> {
-        self.clearing.store(true, Ordering::Release);
-        let mut completed_jobs = self.completed_jobs.write();
+    fn get_recording_path(&self, file_name: &str) -> Option<PathBuf> {
+        let mut map = self.completed_jobs.write();
+        if !map.contains_key(file_name) {
+            return None;
+        }
 
-        for file in completed_jobs.keys() {
-            let file_path = self.data_directory.join(file);
-            if let Ok(exists) = std::fs::exists(file_path.as_path()) {
-                // Don't care if the path is a directory (it should never, ever be one)
-                // Don't care if the file is already gone (the entry will get deleted from the map)
-                //
-                // If a user lacks permission to remove the file, then they're going to have a lot
-                // of trouble running this application - but it's not an error.
-                // When the app re-launches, this will just clobber any existing temporary files
-                // for recordings - i.e. let whomever can clear the cache files, clear the cache
-                // files.
-                if exists {
-                    let _ = std::fs::remove_file(file_path.as_path());
+        let expected_path = self.data_directory.join(file_name);
+        if !expected_path.is_file() {
+            // Remove the broken link from the map if it no longer exists.
+            map.shift_remove(file_name);
+            None
+        } else {
+            Some(expected_path)
+        }
+    }
+
+    // TODO: Just send this to the worker engine.
+    fn clear_cache(&self) {
+        self.clearing.store(true, Ordering::Release);
+        let work_handle = std::thread::spawn(move || {
+            let mut completed_jobs = self.completed_jobs.write();
+
+            for file in completed_jobs.keys() {
+                let file_path = self.data_directory.join(file);
+                if let Ok(exists) = std::fs::exists(file_path.as_path()) {
+                    // Don't care if the path is a directory (it should never, ever be one)
+                    // Don't care if the file is already gone (the entry will get deleted from the map)
+                    //
+                    // If a user lacks permission to remove the file, then they're going to have a lot
+                    // of trouble running this application - but it's not an error.
+                    // When the app re-launches, this will just clobber any existing temporary files
+                    // for recordings - i.e. let whomever can clear the cache files, clear the cache
+                    // files.
+                    if exists {
+                        let _ = std::fs::remove_file(file_path.as_path());
+                    }
                 }
             }
+            // Then empty the hashmap and reset the accumulator.
+            completed_jobs.clear();
+            self.ticket.store(0, Ordering::Release);
+
+            let console_message = ConsoleMessage::Status("Recording cache cleared.".to_string());
+            let ribble_message = RibbleMessage::Console(console_message);
+
+            self.clearing.store(false, Ordering::Release);
+            Ok(ribble_message)
+        });
+
+        let work_request = WorkRequest::Short(work_handle);
+
+        if self.work_request_sender.send(work_request).is_err() {
+            todo!("LOGGING")
         }
-        // Then empty the hashmap and reset the accumulator.
-        completed_jobs.clear();
-        self.ticket.store(0, Ordering::Release);
-
-        let console_message = ConsoleMessage::Status("Recording cache cleared.".to_string());
-        let ribble_message = RibbleMessage::Console(console_message);
-
-        self.clearing.store(false, Ordering::Release);
-        Ok(ribble_message)
     }
 
     fn export_file(
@@ -165,16 +188,7 @@ impl WriterEngineState {
 
             let int_audio = reader
                 .samples::<f32>()
-                .map(|sample| {
-                    sample
-                        .map(|sample| sample.into_pcm_s16())
-                        // TODO: Fix this once hound hook is implemented.
-                        .map_err(|sample| {
-                            RibbleError::Core(
-                                "Cached recording does not match expected spec.".to_string(),
-                            )
-                        })
-                })
+                .map(|sample| sample.map(|sample| sample.into_pcm_s16()))
                 .collect::<Result<Vec<i16>, RibbleError>>()?;
 
             // Open a writer to read the new file out.
@@ -182,6 +196,7 @@ impl WriterEngineState {
             for int_sample in int_audio {
                 writer.write_sample(int_sample)?
             }
+
             writer.finalize()?;
             let console_message =
                 ConsoleMessage::Status(format!("Saved recording to {outfile_path}!"));
@@ -261,31 +276,15 @@ pub(super) struct WriterEngine {
 
 // TODO: take in a bus instead of the explicit sender queue
 impl WriterEngine {
-    fn new(
-        data_directory: PathBuf,
-        incoming_jobs: Receiver<WriteRequest>,
-        worker_engine_channel: Sender<RibbleWorkerHandle>,
-    ) -> Self {
-        let inner = Arc::new(WriterEngineState::new(
-            data_directory,
-            incoming_jobs,
-            worker_engine_channel,
-        ));
+    fn new(data_directory: PathBuf, incoming_jobs: Receiver<WriteRequest>, bus: Bus) -> Self {
+        let inner = Arc::new(WriterEngineState::new(data_directory, incoming_jobs, bus));
         let thread_inner = Arc::clone(&inner);
         let polling_thread = std::thread::spawn(move || {
             while let Ok(request) = thread_inner.incoming_jobs.recv() {
-                // NOTE: if there are problems with send + sync, turn into a static
-                // method/utility function.
-                if thread_inner
-                    .worker_engine_channel
-                    .send(thread_inner.handle_new_request(request))
-                    .is_err()
-                {
-                    // TODO: do some sort of logging -> this would mean that the
-                    // WorkerEngine has deallocated--and this should be the end of the
-                    // application, but in case it's not, this should be logged to pinpoint
-                    // errors.
+                let work_request = WorkRequest::Short(thread_inner.handle_new_request(request));
 
+                if thread_inner.work_request_sender.send(work_request).is_err() {
+                    todo!("LOGGING");
                     break;
                 }
             }
@@ -324,19 +323,14 @@ impl WriterEngine {
 
     // NOTE: use this if a user wants to re-transcribe their last recording.
     // In the UI, label this button: Re-Transcribe latest (recording)
-    // (if this fails, it means there are no recordings, or there was an issue writing to a temp file).
-    pub(super) fn try_get_latest(&self) -> Result<PathBuf, RibbleError> {
+    // If this is none, that means either writing hasn't finished, or there are no recordings.
+    // This is not necessarily an error.
+    pub(super) fn try_get_latest(&self) -> Option<PathBuf> {
         self.inner.try_get_latest()
     }
 
-    pub(super) fn get_recording_path(&self, file_name: &String) -> Option<&String> {
-        todo!("Finish this.")
-        // Do the logic in inner.
-        // Test the key (internal temp file_name -> is in the completed jobs list)
-        // If the key exists on disk, return Some(file_name)
-        // The caller can decide what to do with the file_name.
-        // (This most likely involves a clone, but the frequency with which it happens is low enough)
-        // And the strings are very, very small that the allocation should be nearly free.
+    pub(super) fn get_recording_path(&self, file_name: &str) -> Option<PathBuf> {
+        self.inner.get_recording_path(file_name)
     }
 
     // Use this to disable a clear cache button in the UI thread.
@@ -345,15 +339,13 @@ impl WriterEngine {
     }
 
     // NOTE: remove .into() once RibbleAppError has been removed.
-    pub(super) fn clear_cache(&self) -> Option<RibbleWorkerHandle> {
+    pub(super) fn clear_cache(&self) {
         // TODO: if guarding against grandma clicks isn't necessary, remove this mechanism.
         if self.inner.is_clearing() {
-            return None;
+            return;
         }
-        let thread_inner = Arc::clone(&self.inner);
-        Some(std::thread::spawn(move || {
-            thread_inner.clear_cache().into()
-        }))
+
+        self.inner.clear_cache();
     }
 }
 

@@ -1,15 +1,9 @@
-use crate::utils::constants::{
-    AMPLITUDE_OVERLAP, NUM_BUCKETS, POWER_GAIN, POWER_OVERLAP, WAVEFORM_GAIN,
-};
-use crate::utils::errors::{RibbleAppError, RibbleError};
-use crate::utils::pcm_f32::{IntoPcmF32, PcmF32Convertible};
+use crate::utils::errors::RibbleError;
 use atomic_enum::atomic_enum;
-use crossbeam::channel::{Receiver, Sender};
+use crossbeam::channel::Receiver;
 use parking_lot::RwLock;
 use realfft::RealFftPlanner;
 use realfft::num_traits::pow;
-use ribble_whisper::utils::constants::INPUT_BUFFER_CAPACITY;
-use ribble_whisper::utils::get_channel;
 use std::f32::consts::PI;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -18,15 +12,19 @@ use std::thread;
 use std::thread::JoinHandle;
 use strum::{Display, EnumIter};
 
+// TODO: rename and move to the controller module. "NUM_VISUALIZER_BUCKETS"
+pub const NUM_BUCKETS: usize = 32;
+
 // TODO: might need to move this to somewhere shared.
 pub(crate) enum RotationDirection {
     Clockwise,
     CounterClockwise,
 }
 #[atomic_enum]
-#[derive(PartialEq, EnumIter, Display)]
+#[derive(Default, PartialEq, EnumIter, Display)]
 pub(crate) enum AnalysisType {
     #[strum(to_string = "Amplitude")]
+    #[default]
     AmplitudeEnvelope = 0,
     Waveform,
     Power,
@@ -65,37 +63,58 @@ impl AnalysisType {
 // TODO: Expect to need to return to this (The underlying FFT utils need significant refactoring)
 // TODO: construct the FFT planner inside the Engine + move all utility methods here.
 
-// TODO: possibly add more of these here? --> maybe don't. 32 bit integer audio is weird; this isn't professional recording software.
-// TODO twice: Possibly make generic to use across the writer -- not sure yet.
-pub(crate) enum VisualizerSample {
-    S16(Arc<[i16]>),
-    F32(Arc<[f32]>),
+pub(super) struct VisualizerSample {
+    sample: Arc<[f32]>,
+    sample_rate: f64,
 }
 
-impl From<Arc<[i16]>> for VisualizerSample {
-    fn from(sample: Arc<[i16]>) -> Self {
-        Self::S16(sample)
+impl VisualizerSample {
+    pub(super) fn new(sample: Arc<[f32]>, sample_rate: f64) -> Self {
+        Self {
+            sample,
+            sample_rate,
+        }
     }
-}
-impl From<Arc<[f32]>> for VisualizerSample {
-    fn from(sample: Arc<[f32]>) -> Self {
-        Self::F32(sample)
-    }
-}
-pub(super) struct VisualizerSamplePacket {
-    sample: VisualizerSample,
-    sample_rate: f64,
 }
 
 struct VisualizerEngineState {
     planner: RwLock<RealFftPlanner<f32>>,
-    incoming: Receiver<VisualizerSamplePacket>,
+    incoming_samples: Receiver<VisualizerSample>,
     buffer: RwLock<[f32; NUM_BUCKETS]>,
     visualizer_running: AtomicBool,
     analysis_type: AtomicAnalysisType,
 }
 
 impl VisualizerEngineState {
+    const POWER_OVERLAP: f32 = 0.5;
+    const AMPLITUDE_OVERLAP: f32 = 0.25;
+    const POWER_GAIN: f32 = 30.0;
+    const WAVEFORM_GAIN: f32 = Self::POWER_GAIN / 2.0;
+
+    fn new(incoming_samples: Receiver<VisualizerSample>) -> Self {
+        let buffer = RwLock::new([0.0; NUM_BUCKETS]);
+        let visualizer_running = AtomicBool::new(false);
+        let analysis_type = AtomicAnalysisType::new(AnalysisType::Waveform);
+        let planner = RwLock::new(RealFftPlanner::new());
+        Self {
+            planner,
+            incoming_samples,
+            buffer,
+            visualizer_running,
+            analysis_type,
+        }
+    }
+
+    // TODO: if deciding to store the sample rate, remove this argument
+    fn run_analysis(&self, sample: &[f32], sample_rate: f64) -> Result<(), RibbleError> {
+        match self.analysis_type.load(Ordering::Acquire) {
+            AnalysisType::AmplitudeEnvelope => self.amplitude_envelope(sample),
+            AnalysisType::Waveform => self.normalized_waveform(sample),
+            AnalysisType::Power => self.power_analysis(sample),
+            AnalysisType::SpectrumDensity => self.spectrum_density(sample, sample_rate),
+        }
+    }
+
     // TODO: precompute the frame size/FFT planner, etc.
     // TODO: maybe return RibbleAppError? Might not matter.
     fn power_analysis(&self, samples: &[f32]) -> Result<(), RibbleError> {
@@ -103,7 +122,7 @@ impl VisualizerEngineState {
         let window_samples = hann_window(samples, true);
 
         let (frame_size, step_size) =
-            compute_welch_frames(window_samples.len() as f32, POWER_OVERLAP);
+            compute_welch_frames(window_samples.len() as f32, Self::POWER_OVERLAP);
 
         let frames = window_samples.windows(frame_size).step_by(step_size);
         debug_assert_eq!(
@@ -151,7 +170,7 @@ impl VisualizerEngineState {
         let (frame_size, step_size) = compute_welch_frames(samples.len() as f32, 0f32);
         let window = samples
             .iter()
-            .map(|s| *s * WAVEFORM_GAIN)
+            .map(|s| *s * Self::WAVEFORM_GAIN)
             .collect::<Vec<_>>();
 
         let mut waveform = window
@@ -182,10 +201,11 @@ impl VisualizerEngineState {
     }
 
     fn amplitude_envelope(&self, samples: &[f32]) -> Result<(), RibbleError> {
-        let (frame_size, step_size) = compute_welch_frames(samples.len() as f32, AMPLITUDE_OVERLAP);
+        let (frame_size, step_size) =
+            compute_welch_frames(samples.len() as f32, Self::AMPLITUDE_OVERLAP);
         let window = samples
             .iter()
-            .map(|s| *s * WAVEFORM_GAIN)
+            .map(|s| *s * Self::WAVEFORM_GAIN)
             .collect::<Vec<_>>();
 
         let mut amp_envelope = window
@@ -213,12 +233,13 @@ impl VisualizerEngineState {
         Ok(())
     }
 
-    fn frequency_analysis(&self, samples: &[f32], sample_rate: f64) -> Result<(), RibbleError> {
+    fn spectrum_density(&self, samples: &[f32], sample_rate: f64) -> Result<(), RibbleError> {
         // I don't remember why I'm not applying gain...
         let window_samples = hann_window(samples, false);
         // TODO: look at precomputing on changing settings/running transcriber, etc.
         // Assert nonzero frame size
-        let (frame_size, step_size) = compute_welch_frames(samples.len() as f32, POWER_OVERLAP);
+        let (frame_size, step_size) =
+            compute_welch_frames(samples.len() as f32, Self::POWER_OVERLAP);
         let frames = window_samples.windows(frame_size).step_by(step_size);
         debug_assert_eq!(
             frames.len(),
@@ -299,9 +320,15 @@ impl VisualizerEngineState {
     }
 }
 
+// TODO: probably better to just include a gain multiplier as an argument to the function to
+// encapsulate the constants within the struct.
 fn hann_window(samples: &[f32], apply_gain: bool) -> Vec<f32> {
     let len = samples.len() as f32;
-    let multiplier = if apply_gain { POWER_GAIN } else { 1.0 };
+    let multiplier = if apply_gain {
+        VisualizerEngineState::POWER_GAIN
+    } else {
+        1.0
+    };
     samples
         .iter()
         .enumerate()
@@ -330,85 +357,42 @@ fn compute_welch_frames(sample_len: f32, overlap_ratio: f32) -> (usize, usize) {
 // TODO: kernel-exposed methods for updating sample rate/buffer size
 // For precomputing an FFTplanner state that can be ArcSwapped
 pub(super) struct VisualizerEngine {
-    outgoing: Sender<VisualizerSamplePacket>,
     inner: Arc<VisualizerEngineState>,
     // TODO: swap the error type once errors have been re-implemented.
-    work_thread: Option<JoinHandle<Result<(), RibbleAppError>>>,
+    work_thread: Option<JoinHandle<Result<(), RibbleError>>>,
 }
 impl VisualizerEngine {
-    pub(super) fn new() -> Self {
-        let buffer = RwLock::new([0.0; NUM_BUCKETS]);
-        let visualizer_running = AtomicBool::new(false);
-        let analysis_type = AtomicAnalysisType::new(AnalysisType::Waveform);
-        // TODO: determine what the actual size of this should be.
-
-        // TODO TWICE: MIGRATE THIS CHANNEL INITIALIZATION OUTSIDE OF THE CONSTRUCTOR HERE FOR THE
-        // "BUS".
-        // TAKE THE INNER IN AS AN ARGUMENT.
-        let (sender, receiver) = get_channel(INPUT_BUFFER_CAPACITY);
-        let planner = RwLock::new(RealFftPlanner::new());
-        let inner = Arc::new(VisualizerEngineState {
-            planner,
-            incoming: receiver,
-            buffer,
-            visualizer_running,
-            analysis_type,
-        });
-
+    pub(super) fn new(incoming_samples: Receiver<VisualizerSample>) -> Self {
+        let inner = Arc::new(VisualizerEngineState::new(incoming_samples));
         let thread_inner = Arc::clone(&inner);
 
         let work_thread = Some(thread::spawn(move || {
             // When this receives new audio, perform Audio analysis calculations based on the current
             // visualizer Analysis type.
 
-            while let Ok(packet) = thread_inner.incoming.recv() {
-                let VisualizerSamplePacket {
+            while let Ok(packet) = thread_inner.incoming_samples.recv() {
+                // If the visualizer isn't open, just skip over the sample and don't do the
+                // computation.
+                if !thread_inner.visualizer_running.load(Ordering::Acquire) {
+                    continue;
+                }
+
+                let VisualizerSample {
                     sample,
                     sample_rate,
                 } = packet;
-                // TODO: Possibly bury the implementation down into an internal match.
-                match (thread_inner.analysis_type.load(Ordering::Acquire), sample) {
-                    (AnalysisType::AmplitudeEnvelope, VisualizerSample::F32(audio)) => {
-                        thread_inner.amplitude_envelope(&audio)
-                    }
-                    (AnalysisType::AmplitudeEnvelope, VisualizerSample::S16(audio)) => {
-                        let fp_audio = audio.iter().map(|i| i.into_pcm_f32()).collect();
-                        thread_inner.amplitude_envelope(&fp_audio)
-                    }
-                    (AnalysisType::Waveform, VisualizerSample::F32(audio)) => {
-                        thread_inner.normalized_waveform(&audio)
-                    }
-                    (AnalysisType::Waveform, VisualizerSample::S16(audio)) => {
-                        let fp_audio = audio.iter().map(|i| i.into_pcm_f32()).collect();
-                        thread_inner.normalized_waveform(&fp_audio)
-                    }
-                    (AnalysisType::Power, VisualizerSample::F32(audio)) => {
-                        // TODO: return to this and unwrap the match once methods have been implemented.
-                        thread_inner.power_analysis(&audio)
-                    }
 
-                    (AnalysisType::Power, VisualizerSample::S16(audio)) => {
-                        let fp_audio = audio.iter().map(|i| i.into_pcm_f32()).collect();
-                        // TODO: return to this and unwrap the match once methods have been implemented.
-                        thread_inner.power_analysis(&fp_audio)
-                    }
-                    (AnalysisType::SpectrumDensity, VisualizerSample::F32(audio)) => {
-                        thread_inner.frequency_analysis(&audio, sample_rate)
-                    }
-                    (AnalysisType::SpectrumDensity, VisualizerSample::S16(audio)) => {
-                        let fp_audio = audio.iter().map(|i| i.into_pcm_f32()).collect();
-                        thread_inner.frequency_analysis(&fp_audio, sample_rate)
-                    }
-                }?;
+                if let Err(e) = thread_inner.run_analysis(&sample, sample_rate) {
+                    todo!("LOGGING");
+                    // I'm not necessarily sure this should return an error here.
+                    // TODO: remove this after debugging and maybe just log.
+                    return Err(e);
+                }
             }
             Ok(())
         }));
 
-        Self {
-            outgoing: sender,
-            inner,
-            work_thread,
-        }
+        Self { inner, work_thread }
     }
 
     pub(super) fn set_visualizer_visibility(&self, visibility: bool) {
@@ -422,31 +406,6 @@ impl VisualizerEngine {
         self.inner.visualizer_running.load(Ordering::Acquire)
     }
 
-    // The Arc<T> is to make sharing a little quicker -- otherwise there'd be the need to deep clone.
-    pub(super) fn update_visualizer_data<T: PcmF32Convertible>(
-        &self,
-        buffer: Arc<[T]>,
-        sample_rate: f64,
-    ) {
-        // TODO: If the public method gets removed, just make the atomic load here.
-
-        if self.visualizer_running() {
-            //----
-            // TODO TWICE: put this logic in whomever is using the visualizer engine
-            // (Transcriber/Recorder) and delete this method.
-            let sample: VisualizerSample = Arc::clone(&buffer).into();
-
-            let packet = VisualizerSamplePacket {
-                sample,
-                sample_rate,
-            };
-            // Since this can only fail if the inner receiver is dropped, that means inner has also dropped->
-            // Which means this engine has also dropped, making it impossible to make this method call.
-
-            // It might be okay to just ignore this specific result -> or panic, seeing as something -very- wrong is going on if this fails.
-            let _ = self.outgoing.send(packet);
-        }
-    }
     pub(super) fn try_read_visualization_buffer(&self, copy_buffer: &mut [f32; NUM_BUCKETS]) {
         if let Some(buffer) = self.inner.buffer.try_read() {
             copy_buffer.copy_from_slice(buffer.deref())

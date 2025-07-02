@@ -3,13 +3,6 @@ pub const BLANK_SEPARATOR: f32 = 8.0;
 
 // TODO: move GUI constants to a GUI common file.
 
-// TODO: implement a User Preferences pane for these sorts of things.
-pub const DEFAULT_CONSOLE_HISTORY_SIZE: usize = 35;
-
-// TODO: if these do not see use in a gui, move them back to ConsoleEngine.
-pub const MIN_NUM_MESSAGES: usize = 16;
-pub const MAX_NUM_MESSAGES: usize = 64;
-
 // Uh, 1, this doesn't make a lot of sense; 2, just use the one from ribble_whisper
 pub const MAX_REALTIME_TIMEOUT: u64 = (Duration::new(7200, 0).as_millis() / 1000) as u64;
 
@@ -29,7 +22,6 @@ pub const MAX_PHRASE_TIMEOUT: f32 = 10.0;
 pub const FRAME_CONVERGENCE_ITERATIONS: usize = 1000;
 pub const FRAME_CONVERGENCE_TOLERANCE: usize = 2;
 // TODO: Move to VisualizerEngine
-pub const NUM_BUCKETS: usize = 32;
 // This can go in the GUI constants lib
 pub const SMOOTH_FACTOR: f32 = 8.0;
 
@@ -42,10 +34,6 @@ pub const VISUALIZER_MIN_HEIGHT_PROPORTION: f32 = 0.10;
 pub const VISUALIZER_MAX_WIDTH: f32 = 16.0;
 pub const VISUALIZER_MIN_WIDTH: f32 = 8.0;
 // TODO: move to VisualizerEngine
-pub const POWER_OVERLAP: f32 = 0.5;
-pub const AMPLITUDE_OVERLAP: f32 = 0.25;
-pub const POWER_GAIN: f32 = 30.0;
-pub const WAVEFORM_GAIN: f32 = POWER_GAIN / 2.0;
 
 // TODO: look into what the heck these things are doing/for
 // Lord-y.

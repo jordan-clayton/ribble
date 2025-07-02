@@ -1,62 +1,47 @@
-use crate::utils::constants::{MAX_NUM_MESSAGES, MIN_NUM_MESSAGES};
 use crate::utils::errors::RibbleError;
 use egui::{RichText, Visuals};
 use parking_lot::RwLock;
+use ribble_whisper::utils::Receiver;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread::JoinHandle;
 use strum::Display;
 
-// NOTE: hold off on adding a reference to the kernel if it's not required in the interface.
-// TODO: if a kernel is not required, refactor these state parameters back into ConsoleEngine.
-//
-// TODO: spawn a background thread and use message queues instead.
-struct ConsoleState {
+struct ConsoleEngineState {
+    incoming_messages: Receiver<ConsoleMessage>,
     queue: RwLock<VecDeque<Arc<ConsoleMessage>>>,
     // Because of the way VecDeque allocates, capacity needs to be tracked such that the length is
     // essentially fixed.
     // In practice, expect the real capacity to be slightly greater (likely the next power of two),
     // but the length of the elements will remain fixed to the user-specified limit.
-    capacity: AtomicUsize,
+    queue_capacity: AtomicUsize,
 }
 
-// This is modelled akin to "history states" such that only a predefined list of
-// console messages are retained.
-// NOTE: if it becomes important to retain the entire history of the program for logging purposes,
-// implement a double-buffer strategy to retain popped states.
-pub(super) struct ConsoleEngine {
-    inner: Arc<ConsoleState>,
-}
-
-// Provide access to inner
-impl ConsoleEngine {
-    // These are going to be
+impl ConsoleEngineState {
     const DEFAULT_NUM_MESSAGES: usize = 32;
-    // It is fine to resize the inner queue, but this should take an initial nonzero capacity
-    // The backing buffer is fine to be zero size, but the capacity is monitored to not exceed
-    // a pre-defined user limit.
-    //
-    // TODO: -> Have this return a tuple (Self::Engine, Self::Port(sender))
-    pub(super) fn new(capacity: usize) -> Self {
-        let capacity = capacity.max(MIN_NUM_MESSAGES);
 
-        let console_queue = RwLock::new(VecDeque::with_capacity(capacity));
-        let inner = ConsoleState {
-            queue: console_queue,
-            capacity: AtomicUsize::new(capacity),
-        };
+    pub const MIN_NUM_MESSAGES: usize = 16;
+    pub const MAX_NUM_MESSAGES: usize = 64;
+
+    fn new(incoming_messages: Receiver<ConsoleMessage>, capacity: usize) -> Self {
+        let capacity = capacity.max(Self::MIN_NUM_MESSAGES);
+        let queue = RwLock::new(VecDeque::with_capacity(capacity));
+        let queue_capacity = AtomicUsize::new(capacity);
         Self {
-            inner: Arc::new(inner),
+            incoming_messages,
+            queue,
+            queue_capacity,
         }
     }
 
-    // TODO: remove this method -> migrate the logic to a background thread.
-    pub(super) fn add_console_message(&self, message: ConsoleMessage) {
+    fn add_console_message(&self, message: ConsoleMessage) {
         // Get a write lock for pushing to the buffer
-        let mut queue = self.inner.queue.write();
+        let mut queue = self.queue.write();
 
         // If the buffer is at capacity, pop the first element
-        let capacity = self.inner.capacity.load(Ordering::Acquire);
+        let capacity = self.queue_capacity.load(Ordering::Acquire);
+
         debug_assert!(capacity > 0, "Redundancy error, capacity is zero");
         if queue.len() == capacity {
             queue.pop_front();
@@ -67,23 +52,15 @@ impl ConsoleEngine {
             "Queue length greater than capacity, pop logic is incorrect. Len: {}",
             queue.len()
         );
-        drop(queue);
+
     }
 
-    // Implementing Clone for ConsoleMessage would get expensive; it's cheaper to just use
-    // shared pointers
-    pub(super) fn try_get_current_message(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
-        if let Some(buffer) = self.inner.queue.try_read() {
-            copy_buffer.clear();
-            copy_buffer.extend(buffer.iter().cloned())
-        }
-    }
 
-    pub(super) fn resize(&self, new_size: usize) {
+    fn resize(&self, new_size: usize) {
         // Clamp the size between min/max
-        let new_size = new_size.max(MIN_NUM_MESSAGES).min(MAX_NUM_MESSAGES);
+        let new_size = new_size.max(Self::MIN_NUM_MESSAGES).min(Self::MAX_NUM_MESSAGES);
         // Determine whether to shrink or grow.
-        let capacity = self.inner.capacity.load(Ordering::Acquire);
+        let capacity = self.queue_capacity.load(Ordering::Acquire);
         if new_size > capacity {
             let diff = new_size.saturating_sub(capacity);
             // This is likely a little unnecessary, but stranger things have happened.
@@ -97,23 +74,74 @@ impl ConsoleEngine {
         } else {
             return;
         }
-        self.inner.capacity.store(new_size, Ordering::Release);
+        self.queue_capacity.store(new_size, Ordering::Release);
     }
 
     // Since diff is pre-calculated and reserve is (additional), this should never, ever panic
     // except for in cases of a memory allocation error.
     fn grow(&self, diff: usize) {
         // Get a write lock to resize the buffer.
-        self.inner.queue.write().reserve(diff);
+        self.queue.write().reserve(diff);
     }
 
     // Like above, diff is pre-calculated and this method clamps to the length of the buffer.
     // Expect that this will never panic.
     fn shrink(&self, diff: usize) {
-        let mut queue = self.inner.queue.write();
+        let mut queue = self.queue.write();
         let drain = diff.min(queue.len());
         queue.drain(..drain);
     }
+}
+
+// This is modelled akin to "history states" such that only a predefined list of
+// console messages are retained.
+// NOTE: if it becomes important to retain the entire history of the program for logging purposes,
+// implement a double-buffer strategy to retain popped states.
+pub(super) struct ConsoleEngine {
+    inner: Arc<ConsoleEngineState>,
+    work_thread: Option<JoinHandle<Result<(), RibbleError>>>,
+}
+
+// Provide access to inner
+impl ConsoleEngine {
+    // These are going to be
+    // It is fine to resize the inner queue, but this should take an initial nonzero capacity
+    // The backing buffer is fine to be zero size, but the capacity is monitored to not exceed
+    // a pre-defined user limit.
+    //
+    // TODO: -> Have this return a tuple (Self::Engine, Self::Port(sender))
+    pub(super) fn new(incoming_messages: Receiver<ConsoleMessage>, capacity: usize) -> Self {
+        let inner = Arc::new(ConsoleEngineState::new(incoming_messages, capacity));
+        let thread_inner = Arc::clone(&inner);
+
+        let worker = std::thread::spawn(move||{
+            while let Ok(console_message) = thread_inner.incoming_messages.recv(){
+                thread_inner.add_console_message(console_message);
+            }
+            Ok(())
+        });
+
+        let work_thread = Some(worker)
+
+        Self {
+            inner,
+            work_thread,
+        }
+    }
+
+    // Implementing Clone for ConsoleMessage would get expensive; it's cheaper to just use
+    // shared pointers
+    pub(super) fn try_get_current_message(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
+        if let Some(buffer) = self.inner.queue.try_read() {
+            copy_buffer.clear();
+            copy_buffer.extend(buffer.iter().cloned())
+        }
+    }
+
+    pub(super) fn resize(&self, new_size: usize) {
+        self.inner.resize(new_size);
+    }
+
 }
 
 #[derive(Debug, Display)]
@@ -135,4 +163,13 @@ impl ConsoleMessage {
     }
 }
 
-// TODO: implement drop once background thread impl is done.
+impl Drop for ConsoleEngine {
+    fn drop(&mut self) {
+        if let Some(handle) = self.work_thread.take(){
+            handle.join()
+                .expect("The Console thread should never panic.")
+                .expect("I do not know what sort of error conditions would be relevant here")
+        }
+    }
+}
+

@@ -1,115 +1,120 @@
+use crate::controller::Bus;
 use crate::controller::console::ConsoleMessage;
-use crate::controller::kernel::EngineKernel;
 use crate::controller::{RibbleMessage, RibbleWorkerHandle};
-use crate::utils::errors::{RibbleAppError, RibbleError};
-use crossbeam::channel::{self, Receiver, Sender, TrySendError};
+use crate::utils::errors::RibbleError;
 use crossbeam::scope;
-use ribble_whisper::whisper::model::ModelRetriever;
-use std::sync::{Arc, Weak};
+use ribble_whisper::utils::{Receiver, Sender, get_channel};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 
-// TODO: this should instead construct with a queue to send
-// console messages; it doesn't ever need to touch TranscriberEngine
-
-// TODO TWICE: Split the joiner thread into 2: 1 for long, 1 for short jobs.
-// Change the Receiver to Receiver<WorkRequest> where WorkRequest is an enum
-// WorkRequest::Long(RibbleWorkerHandle), WorkRequest::Short(RibbleWorkerHandle), to help mitigate
-// starvation.
-
-pub(crate) enum WorkerJob {
-    Short(Receiver<RibbleWorkerHandle>),
-    Long(Receiver<RibbleWorkerHandle>),
+// There is no functional difference between members of this enum (at the moment).
+// Right now, it's just semantic & the long_queue is twice the size.
+pub(crate) enum WorkRequest {
+    Short(RibbleWorkerHandle),
+    Long(RibbleWorkerHandle),
 }
 
-struct WorkerInner<M: ModelRetriever, E: EngineKernel<Retriever=M>> {
-    engine_kernel: Weak<E>,
-    // TODO: tweak this this a bit more: take in a receiver as an arg, of type WorkerJob.
-    // Match based on which one and forward into the correct queue.
-    incoming: Receiver<RibbleWorkerHandle>,
+struct WorkerInner {
+    incoming_requests: Receiver<WorkRequest>,
+    console_message_sender: Sender<ConsoleMessage>,
     // Inner channel to forward incoming jobs to a joiner.
     // TODO: If double-buffering is not sufficient, look at implementing a priority system
     // Possibly look at rayon for work-stealing if thrashing starts to become an issue.
-    // TODO: use these for Short, call it something like to_short_queue (send out) / from_short_queue (join here)
-    forward_incoming: Receiver<RibbleWorkerHandle>,
-    forward_outgoing: Sender<RibbleWorkerHandle>,
-    // TODO: add more queues for Long, call it something like to_long_queue(send out) /from_long_queue (join here)
+    short_incoming: Receiver<RibbleWorkerHandle>,
+    short_outgoing: Sender<RibbleWorkerHandle>,
+    long_incoming: Receiver<RibbleWorkerHandle>,
+    long_outgoing: Sender<RibbleWorkerHandle>,
 }
-impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> WorkerInner<M, E> {
+impl WorkerInner {
+    const MAX_SHORT_JOBS: usize = 10;
+    const MAX_LONG_JOBS: usize = 2 * Self::MAX_SHORT_JOBS;
+    fn new(incoming_requests: Receiver<WorkRequest>, bus: Bus) -> Self {
+        let (short_outgoing, short_incoming) = get_channel(Self::MAX_SHORT_JOBS);
+        let (long_outgoing, long_incoming) = get_channel(Self::MAX_LONG_JOBS);
+        Self {
+            incoming_requests,
+            console_message_sender: bus.console_message_sender(),
+            short_incoming,
+            short_outgoing,
+            long_incoming,
+            long_outgoing,
+        }
+    }
     fn handle_result(
         &self,
-        message: Result<RibbleMessage, RibbleAppError>,
-    ) -> Result<(), RibbleAppError> {
+        message: Result<RibbleMessage, RibbleError>,
+    ) -> Result<(), RibbleError> {
         match message {
             Ok(message) => self.handle_message(message),
             Err(err) => self.handle_error(err),
         }
     }
-    fn handle_message(&self, message: RibbleMessage) -> Result<(), RibbleAppError> {
-        let kernel = self.engine_kernel.upgrade().ok_or(
-            RibbleError::Core("Kernel not yet attached to WorkerEngine".to_string()).into(),
-        )?;
+    // TODO: determine why this is returning an error...?
+    fn handle_message(&self, message: RibbleMessage) -> Result<(), RibbleError> {
         match message {
-            RibbleMessage::Console(msg) => Ok(kernel.send_console_message(msg)),
+            RibbleMessage::Console(msg) => Ok({
+                if self.console_message_sender.send(msg).is_err() {
+                    todo!("LOG THIS");
+                }
+            }),
             // NOTE: if for some reason a Progress message needs to be returned via thread,
             // this will panic and need refactoring.
+            // TODO: Just remove the RibbleMessage and use ConsoleMessage.
             RibbleMessage::Progress(_) => unreachable!(),
         }
     }
-    fn handle_error(&self, mut error: RibbleAppError) -> Result<(), RibbleAppError> {
-        let kernel = self.engine_kernel.upgrade().ok_or(
-            RibbleError::Core("Kernel not yet attached to WorkerEngine".to_string()).into(),
-        )?;
-
-        let error = if error.needs_cleanup() {
-            error.run_cleanup();
-            error.into_error()
-        } else {
-            error.into_error()
-        }?;
-
+    // TODO: determine why this is returning an error.
+    fn handle_error(&self, error: RibbleError) -> Result<(), RibbleError> {
         let error_msg = ConsoleMessage::Error(error);
-        Ok(kernel.send_console_message(error_msg))
+        Ok({
+            if self.console_message_sender.send(error_msg).is_err() {
+                todo!("LOG THIS");
+            }
+        })
     }
 }
 
-pub(super) struct WorkerEngine<M: ModelRetriever, E: EngineKernel<Retriever=M>> {
-    outgoing: Sender<RibbleWorkerHandle>,
-    inner: Arc<WorkerInner<M, E>>,
+pub(super) struct WorkerEngine {
+    inner: Arc<WorkerInner>,
     // TODO: swap the error type here once errors have been reimplemented.
-    work_thread: Option<JoinHandle<Result<(), RibbleAppError>>>,
+    work_thread: Option<JoinHandle<Result<(), RibbleError>>>,
 }
 
-impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> WorkerEngine<M, E> {
-    pub(super) fn new() -> Self {
-        // TODO: factor out a constant for the number of workers this can hold
-        let (outgoing, incoming) = channel::bounded::<RibbleWorkerHandle>(100);
-        let (forward_outgoing, forward_incoming) = channel::bounded::<RibbleWorkerHandle>(100);
-
-        let inner = Arc::new(WorkerInner {
-            engine_kernel: Weak::new(),
-            incoming,
-            forward_outgoing,
-            forward_incoming,
-        });
+impl WorkerEngine {
+    pub(super) fn new(incoming_request: Receiver<WorkRequest>, bus: Bus) -> Self {
+        let inner = Arc::new(WorkerInner::new(incoming_request, bus));
         let thread_inner = Arc::clone(&inner);
 
         let work_thread = Some(std::thread::spawn(move || {
             let forwarder_inner = Arc::clone(&thread_inner);
-            let worker_inner = Arc::clone(&thread_inner);
+            let long_job_inner = Arc::clone(&thread_inner);
+            let short_job_inner = Arc::clone(&thread_inner);
+
             let res = scope(|s| {
                 // NOTE: at the moment, it's -probably- okay for this thread to block.
                 // If this starts to become an issue once bounds are sorted out, look
                 // at implementing a priority system + bounded joining.
                 let _forwarder = s.spawn(move || {
-                    while let Ok(work) = forwarder_inner.incoming.recv() {
-                        // This can only return SendError if the entire struct is deallocated.
-                        let _ = forwarder_inner.forward_outgoing.send(work);
+                    while let Ok(request) = forwarder_inner.incoming_requests.recv() {
+                        match request {
+                            WorkRequest::Long(work) => {
+                                if forwarder_inner.long_outgoing.send(work).is_err() {
+                                    todo!("LOGGING.");
+                                }
+                            }
+                            WorkRequest::Short(work) => {
+                                if forwarder_inner.short_outgoing.send(work).is_err() {
+                                    todo!("LOGGING.");
+                                }
+                            }
+                        }
                     }
                 });
 
-                // TODO: two workers: long_queue/short_queue
-                let worker = s.spawn(move || {
-                    while let Ok(work) = worker_inner.forward_incoming.recv() {
+                // TODO: remove the INTO once the errors are fixed.
+                let _short_worker = s.spawn(move || {
+                    while let Ok(work) = short_job_inner.short_incoming.recv() {
+                        // TODO: get rid of the ? operator => these don't need to return an error.
                         match work.join() {
                             Ok(res) => thread_inner.handle_result(res),
                             // TODO: it might actually better to just panic the app until the new implementation
@@ -117,53 +122,50 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> WorkerEngine<M, E> {
                             // All errors from ribble_whisper are handled with results -> so it might be
                             // better to treat as fatal and crash the app.
                             Err(err) => {
-                                let ribble_error =
-                                    RibbleError::ThreadPanic(format!("{:?}", err)).into();
+                                let ribble_error = RibbleError::ThreadPanic(format!("{:?}", err));
                                 thread_inner.handle_error(ribble_error)
                             } // Since handle_result/handle_error only return Err when the kernel's
-                            // not set, unwrapping here will panic the worker thread and information
-                            // should bubble up accordingly.
+                              // not set, unwrapping here will panic the worker thread and information
+                              // should bubble up accordingly.
                         }?;
                     }
-                    Ok(())
                 });
-                worker
+
+                // TODO: remove the INTO once the errors are fixed.
+                let _long_worker = s.spawn(move || {
+                    while let Ok(work) = short_job_inner.long_incoming.recv() {
+                        // TODO: get rid of the ? operator => these don't need to return an error.
+                        match work.join() {
+                            Ok(res) => thread_inner.handle_result(res),
+                            Err(err) => {
+                                let ribble_error = RibbleError::ThreadPanic(format!("{:?}", err));
+                                thread_inner.handle_error(ribble_error)
+                            } // Since handle_result/handle_error only return Err when the kernel's
+                              // not set, unwrapping here will panic the worker thread and information
+                              // should bubble up accordingly.
+                        }?;
+                    }
+                });
+
+                Ok(())
                     .join()
-                    .map_err(|e| RibbleError::ThreadPanic(format!("{}", e)).into())
+                    .map_err(|e| RibbleError::ThreadPanic(format!("{}", e)))
             })
-                .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e)).into())??;
+            .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e)))??;
             res
         }));
 
-        Self {
-            outgoing,
-            inner,
-            work_thread,
-        }
-    }
-    pub(super) fn set_engine_kernel(&self, kernel: Weak<E>) {
-        *self.inner.engine_kernel = kernel;
-    }
-
-    // TODO: determine whether or not to handle this in WorkerEngine, or the Controller.
-    // (Probably best to do in the controller)
-    pub(super) fn spawn(
-        &self,
-        task: RibbleWorkerHandle,
-    ) -> Result<(), TrySendError<RibbleWorkerHandle>> {
-        self.outgoing.try_send(task)
+        Self { inner, work_thread }
     }
 }
 
-impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> Drop for WorkerEngine<M, E> {
+impl Drop for WorkerEngine {
     fn drop(&mut self) {
         if let Some(handle) = self.work_thread.take() {
             handle
                 .join()
                 .expect("The worker thread is not expected to panic and should run without issues.")
-                .expect(
-                    "The kernel should have been set before attempting to do any background work.",
-                );
+                .expect("I'm not quite sure as to what the error conditions for this should be.");
         }
     }
 }

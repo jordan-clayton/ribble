@@ -1,7 +1,7 @@
 use crate::utils::errors::RibbleError;
 use case_style::CaseStyle;
-use indexmap::map::Iter;
 use indexmap::IndexMap;
+use indexmap::map::Iter;
 use parking_lot::{RwLock, RwLockReadGuard};
 use ribble_whisper::utils::errors::RibbleWhisperError;
 use ribble_whisper::whisper::model::{ConcurrentModelBank, Model, ModelId, ModelRetriever};
@@ -13,7 +13,12 @@ use std::path::{Path, PathBuf};
 use std::thread::panicking;
 use twox_hash::XxHash3_64;
 
-pub (crate) struct RibbleModelBank {
+// TODO: methods for downloading models (take in a bus to send download jobs).
+// TODO: explicit methods for copying files over by path to create a model.
+// TODO: explicit method for renaming (user name) a model.
+// Methods for to retrieve file_name from url slug/file path.
+
+pub(crate) struct RibbleModelBank {
     model_directory: PathBuf,
     model_map: RwLock<IndexMap<ModelId, Model>>,
 }
@@ -38,7 +43,7 @@ impl RibbleModelBank {
                 model_directory,
                 model_map,
             }
-                .init()
+            .init()
         }
     }
 
@@ -153,7 +158,8 @@ impl RibbleModelBank {
         let model_file = File::create(model_file_path);
         if let Ok((model_map, model_file)) = (model_ron, model_file) {
             let mut writer = BufWriter::new(model_file);
-            if let Err(_e) = ron::ser::to_writer_pretty(&mut writer, model_map, Default::default()) {
+            if let Err(_e) = ron::ser::to_writer_pretty(&mut writer, model_map, Default::default())
+            {
                 todo!("LOGGING!")
             }
         }
@@ -203,7 +209,7 @@ impl ConcurrentModelBank for RibbleModelBank {
     // TODO: this very obviously will not compile, but it gets the point across.
     // Make a wrapper struct that implements Iterator that holds the write guard.
     type Iter<'a>
-    = RibbleModelBankIter<'a>
+        = RibbleModelBankIter<'a>
     where
         Self: 'a;
 

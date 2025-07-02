@@ -1,9 +1,11 @@
 use crate::utils::errors::RibbleError;
 use ribble_whisper::audio::pcm::PcmS16Convertible;
 use ribble_whisper::transcriber::vad::{
-    Earshot, Resettable, Silero, SileroBuilder, WebRtc, WebRtcBuilder, WebRtcFilterAggressiveness,
-    WebRtcFrameLengthMillis, WebRtcSampleRate, VAD,
+    Earshot, Resettable, Silero, SileroBuilder, VAD, WebRtc, WebRtcBuilder,
+    WebRtcFilterAggressiveness, WebRtcFrameLengthMillis, WebRtcSampleRate,
 };
+
+// TODO: this should probably be re-thought; the constants dump is a little less than ideal.
 use ribble_whisper::utils::constants::{
     OFFLINE_VOICE_PROBABILITY_THRESHOLD, SILERO_CHUNK_SIZE, SILERO_VOICE_PROBABILITY_THRESHOLD,
     WEBRTC_VOICE_PROBABILITY_THRESHOLD, WHISPER_SAMPLE_RATE,
@@ -18,16 +20,17 @@ pub(crate) struct VadConfigs {
     vad_type: VadType,
     frame_size: VadFrameSize,
     strictness: VadStrictness,
-    use_vad: bool,
+    use_vad_offline: bool,
 }
 
 impl VadConfigs {
+    const STRICTEST_PROBABILITY: f32 = 0.85f32;
     pub(crate) fn new() -> Self {
         Self {
             vad_type: VadType::Auto,
             frame_size: VadFrameSize::Auto,
             strictness: VadStrictness::Auto,
-            use_vad: true,
+            use_vad_offline: true,
         }
     }
 
@@ -45,8 +48,8 @@ impl VadConfigs {
         self.strictness = strictness;
         self
     }
-    pub(crate) fn set_use_vad(mut self, use_vad: bool) -> Self {
-        self.use_vad = use_vad;
+    pub(crate) fn with_use_vad_offline(mut self, use_vad: bool) -> Self {
+        self.use_vad_offline = use_vad;
         self
     }
 
@@ -60,8 +63,9 @@ impl VadConfigs {
     pub(crate) fn strictness(&self) -> VadStrictness {
         self.strictness
     }
-    pub(crate) fn use_vad(&self) -> bool {
-        self.use_vad
+
+    pub(crate) fn use_vad_offline(&self) -> bool {
+        self.use_vad_offline
     }
 
     // Frame size, Aggressiveness, Probability
@@ -79,10 +83,20 @@ impl VadConfigs {
             ),
             VadStrictness::Auto | VadStrictness::Medium => (
                 WebRtcFilterAggressiveness::Aggressive,
-                OFFLINE_VOICE_PROBABILITY_THRESHOLD,
+                WEBRTC_VOICE_PROBABILITY_THRESHOLD,
             ),
-            // TODO: determine whether to abstract the numbers into constants
-            VadStrictness::Strict => (WebRtcFilterAggressiveness::VeryAggressive, 0.8),
+            // NOTE: Since the Aggressiveness does a lot of the work here with determining
+            // "speech", the probability here operates as the "proportion of voiced-frames"
+            // rather than an actual probability measurement like Silero.
+            //
+            // If it is the case that the number of voiced frames @ VeryAggressive is greater than ~60%, then it's a
+            // voiced sample.
+            // -- If this proves to be a bit too high (it shouldn't be), reduce this down to 50% to
+            // match Silero's min frame proportion.
+            VadStrictness::Strict => (
+                WebRtcFilterAggressiveness::VeryAggressive,
+                WEBRTC_VOICE_PROBABILITY_THRESHOLD,
+            ),
         };
 
         (frame_size, aggressiveness, probability)
@@ -103,14 +117,15 @@ impl VadConfigs {
                     }
                     VadStrictness::Medium => OFFLINE_VOICE_PROBABILITY_THRESHOLD,
                     // TODO: determine whether to abstract the numbers into constants
-                    VadStrictness::Strict => 0.8,
+                    VadStrictness::Strict => Self::STRICTEST_PROBABILITY,
                 };
 
                 let vad = SileroBuilder::new()
                     .with_sample_rate(WHISPER_SAMPLE_RATE as i64)
                     .with_chunk_size(frame_size)
                     .with_detection_probability_threshold(probability)
-                    .build().into()?;
+                    .build()
+                    .into()?;
                 Ok(RibbleVAD::Silero(vad))
             }
             VadType::WebRtc => {
@@ -120,7 +135,8 @@ impl VadConfigs {
                     .with_frame_length_millis(frame_size)
                     .with_filter_aggressiveness(aggressiveness)
                     .with_detection_probability_threshold(probability)
-                    .build_webrtc().into()?;
+                    .build_webrtc()
+                    .into()?;
                 Ok(RibbleVAD::WebRtc(vad))
             }
             VadType::Earshot => {
@@ -130,7 +146,8 @@ impl VadConfigs {
                     .with_frame_length_millis(frame_size)
                     .with_filter_aggressiveness(aggressiveness)
                     .with_detection_probability_threshold(probability)
-                    .build_earshot().into()?;
+                    .build_earshot()
+                    .into()?;
 
                 Ok(RibbleVAD::Earshot(vad))
             }

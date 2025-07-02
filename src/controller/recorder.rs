@@ -1,75 +1,106 @@
+use crate::controller::Bus;
+use crate::controller::RibbleMessage;
 use crate::controller::console::ConsoleMessage;
-use crate::controller::kernel::EngineKernel;
-use crate::controller::progress::Progress;
+use crate::controller::progress::{Progress, ProgressMessage};
+use crate::controller::visualizer::VisualizerSample;
+use crate::controller::worker::WorkRequest;
 use crate::controller::writer::WriteRequest;
-use crate::controller::{RibbleMessage, RibbleWorkerHandle};
 use crate::utils::errors::RibbleError;
-use crate::utils::pcm_f32::PcmF32Convertible;
-use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExportFormat};
+use crate::utils::recorder_configs::RibbleRecordingConfigs;
 use arc_swap::ArcSwap;
 use crossbeam::channel::TrySendError;
-use ribble_whisper::audio::audio_backend::CaptureSpec;
+use ribble_whisper::audio::audio_backend::AudioBackend;
 use ribble_whisper::audio::microphone::MicCapture;
 use ribble_whisper::audio::recorder::ArcChannelSink;
-use ribble_whisper::audio::recorder::RecorderSample;
 use ribble_whisper::utils::constants::INPUT_BUFFER_CAPACITY;
-use ribble_whisper::utils::{get_channel, Sender};
-use ribble_whisper::whisper::model::ModelRetriever;
+use ribble_whisper::utils::{Sender, get_channel};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Weak};
 
-// TODO: migrate to message queues -> if Inner is no longer relevant, migrate the inner struct to
-// the outer one.
-struct RecorderEngineState<M: ModelRetriever, E: EngineKernel<Retriever=M>> {
-    engine_kernel: Weak<E>,
+struct RecorderEngineState {
     recorder_running: Arc<AtomicBool>,
     recorder_configs: ArcSwap<RibbleRecordingConfigs>,
-    write_request_handle: Sender<WriteRequest>,
-    // TODO: this also needs a visualizer request handle
+    progress_message_sender: Sender<ProgressMessage>,
+    write_request_sender: Sender<WriteRequest>,
+    visualizer_sample_sender: Sender<VisualizerSample>,
 }
 
-impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> RecorderEngineState<M, E> {
-    fn new(write_requester: Sender<WriteRequest>) -> Self {
-        let configs = Arc::new(Default::default());
+impl RecorderEngineState {
+    fn new(configs: Option<Arc<RibbleRecordingConfigs>>, bus: Bus) -> Self {
+        let recorder_configs = configs.unwrap_or(Arc::new(Default::default()));
         Self {
-            engine_kernel: Weak::new(),
             recorder_running: Arc::new(AtomicBool::new(false)),
-            recorder_configs: ArcSwap::from(configs),
-            write_request_handle: write_requester,
+            recorder_configs: ArcSwap::from(recorder_configs),
+            progress_message_sender: bus.progress_message_sender(),
+            write_request_sender: bus.write_request_sender(),
+            visualizer_sample_sender: bus.visualizer_sample_sender(),
         }
     }
 
-    fn run_recorder_loop<T: RecorderSample + PcmF32Convertible>(
+    fn run_recorder_loop<A: AudioBackend<ArcChannelSink<f32>>>(
         &self,
-        spec: CaptureSpec,
+        audio_backend: A,
     ) -> Result<(), RibbleError> {
-        // TODO: the kernel biz needs to be refactored; things are mostly for stubbing right now.
-        let kernel = self.engine_kernel.upgrade().ok_or(RibbleError::Core(
-            "Kernel not attached to RecorderEngine.".to_string(),
-        ))?;
-
         // TODO: set up the progress engine message queue
         let setup_progress = Progress::new_indeterminate("Setting up recording.");
+        let (id_sender, id_receiver) = get_channel(1);
 
-        let (audio_sender, audio_receiver) = get_channel::<Arc<[T]>>(INPUT_BUFFER_CAPACITY);
+        let progress_setup_message = ProgressMessage::Request {
+            job: setup_progress,
+            source: id_sender,
+        };
+
+        if self
+            .progress_message_sender
+            .send(progress_setup_message)
+            .is_err()
+        {
+            // TODO: logging
+        }
+
+        let setup_id = match id_receiver.recv() {
+            Ok(id) => Some(id),
+            Err(_) => {
+                todo!("LOGGING");
+                None
+            }
+        };
+
+        let (audio_sender, audio_receiver) = get_channel::<Arc<[f32]>>(INPUT_BUFFER_CAPACITY);
         let sink = ArcChannelSink::new(audio_sender);
-        let mic = kernel.request_audio_capture(spec, sink)?;
+        let spec = self.recorder_configs.load_full().into();
+        let mic = audio_backend.open_capture(spec, sink).or_else(|e| {
+            if let Some(id) = setup_id {
+                let remove_message = ProgressMessage::Remove { job_id: id };
+                if self.progress_message_sender.send(remove_message).is_err() {
+                    todo!("LOGGING");
+                }
+            }
+            Err(e)
+        })?;
         // TODO: send a write job through a channel -> Send the receiver.
-        let (write_sender, write_receiver) = get_channel::<Arc<[T]>>(INPUT_BUFFER_CAPACITY);
+        let (write_sender, write_receiver) = get_channel::<Arc<[f32]>>(INPUT_BUFFER_CAPACITY);
         let confirmed_specs = RibbleRecordingConfigs::from_mic_capture(&mic);
 
         let request = WriteRequest::new(write_receiver, confirmed_specs);
 
         // Send off the request to write the file
-        if self.write_request_handle.send(request).is_err() {
-            let ribble_error = RibbleError::Core("Writing engine no longer receiving write requests.".to_string());
+        if self.write_request_sender.send(request).is_err() {
+            let ribble_error =
+                RibbleError::Core("Writing engine no longer receiving write requests.".to_string());
             self.recorder_running.store(false, Ordering::Release);
             return Err(ribble_error);
         }
 
-
         let sample_rate = mic.sample_rate();
-        // TODO: end the setup progress job here and send it.
+
+        if let Some(id) = setup_id {
+            let remove_message = ProgressMessage::Remove { job_id: id };
+            if self.progress_message_sender.send(remove_message).is_err() {
+                todo!("LOGGING")
+            }
+        }
+
         mic.play();
         while self.recorder_running.load(Ordering::Acquire) {
             match audio_receiver.recv() {
@@ -80,14 +111,15 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> RecorderEngineState<M, E> 
                         self.recorder_running.store(false, Ordering::Release);
                     }
 
-                    let visualizer_converted =
-                        audio.iter().copied().map(|s| s.into_pcm_f32()).collect();
-
-                    // TODO: this instead will have to move to the message queue.
-                    kernel.update_visualizer_data(
-                        Arc::from(visualizer_converted),
-                        sample_rate as f64,
-                    );
+                    let next_visualizer_sample =
+                        VisualizerSample::new(Arc::clone(&audio), sample_rate as f64);
+                    if self
+                        .visualizer_sample_sender
+                        .send(next_visualizer_sample)
+                        .is_err()
+                    {
+                        todo!("LOGGING")
+                    }
                 }
                 Err(_) => self.recorder_running.store(false, Ordering::Release),
             }
@@ -98,58 +130,52 @@ impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> RecorderEngineState<M, E> 
     }
 }
 
-pub(super) struct RecorderEngine<M: ModelRetriever, E: EngineKernel<Retriever=M>> {
-    inner: Arc<RecorderEngineState<M, E>>,
+pub(super) struct RecorderEngine {
+    inner: Arc<RecorderEngineState>,
+    work_request_sender: Sender<WorkRequest>,
 }
 
-impl<M: ModelRetriever, E: EngineKernel<Retriever=M>> RecorderEngine<M, E> {
-    // TODO: refactor this to take a "BUS"
-    pub(super) fn new(write_request_handle: Sender<WriteRequest>) -> Self {
+impl RecorderEngine {
+    pub(super) fn new(configs: Option<Arc<RibbleRecordingConfigs>>, bus: Bus) -> Self {
         Self {
-            inner: Arc::new(RecorderEngineState::new(write_request_handle)),
+            inner: Arc::new(RecorderEngineState::new(configs, bus)),
+            work_request_sender: bus.work_request_sender(),
         }
     }
 
-    pub(super) fn start_recording(&self) -> RibbleWorkerHandle {
+    pub(super) fn start_recording<A: AudioBackend<ArcChannelSink<f32>>>(&self, audio_backend: &A) {
+        // Set the state flag so that the UI can update.
+        self.inner.recorder_running.store(true, Ordering::Release);
+
         let thread_inner = Arc::clone(&self.inner);
-
+        // Spawn a (long job) thread and send it off to the worker to join it.
         let worker = std::thread::spawn(move || {
-            let configs = *thread_inner.recorder_configs.load_full();
-
-            let format = configs.format();
-            let spec: CaptureSpec = configs.into();
-
-            // Match on the format, send the configs in as an arg to avoid the extra copy.
-            match format {
-                RibbleRecordingExportFormat::F32 => thread_inner.run_recorder_loop::<f32>(spec),
-                RibbleRecordingExportFormat::I16 => thread_inner.run_recorder_loop::<i16>(spec),
-            }?;
-
+            if let Err(e) = thread_inner.run_recorder_loop(audio_backend) {
+                // TODO: remove into once RibbleAppError is gone.
+                return Err(e);
+            }
             let message = String::from("Finished recording!");
             let console_message = ConsoleMessage::Status(message);
             Ok(RibbleMessage::Console(console_message))
         });
-        worker
+
+        let request = WorkRequest::Long(worker);
+        if self.work_request_sender.send(request).is_err() {
+            todo!("LOGGING!");
+        }
     }
 
     pub(super) fn recorder_running(&self) -> bool {
-        self.inner
-            .recorder_running
-            .load(Ordering::Acquire)
+        self.inner.recorder_running.load(Ordering::Acquire)
     }
 
     pub(super) fn read_recorder_configs(&self) -> Arc<RibbleRecordingConfigs> {
         self.inner.recorder_configs.load_full()
     }
-    pub(super) fn write_recorder_configs<
-        F: FnOnce(RibbleRecordingConfigs) -> RibbleRecordingConfigs,
-    >(
-        &self,
-        update_closure: F,
-    ) {
-        let confs = *self.inner.recorder_configs.load_full();
+
+    pub(super) fn write_recorder_configs(&self, recorder_configs: RibbleRecordingConfigs) {
         self.inner
             .recorder_configs
-            .store(Arc::new(update_closure(confs)));
+            .store(Arc::new(recorder_configs));
     }
 }
