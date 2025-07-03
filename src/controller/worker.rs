@@ -1,9 +1,9 @@
-use crate::controller::Bus;
 use crate::controller::console::ConsoleMessage;
+use crate::controller::Bus;
 use crate::controller::{RibbleMessage, RibbleWorkerHandle};
 use crate::utils::errors::RibbleError;
 use crossbeam::scope;
-use ribble_whisper::utils::{Receiver, Sender, get_channel};
+use ribble_whisper::utils::{get_channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -26,9 +26,9 @@ struct WorkerInner {
     long_outgoing: Sender<RibbleWorkerHandle>,
 }
 impl WorkerInner {
-    const MAX_SHORT_JOBS: usize = 10;
+    const MAX_SHORT_JOBS: usize = 16;
     const MAX_LONG_JOBS: usize = 2 * Self::MAX_SHORT_JOBS;
-    fn new(incoming_requests: Receiver<WorkRequest>, bus: Bus) -> Self {
+    fn new(incoming_requests: Receiver<WorkRequest>, bus: &Bus) -> Self {
         let (short_outgoing, short_incoming) = get_channel(Self::MAX_SHORT_JOBS);
         let (long_outgoing, long_incoming) = get_channel(Self::MAX_LONG_JOBS);
         Self {
@@ -57,10 +57,15 @@ impl WorkerInner {
                     todo!("LOG THIS");
                 }
             }),
-            // NOTE: if for some reason a Progress message needs to be returned via thread,
-            // this will panic and need refactoring.
-            // TODO: Just remove the RibbleMessage and use ConsoleMessage.
-            RibbleMessage::Progress(_) => unreachable!(),
+
+            RibbleMessage::BackgroundWork(msg) => Ok({
+                if let Err(e) = msg {
+                    let err_msg = ConsoleMessage::Error(e);
+                    if self.console_message_sender.send(err_msg).is_err() {
+                        todo!("LOG THIS");
+                    }
+                }
+            }),
         }
     }
     // TODO: determine why this is returning an error.
@@ -81,7 +86,7 @@ pub(super) struct WorkerEngine {
 }
 
 impl WorkerEngine {
-    pub(super) fn new(incoming_request: Receiver<WorkRequest>, bus: Bus) -> Self {
+    pub(super) fn new(incoming_request: Receiver<WorkRequest>, bus: &Bus) -> Self {
         let inner = Arc::new(WorkerInner::new(incoming_request, bus));
         let thread_inner = Arc::clone(&inner);
 
@@ -111,7 +116,6 @@ impl WorkerEngine {
                     }
                 });
 
-                // TODO: remove the INTO once the errors are fixed.
                 let _short_worker = s.spawn(move || {
                     while let Ok(work) = short_job_inner.short_incoming.recv() {
                         // TODO: get rid of the ? operator => these don't need to return an error.
@@ -125,13 +129,12 @@ impl WorkerEngine {
                                 let ribble_error = RibbleError::ThreadPanic(format!("{:?}", err));
                                 thread_inner.handle_error(ribble_error)
                             } // Since handle_result/handle_error only return Err when the kernel's
-                              // not set, unwrapping here will panic the worker thread and information
-                              // should bubble up accordingly.
+                            // not set, unwrapping here will panic the worker thread and information
+                            // should bubble up accordingly.
                         }?;
                     }
                 });
 
-                // TODO: remove the INTO once the errors are fixed.
                 let _long_worker = s.spawn(move || {
                     while let Ok(work) = short_job_inner.long_incoming.recv() {
                         // TODO: get rid of the ? operator => these don't need to return an error.
@@ -141,8 +144,8 @@ impl WorkerEngine {
                                 let ribble_error = RibbleError::ThreadPanic(format!("{:?}", err));
                                 thread_inner.handle_error(ribble_error)
                             } // Since handle_result/handle_error only return Err when the kernel's
-                              // not set, unwrapping here will panic the worker thread and information
-                              // should bubble up accordingly.
+                            // not set, unwrapping here will panic the worker thread and information
+                            // should bubble up accordingly.
                         }?;
                     }
                 });
@@ -151,7 +154,7 @@ impl WorkerEngine {
                     .join()
                     .map_err(|e| RibbleError::ThreadPanic(format!("{}", e)))
             })
-            .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e)))??;
+                .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e)))??;
             res
         }));
 

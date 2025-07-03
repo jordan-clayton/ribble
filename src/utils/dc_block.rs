@@ -35,7 +35,7 @@ impl DCBlock {
     }
 
     fn compute_r(mut self) -> Self {
-        let nyquist = self.sample_rate / 2;
+        let nyquist = self.sample_rate / 2.0f32;
 
         self.r = if self.cutoff_frequency > nyquist {
             let exponent = -2f32 * PI * self.cutoff_frequency / self.sample_rate;

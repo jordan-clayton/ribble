@@ -3,7 +3,6 @@ use ribble_whisper::audio::audio_backend::CaptureSpec;
 use ribble_whisper::audio::microphone::MicCapture;
 use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
 
-// TODO: rename this to RibbleRecordingExportFormat
 #[derive(
     Default,
     Copy,

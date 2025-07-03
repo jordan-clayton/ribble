@@ -23,9 +23,7 @@ type RibbleWorkerHandle = JoinHandle<Result<RibbleMessage, RibbleError>>;
 
 pub(crate) enum RibbleMessage {
     Console(console::ConsoleMessage),
-    // TODO: possibly rename this; use it for cleanup if a job fails.
-    // Send the messages in over the queue.
-    Progress(progress::ProgressMessage),
+    BackgroundWork(Result<(), RibbleError>),
 }
 
 pub(super) struct Bus {

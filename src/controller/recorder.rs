@@ -26,11 +26,10 @@ struct RecorderEngineState {
 }
 
 impl RecorderEngineState {
-    fn new(configs: Option<Arc<RibbleRecordingConfigs>>, bus: Bus) -> Self {
-        let recorder_configs = configs.unwrap_or(Arc::new(Default::default()));
+    fn new(configs: RibbleRecordingConfigs, bus: &Bus) -> Self {
         Self {
             recorder_running: Arc::new(AtomicBool::new(false)),
-            recorder_configs: ArcSwap::from(recorder_configs),
+            recorder_configs: ArcSwap::from(Arc::new(configs)),
             progress_message_sender: bus.progress_message_sender(),
             write_request_sender: bus.write_request_sender(),
             visualizer_sample_sender: bus.visualizer_sample_sender(),
@@ -136,7 +135,7 @@ pub(super) struct RecorderEngine {
 }
 
 impl RecorderEngine {
-    pub(super) fn new(configs: Option<Arc<RibbleRecordingConfigs>>, bus: Bus) -> Self {
+    pub(super) fn new(configs: RibbleRecordingConfigs, bus: &Bus) -> Self {
         Self {
             inner: Arc::new(RecorderEngineState::new(configs, bus)),
             work_request_sender: bus.work_request_sender(),

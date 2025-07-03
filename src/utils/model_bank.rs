@@ -1,16 +1,16 @@
 use crate::utils::errors::RibbleError;
 use case_style::CaseStyle;
-use indexmap::IndexMap;
 use indexmap::map::Iter;
+use indexmap::IndexMap;
 use parking_lot::{RwLock, RwLockReadGuard};
 use ribble_whisper::utils::errors::RibbleWhisperError;
 use ribble_whisper::whisper::model::{ConcurrentModelBank, Model, ModelId, ModelRetriever};
+use ron::ser::PrettyConfig;
 use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, ErrorKind};
+use std::io::{BufReader, BufWriter, ErrorKind, Write};
 use std::path::{Path, PathBuf};
-use std::thread::panicking;
 use twox_hash::XxHash3_64;
 
 // TODO: methods for downloading models (take in a bus to send download jobs).
@@ -43,7 +43,7 @@ impl RibbleModelBank {
                 model_directory,
                 model_map,
             }
-            .init()
+                .init()
         }
     }
 
@@ -137,9 +137,7 @@ impl RibbleModelBank {
                 Model::new().with_name(name).with_file_name(file_name)
             };
 
-            if let Err(_e) = map_lock.insert(model_key, model) {
-                // TODO: logging -> this -should- never ever happen.
-            }
+            map_lock.insert(model_key, model);
         }
 
         Ok(())
@@ -153,15 +151,17 @@ impl RibbleModelBank {
             .iter()
             .map(|(_, v)| (v.file_name().to_string(), v.name().to_string()))
             .collect::<IndexMap<_, _>>();
-        let model_ron = ron::ser::to_string(&model_map);
         let model_file_path = self.model_directory.join(Self::MODEL_SHORT_NAMES_MAP);
         let model_file = File::create(model_file_path);
-        if let Ok((model_map, model_file)) = (model_ron, model_file) {
-            let mut writer = BufWriter::new(model_file);
-            if let Err(_e) = ron::ser::to_writer_pretty(&mut writer, model_map, Default::default())
-            {
-                todo!("LOGGING!")
+
+        if let Ok(file) = model_file {
+            let writer = BufWriter::new(file);
+
+            if ron::Options::default().to_io_writer_pretty(writer, &model_map, PrettyConfig::default()).is_err() {
+                todo!("LOGGING")
             }
+        } else {
+            todo!("LOGGING")
         }
     }
 
@@ -182,15 +182,9 @@ impl RibbleModelBank {
 
 impl Drop for RibbleModelBank {
     fn drop(&mut self) {
-        if !panicking() {
-            self.serialize_model_map();
-        }
+        self.serialize_model_map();
     }
 }
-
-// TODO! MOVE THIS TO SOMEWHERE AND THEN IMPLEMENT FOR RibbleModelBank + State -> Perhaps instead I rely on RAII semantics though, or both.
-// Basically, anything that needs to be serialized upon app removal.
-pub(crate) trait SerializableEntity {}
 
 pub(crate) struct RibbleModelBankIter<'a> {
     read_guard: RwLockReadGuard<'a, IndexMap<ModelId, Model>>,
@@ -209,7 +203,7 @@ impl ConcurrentModelBank for RibbleModelBank {
     // TODO: this very obviously will not compile, but it gets the point across.
     // Make a wrapper struct that implements Iterator that holds the write guard.
     type Iter<'a>
-        = RibbleModelBankIter<'a>
+    = RibbleModelBankIter<'a>
     where
         Self: 'a;
 

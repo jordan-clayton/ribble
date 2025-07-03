@@ -1,10 +1,10 @@
-use crate::controller::Bus;
-use crate::controller::RibbleMessage;
 use crate::controller::console::ConsoleMessage;
 use crate::controller::progress::{Progress, ProgressMessage};
 use crate::controller::visualizer::VisualizerSample;
 use crate::controller::worker::WorkRequest;
 use crate::controller::writer::WriteRequest;
+use crate::controller::Bus;
+use crate::controller::RibbleMessage;
 use crate::utils::dc_block::DCBlock;
 use crate::utils::errors::RibbleError;
 use crate::utils::recorder_configs::{
@@ -26,19 +26,19 @@ use ribble_whisper::audio::{AudioChannelConfiguration, WhisperAudioSample};
 use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
 use ribble_whisper::transcriber::{
-    CallbackTranscriber, Transcriber, TranscriptionSnapshot, WhisperCallbacks,
-    WhisperControlPhrase, WhisperOutput, redirect_whisper_logging_to_hooks,
+    redirect_whisper_logging_to_hooks, CallbackTranscriber, Transcriber, TranscriptionSnapshot,
+    WhisperCallbacks, WhisperControlPhrase, WhisperOutput,
 };
 use ribble_whisper::utils::callback::{
     ShortCircuitRibbleWhisperCallback, StaticRibbleWhisperCallback,
 };
 use ribble_whisper::utils::constants::{INPUT_BUFFER_CAPACITY, WHISPER_SAMPLE_RATE};
-use ribble_whisper::utils::{Receiver, Sender, get_channel};
+use ribble_whisper::utils::{get_channel, Receiver, Sender};
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model::ModelRetriever;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use strum::{AsRefStr, EnumIter, EnumString};
@@ -78,7 +78,7 @@ impl TranscriberEngineState {
         configs: WhisperRealtimeConfigs,
         v_configs: VadConfigs,
         feedback_type: OfflineTranscriberFeedback,
-        bus: Bus,
+        bus: &Bus,
     ) -> Self {
         let transcription_configs = ArcSwap::new(Arc::new(configs));
         let vad_configs = ArcSwap::new(Arc::new(v_configs));
@@ -233,7 +233,9 @@ impl TranscriberEngineState {
             // Start a write job
             let (write_sender, write_receiver) = get_channel::<Arc<[f32]>>(INPUT_BUFFER_CAPACITY);
             let write_request = WriteRequest::new(write_receiver, confirmed_recording_configs);
-
+            if self.write_request_sender.send(write_request).is_err() {
+                todo!("LOGGING");
+            }
             // Start the mic feed
             mic.play();
 
@@ -320,7 +322,7 @@ impl TranscriberEngineState {
 
     fn run_offline_transcription<M: ModelRetriever>(
         &self,
-        audio_file_path: Path,
+        audio_file_path: &Path,
         shared_model_retriever: Arc<M>,
     ) -> Result<RibbleMessage, RibbleError> {
         // Send a progress job so the UI can be updated.
@@ -427,21 +429,21 @@ impl TranscriberEngineState {
         // Load the audio file.
         let loaded_audio = load_normalized_audio_file(audio_file_path, Some(load_audio_callback))
             .or_else(|e| {
-            if let Some(id) = setup_id {
-                let remove_message = ProgressMessage::Remove { job_id: id };
-                if self.progress_message_sender.send(remove_message).is_err() {
-                    todo!("LOGGING");
+                if let Some(id) = setup_id {
+                    let remove_message = ProgressMessage::Remove { job_id: id };
+                    if self.progress_message_sender.send(remove_message).is_err() {
+                        todo!("LOGGING");
+                    }
                 }
-            }
-            if let Some(id) = load_audio_id {
-                let remove_message = ProgressMessage::Remove { job_id: id };
-                if self.progress_message_sender.send(remove_message).is_err() {
-                    todo!("LOGGING");
+                if let Some(id) = load_audio_id {
+                    let remove_message = ProgressMessage::Remove { job_id: id };
+                    if self.progress_message_sender.send(remove_message).is_err() {
+                        todo!("LOGGING");
+                    }
                 }
-            }
 
-            Err(e)
-        })?;
+                Err(e)
+            })?;
 
         let audio = match loaded_audio {
             WhisperAudioSample::F32(audio) => {
@@ -712,7 +714,7 @@ impl TranscriberEngine {
         transcription_configs: WhisperRealtimeConfigs,
         vad_configs: VadConfigs,
         feedback_type: OfflineTranscriberFeedback,
-        bus: Bus,
+        bus: &Bus,
     ) -> Self {
         let inner = Arc::new(TranscriberEngineState::new(
             transcription_configs,
@@ -749,6 +751,19 @@ impl TranscriberEngine {
     }
     pub(super) fn read_vad_configs(&self) -> Arc<VadConfigs> {
         self.inner.vad_configs.load_full()
+    }
+    pub(super) fn read_offline_transcriber_feedback(&self) -> OfflineTranscriberFeedback {
+        self.inner
+            .offline_transcriber_feedback
+            .load(Ordering::Acquire)
+    }
+    pub(super) fn write_offline_transcriber_feedback(
+        &self,
+        new_feedback: OfflineTranscriberFeedback,
+    ) {
+        self.inner
+            .offline_transcriber_feedback
+            .store(new_feedback, Ordering::Release);
     }
 
     pub(super) fn write_transcription_configs(&self, configs: WhisperRealtimeConfigs) {
@@ -788,7 +803,7 @@ impl TranscriberEngine {
 
     pub(super) fn start_offline_transcription<M: ModelRetriever>(
         &self,
-        audio_file_path: Path,
+        audio_file_path: &Path,
         shared_model_retriever: Arc<M>,
     ) {
         // Set the flag that the offline runner is running so that the UI can update.

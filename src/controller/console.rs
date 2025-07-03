@@ -1,10 +1,13 @@
+use crate::controller::worker::WorkRequest;
+use crate::controller::Bus;
+use crate::controller::RibbleMessage;
 use crate::utils::errors::RibbleError;
 use egui::{RichText, Visuals};
 use parking_lot::RwLock;
-use ribble_whisper::utils::Receiver;
+use ribble_whisper::utils::{Receiver, Sender};
 use std::collections::VecDeque;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use strum::Display;
 
@@ -19,7 +22,7 @@ struct ConsoleEngineState {
 }
 
 impl ConsoleEngineState {
-    const DEFAULT_NUM_MESSAGES: usize = 32;
+    pub const DEFAULT_NUM_MESSAGES: usize = 32;
 
     pub const MIN_NUM_MESSAGES: usize = 16;
     pub const MAX_NUM_MESSAGES: usize = 64;
@@ -52,7 +55,6 @@ impl ConsoleEngineState {
             "Queue length greater than capacity, pop logic is incorrect. Len: {}",
             queue.len()
         );
-
     }
 
 
@@ -99,32 +101,28 @@ impl ConsoleEngineState {
 // implement a double-buffer strategy to retain popped states.
 pub(super) struct ConsoleEngine {
     inner: Arc<ConsoleEngineState>,
+    work_request_sender: Sender<WorkRequest>,
     work_thread: Option<JoinHandle<Result<(), RibbleError>>>,
 }
 
 // Provide access to inner
 impl ConsoleEngine {
-    // These are going to be
-    // It is fine to resize the inner queue, but this should take an initial nonzero capacity
-    // The backing buffer is fine to be zero size, but the capacity is monitored to not exceed
-    // a pre-defined user limit.
-    //
-    // TODO: -> Have this return a tuple (Self::Engine, Self::Port(sender))
-    pub(super) fn new(incoming_messages: Receiver<ConsoleMessage>, capacity: usize) -> Self {
+    pub(super) fn new(incoming_messages: Receiver<ConsoleMessage>, capacity: usize, bus: &Bus) -> Self {
         let inner = Arc::new(ConsoleEngineState::new(incoming_messages, capacity));
         let thread_inner = Arc::clone(&inner);
 
-        let worker = std::thread::spawn(move||{
-            while let Ok(console_message) = thread_inner.incoming_messages.recv(){
+        let worker = std::thread::spawn(move || {
+            while let Ok(console_message) = thread_inner.incoming_messages.recv() {
                 thread_inner.add_console_message(console_message);
             }
             Ok(())
         });
 
-        let work_thread = Some(worker)
+        let work_thread = Some(worker);
 
         Self {
             inner,
+            work_request_sender: bus.work_request_sender(),
             work_thread,
         }
     }
@@ -138,10 +136,19 @@ impl ConsoleEngine {
         }
     }
 
+    // Since resizing can block, this dispatches a very short-lived thread to perform the resize in
+    // the background.
     pub(super) fn resize(&self, new_size: usize) {
-        self.inner.resize(new_size);
-    }
+        let work = std::thread::spawn(move || {
+            self.inner.resize(new_size);
+            Ok(RibbleMessage::BackgroundWork(Ok(())))
+        });
 
+        let work_request = WorkRequest::Short(work);
+        if self.work_request_sender.send(work_request).is_err() {
+            todo!("LOGGING");
+        }
+    }
 }
 
 #[derive(Debug, Display)]
@@ -165,7 +172,7 @@ impl ConsoleMessage {
 
 impl Drop for ConsoleEngine {
     fn drop(&mut self) {
-        if let Some(handle) = self.work_thread.take(){
+        if let Some(handle) = self.work_thread.take() {
             handle.join()
                 .expect("The Console thread should never panic.")
                 .expect("I do not know what sort of error conditions would be relevant here")

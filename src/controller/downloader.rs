@@ -81,7 +81,7 @@ struct DownloadEngineState {
 }
 
 impl DownloadEngineState {
-    fn new(incoming_jobs: Receiver<DownloadRequest>, bus: Bus) -> Self {
+    fn new(incoming_jobs: Receiver<DownloadRequest>, bus: &Bus) -> Self {
         Self {
             incoming_jobs,
             worker_sender: bus.work_request_sender(),
@@ -168,7 +168,7 @@ pub(super) struct DownloadEngine {
 
 impl DownloadEngine {
     // TODO: refactor this to take in a bus once the bus impl is done.
-    pub(super) fn new(incoming_jobs: Receiver<DownloadRequest>, bus: Bus) -> Self {
+    pub(super) fn new(incoming_jobs: Receiver<DownloadRequest>, bus: &Bus) -> Self {
         let inner = Arc::new(DownloadEngineState::new(incoming_jobs, bus));
         let thread_inner = Arc::clone(&inner);
 

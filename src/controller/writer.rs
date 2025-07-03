@@ -1,9 +1,9 @@
+use crate::controller::console::ConsoleMessage;
+use crate::controller::worker::WorkRequest;
 // Basic idea: spawn a thread on construction time that waits for new requests for writing.
 // Upon one, send a worker job (via message queues once the kernel stuff is refactored out).
 // Store a limited number of temporary file recordings (keep an accumulator modulo num recordings).
 use crate::controller::Bus;
-use crate::controller::console::ConsoleMessage;
-use crate::controller::worker::WorkRequest;
 use crate::controller::{RibbleMessage, RibbleWorkerHandle};
 use crate::utils::errors::RibbleError;
 use crate::utils::recorder_configs::RibbleRecordingConfigs;
@@ -63,7 +63,7 @@ impl WriterEngineState {
     const DEFAULT_CACHE_SIZE: usize = 5;
     const TMP_FILE: &'static str = "tmp_recording";
     const FILE_EXTENSION: &'static str = ".wav";
-    fn new(data_directory: PathBuf, incoming_jobs: Receiver<WriteRequest>, bus: Bus) -> Self {
+    fn new(data_directory: PathBuf, incoming_jobs: Receiver<WriteRequest>, bus: &Bus) -> Self {
         let ticket = AtomicUsize::new(0);
         let clearing = AtomicBool::new(false);
         let completed_jobs = RwLock::new(IndexMap::with_capacity(Self::DEFAULT_CACHE_SIZE));
@@ -188,7 +188,7 @@ impl WriterEngineState {
 
             let int_audio = reader
                 .samples::<f32>()
-                .map(|sample| sample.map(|sample| sample.into_pcm_s16()))
+                .map(|sample| sample.map(|sample| sample?.into_pcm_s16()))
                 .collect::<Result<Vec<i16>, RibbleError>>()?;
 
             // Open a writer to read the new file out.
@@ -276,7 +276,7 @@ pub(super) struct WriterEngine {
 
 // TODO: take in a bus instead of the explicit sender queue
 impl WriterEngine {
-    fn new(data_directory: PathBuf, incoming_jobs: Receiver<WriteRequest>, bus: Bus) -> Self {
+    fn new(data_directory: PathBuf, incoming_jobs: Receiver<WriteRequest>, bus: &Bus) -> Self {
         let inner = Arc::new(WriterEngineState::new(data_directory, incoming_jobs, bus));
         let thread_inner = Arc::clone(&inner);
         let polling_thread = std::thread::spawn(move || {
