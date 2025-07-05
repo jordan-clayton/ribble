@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 // NOTE: if deciding to swap the backend, make the sink generic, S: Sink<f32>
 // NOTE TWICE: Possibly look at making the Kernel generic and implement methods on it.
+#[derive(Clone)]
 pub(crate) struct RibbleController<A: AudioBackend<ArcChannelSink<f32>>> {
     kernel: Arc<Kernel<A>>,
 }
@@ -24,6 +25,10 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> RibbleController<A> {
     pub(crate) fn new(data_directory: &Path, audio_backend: A) -> Result<Self, RibbleError> {
         let kernel = Arc::new(Kernel::new(data_directory, audio_backend)?);
         Ok(Self { kernel })
+    }
+
+    pub(crate) fn serialize_user_data(&self) {
+        self.kernel.serialize_user_data();
     }
 
     // MODEL MANAGEMENT

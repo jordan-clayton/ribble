@@ -267,7 +267,7 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
     }
 
     // TODO: return a result or log.
-    fn serialize_user_data(&self) {
+    pub(super) fn serialize_user_data(&self) {
         let transcriber_configs = *self.transcriber_engine.read_transcription_configs();
         let offline_transcriber_feedback =
             self.transcriber_engine.read_offline_transcriber_feedback();

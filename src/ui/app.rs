@@ -1,21 +1,22 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::thread::JoinHandle;
 
+use crate::utils::audio_backend_proxy::{AudioBackendProxy, AudioCaptureRequest};
+use crate::utils::errors::RibbleError;
 use catppuccin_egui::Theme;
 use eframe::Storage;
 use egui::{Event, Key, ViewportCommand, Visuals};
 use egui_dock::{DockArea, DockState, NodeIndex, Style, SurfaceIndex, TabIndex};
-use ribble_whisper::audio::recorder::ArcChannelSink;
-use ribble_whisper::audio::audio_backend::{AudioBackend, Sdl2Backend, default_backend}
-use crate::utils::audio_backend_proxy::{AudioCaptureRequest, AudioBackendProxy};
-use crate::utils::errors::RibbleError;
-use ribble_whisper::utils::{Sender, Receiver, get_channel};
+use ribble_whisper::audio::audio_backend::{default_backend, Sdl2Backend};
+use ribble_whisper::utils::{get_channel, Receiver};
 
+use crate::controller::ribble_controller::RibbleController;
 use crate::controller::ConsoleMessage;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::{
-        controller_tabs::{realtime, recording, r#static},
+        controller_tabs::{r#static, realtime, recording},
         display_tabs::{console, progress, transcription, visualizer},
         tab_viewer,
         whisper_tab::{FocusTab, WhisperTab},
@@ -29,7 +30,8 @@ use crate::{
 };
 
 pub struct Ribble {
-    // TODO: rename tabs
+    // TODO: determine whether it's sensible to store the local_cache.
+    local_cache_dir: PathBuf,
     tree: DockState<WhisperTab>,
     // TODO: rewrite controller
     //controller: RibbleController,
@@ -38,12 +40,16 @@ pub struct Ribble {
     // This needs to be polled in the UI loop to handle
     capture_requests: Receiver<AudioCaptureRequest>,
     // TODO: background thread for saving, RAII
+    controller: RibbleController<AudioBackendProxy>,
+
+    // TODO: if only logging, remove the result.
+    periodic_serialize: Option<JoinHandle<Result<(), RibbleError>>>,
 }
 
 impl Ribble {
     // NOTE: this should really only take the system theme if it's... necessary?
     // I do not remember what the heck I was doing.
-    pub fn new() -> Result<Self, RibbleError> {
+    pub(crate) fn new(data_directory: &Path) -> Result<Self, RibbleError> {
         // Pack these in the app struct so they live on the main thread.
         let (sdl_ctx, backend) = default_backend()?;
 
@@ -52,10 +58,41 @@ impl Ribble {
 
         // Send this to the kernel
         let backend_proxy = AudioBackendProxy::new(request_sender);
-
-
-        todo!("App Constructor");
+        let controller = RibbleController::new(data_directory, backend_proxy)?;
         // Deserialize the app tree
+        let tree = todo!("DESERIALIZE THE APP TREE & implement default layout");
+
+        Ok(Self { local_cache_dir: data_directory.to_path_buf(), tree, sdl: sdl_ctx, backend, capture_requests: request_receiver, controller })
+    }
+
+    fn check_join_last_save(&mut self) {
+        if let Some(handle) = self.periodic_serialize.take() {
+            // TODO: Add a way for the app to forward messages into the console engine.
+            // OR: just log the error.
+            if handle.join().is_err() {
+                todo!("LOGGING");
+            }
+        }
+    }
+
+    fn serialize_app_state(&mut self) {
+        self.check_join_last_save();
+
+        let controller = self.controller.clone();
+        // TODO: clone the tree? or possibly move the reference -> not sure.
+        let worker = std::thread::spawn(move || {
+            controller.serialize_user_data();
+            Ok(())
+        });
+
+        self.periodic_serialize = Some(worker)
+    }
+}
+
+impl Drop for Ribble {
+    fn drop(&mut self) {
+        self.check_join_last_save();
+        // TODO: serialize tree -> kernel serializes on drop.
     }
 }
 
@@ -65,7 +102,14 @@ impl eframe::App for Ribble {
         while let Ok(request) = self.capture_requests.try_recv() {
             request(&self.backend);
         }
-        todo!("Finish draw loop.")
+        todo!("Finish draw loop ->> should probably just be the DockArea.")
+    }
+    fn save(&mut self, _storage: &mut dyn Storage) {
+        self.serialize_app_state();
+    }
+
+    fn persist_egui_memory(&self) -> bool {
+        true
     }
 }
 
