@@ -1,18 +1,9 @@
-use crate::controller::console::ConsoleMessage;
-use crate::controller::Bus;
-use crate::controller::{RibbleMessage, RibbleWorkerHandle};
+use crate::controller::{Bus, ConsoleMessage, RibbleMessage, RibbleWorkerHandle, WorkRequest};
 use crate::utils::errors::RibbleError;
 use crossbeam::scope;
 use ribble_whisper::utils::{get_channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-
-// There is no functional difference between members of this enum (at the moment).
-// Right now, it's just semantic & the long_queue is twice the size.
-pub(crate) enum WorkRequest {
-    Short(RibbleWorkerHandle),
-    Long(RibbleWorkerHandle),
-}
 
 struct WorkerInner {
     incoming_requests: Receiver<WorkRequest>,

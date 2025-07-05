@@ -10,7 +10,7 @@ pub const TOOLTIP_DELAY: f32 = 0.5;
 pub const TOOLTIP_GRACE_TIME: f32 = 0.0;
 // NOTE: these are in seconds due to slider scaling.
 // TODO: Rethink this. Values > 0 should be fine, though it might be wiser to cap on 10s.
-// Or, just let this be handled by ribble_core; 10s is perfectly reasonable as a window size.
+// Or, just let this be handled by ribble_whisper; 10s is perfectly reasonable as a window size.
 pub const MIN_AUDIO_CHUNK_SIZE: f32 = 2.0;
 pub const MAX_AUDIO_CHUNK_SIZE: f32 = 30.0;
 
@@ -18,11 +18,10 @@ pub const MAX_AUDIO_CHUNK_SIZE: f32 = 30.0;
 pub const MIN_PHRASE_TIMEOUT: f32 = 0.5;
 pub const MAX_PHRASE_TIMEOUT: f32 = 10.0;
 
-// FFT CONSTANTS -> These two probably should... go.
-pub const FRAME_CONVERGENCE_ITERATIONS: usize = 1000;
-pub const FRAME_CONVERGENCE_TOLERANCE: usize = 2;
 // TODO: Move to VisualizerEngine
 // This can go in the GUI constants lib
+
+// This was used as a smoothing factor to prevent the bars from aggressively jumping.
 pub const SMOOTH_FACTOR: f32 = 8.0;
 
 // TODO: move to gui common -> fix.
@@ -41,13 +40,13 @@ pub const TREE_KEY: &str = "Tree";
 pub const CLOSED_TABS_KEY: &str = "Closed Tabs";
 // TODO: look into ron, choose a more appropriate format for serialization
 // Ron is totally fine -- just rename this file -- > get rid of the old "data.ron"
-pub const RON_FILE: &str = "data.ron";
+pub const OLD_DATA_STORAGE_FILE: &str = "data.ron";
 pub const APP_ID: &str = "Ribble";
 
 pub const QUALIFIER: &str = "com";
 pub const ORGANIZATION: &str = "Jordan";
 
-// TODO: move this to Kernel module
+// TODO: REMOVE
 pub const TEMP_FILE: &str = "tmp.wav";
 
 pub const DEFAULT_BUTTON_LABEL: &str = "Reset to default";

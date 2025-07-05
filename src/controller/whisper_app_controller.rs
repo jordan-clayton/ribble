@@ -1,3 +1,5 @@
+// TODO: Nuke this old implementation and just write a GUI-facing API that delegates to the kernel
+
 use std::{
     any::TypeId,
     path::{Path, PathBuf},
@@ -28,7 +30,7 @@ use whisper_realtime::{
     },
 };
 
-use crate::controller::console::ConsoleMessage;
+use crate::controller::ConsoleMessage;
 use crate::{
     controller::utils::{
         gpu_init::check_gpu_target,

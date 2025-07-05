@@ -109,7 +109,7 @@ pub fn save_app_state(
 
 fn qualify_save_path(dir: &Path) -> PathBuf {
     let mut path = dir.to_path_buf();
-    path.push(constants::RON_FILE);
+    path.push(constants::OLD_DATA_STORAGE_FILE);
     path
 }
 

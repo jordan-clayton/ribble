@@ -1,10 +1,11 @@
-use crate::controller::console::ConsoleMessage;
-use crate::controller::progress::{Progress, ProgressMessage};
 use crate::controller::visualizer::VisualizerSample;
-use crate::controller::worker::WorkRequest;
 use crate::controller::writer::WriteRequest;
-use crate::controller::Bus;
-use crate::controller::RibbleMessage;
+use crate::controller::Progress;
+use crate::controller::WorkRequest;
+use crate::controller::{AtomicOfflineTranscriberFeedback, OfflineTranscriberFeedback, RibbleMessage};
+use crate::controller::{Bus, UTILITY_QUEUE_SIZE};
+use crate::controller::{ConsoleMessage, ProgressMessage};
+use crate::ui::TranscriptionType;
 use crate::utils::dc_block::DCBlock;
 use crate::utils::errors::RibbleError;
 use crate::utils::recorder_configs::{
@@ -13,7 +14,6 @@ use crate::utils::recorder_configs::{
 use crate::utils::vad_configs::RibbleVAD;
 use crate::utils::vad_configs::VadConfigs;
 use arc_swap::ArcSwap;
-use atomic_enum::atomic_enum;
 use crossbeam::channel::TrySendError;
 use crossbeam::scope;
 use crossbeam::thread::{Scope, ScopedJoinHandle};
@@ -25,14 +25,10 @@ use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::audio::{AudioChannelConfiguration, WhisperAudioSample};
 use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
-use ribble_whisper::transcriber::{
-    redirect_whisper_logging_to_hooks, CallbackTranscriber, Transcriber, TranscriptionSnapshot,
-    WhisperCallbacks, WhisperControlPhrase, WhisperOutput,
-};
+use ribble_whisper::transcriber::{redirect_whisper_logging_to_hooks, CallbackTranscriber, Transcriber, TranscriptionSnapshot, WhisperCallbacks, WhisperControlPhrase, WhisperOutput, WHISPER_SAMPLE_RATE};
 use ribble_whisper::utils::callback::{
     ShortCircuitRibbleWhisperCallback, StaticRibbleWhisperCallback,
 };
-use ribble_whisper::utils::constants::{INPUT_BUFFER_CAPACITY, WHISPER_SAMPLE_RATE};
 use ribble_whisper::utils::{get_channel, Receiver, Sender};
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model::ModelRetriever;
@@ -40,20 +36,6 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-
-use strum::{AsRefStr, EnumIter, EnumString};
-
-// Minimal: progress bar only (fastest)
-// Progressive: progress bar + snapshotting when new segments are decoded.
-// TODO: this might be better to move somewhere else.
-#[atomic_enum]
-#[repr(C)]
-#[derive(Default, PartialEq, Eq, EnumIter, EnumString, AsRefStr)]
-pub(crate) enum OfflineTranscriberFeedback {
-    #[default]
-    Minimal = 0,
-    Progressive,
-}
 
 struct TranscriberEngineState {
     transcription_configs: ArcSwap<WhisperRealtimeConfigs>,
@@ -104,7 +86,30 @@ impl TranscriberEngineState {
         }
     }
 
-    // TODO: move the realtime/offline transcription here.
+    fn cleanup_remove_progress_job(&self, maybe_id: Option<usize>) {
+        if let Some(id) = maybe_id {
+            let remove_setup = ProgressMessage::Remove { job_id: id };
+            if self.progress_message_sender.send(remove_setup).is_err() {
+                todo!("LOGGING");
+            }
+        }
+    }
+
+    fn update_increment_progress_job(&self, maybe_id: Option<usize>, delta: u64) {
+        if let Some(id) = maybe_id {
+            let update_progress_message = ProgressMessage::Increment {
+                job_id: id,
+                delta,
+            };
+            if self
+                .progress_message_sender
+                .send(update_progress_message)
+                .is_err()
+            {
+                todo!("LOGGING.");
+            }
+        }
+    }
 
     // NOTE: this could probably just spawn the thread here and return it?
     // If choosing to do that, keep the interface consistent and change RecorderEngine.
@@ -125,7 +130,7 @@ impl TranscriberEngineState {
         let setup_progress_message = ProgressMessage::Request {
             job: setup_progress,
             // TODO: rename this; it's confusing.
-            source: id_sender,
+            id_return_sender: id_sender,
         };
 
         if self
@@ -146,21 +151,15 @@ impl TranscriberEngineState {
 
         let audio_ring_buffer = AudioRingBuffer::<f32>::default();
         // Audio fanout channels
-        let (audio_sender, audio_receiver) = get_channel::<Arc<[f32]>>(INPUT_BUFFER_CAPACITY);
+        let (audio_sender, audio_receiver) = get_channel::<Arc<[f32]>>(UTILITY_QUEUE_SIZE);
 
         // Transcription channels
-        let (text_sender, text_receiver) = get_channel(INPUT_BUFFER_CAPACITY);
+        let (text_sender, text_receiver) = get_channel(UTILITY_QUEUE_SIZE);
         // TODO: instead, pass these in an argument
         let vad_configs = *self.vad_configs.load_full().clone();
 
         let vad = vad_configs.build_vad().or_else(|e| {
-            // TODO: this should be factored out into another method.
-            if let Some(id) = setup_id {
-                let remove_setup = ProgressMessage::Remove { job_id: id };
-                if self.progress_message_sender.send(remove_setup).is_err() {
-                    todo!("LOGGING");
-                }
-            }
+            self.cleanup_remove_progress_job(setup_id);
             Err(e)
         })?;
 
@@ -169,12 +168,7 @@ impl TranscriberEngineState {
         let sink = ArcChannelSink::new(audio_sender);
 
         let mic = audio_backend.open_capture(spec, sink).or_else(|e| {
-            if let Some(id) = setup_id {
-                let remove_setup = ProgressMessage::Remove { job_id: id };
-                if self.progress_message_sender.send(remove_setup).is_err() {
-                    todo!("LOGGING");
-                }
-            }
+            self.cleanup_remove_progress_job(setup_id);
             Err(e)
         })?;
 
@@ -189,12 +183,7 @@ impl TranscriberEngineState {
             .with_shared_model_retriever(shared_model_retriever)
             .build()
             .or_else(|e| {
-                if let Some(id) = setup_id {
-                    let remove_setup = ProgressMessage::Remove { job_id: id };
-                    if self.progress_message_sender.send(remove_setup).is_err() {
-                        todo!("LOGGING");
-                    }
-                }
+                self.cleanup_remove_progress_job(setup_id);
                 Err(e)
             })?;
 
@@ -209,12 +198,7 @@ impl TranscriberEngineState {
             // Disable stderr/stdout
             redirect_whisper_logging_to_hooks();
             // Close the "Setup" progress job
-            if let Some(id) = setup_id {
-                let remove_setup = ProgressMessage::Remove { job_id: id };
-                if self.progress_message_sender.send(remove_setup).is_err() {
-                    todo!("LOGGING");
-                }
-            }
+            self.cleanup_remove_progress_job(setup_id);
 
             // Get the confirmed recording specs for the writer.
             let confirmed_recording_configs = RibbleRecordingConfigs::from_mic_capture(&mic);
@@ -231,7 +215,7 @@ impl TranscriberEngineState {
             debug_assert_ne!(confirmed_recording_configs.period(), RibblePeriod::Auto);
 
             // Start a write job
-            let (write_sender, write_receiver) = get_channel::<Arc<[f32]>>(INPUT_BUFFER_CAPACITY);
+            let (write_sender, write_receiver) = get_channel::<Arc<[f32]>>(UTILITY_QUEUE_SIZE);
             let write_request = WriteRequest::new(write_receiver, confirmed_recording_configs);
             if self.write_request_sender.send(write_request).is_err() {
                 todo!("LOGGING");
@@ -332,7 +316,7 @@ impl TranscriberEngineState {
         let setup_progress_message = ProgressMessage::Request {
             job: setup_progress,
             // TODO: rename this; it's confusing.
-            source: id_sender,
+            id_return_sender: id_sender,
         };
 
         if self
@@ -355,12 +339,7 @@ impl TranscriberEngineState {
         // Unpack the VAD settings and build a VAD if the user wants to optimize.
         let vad = if !vad_configs.use_vad_offline() {
             let vad = vad_configs.build_vad().or_else(|e| {
-                if let Some(id) = setup_id {
-                    let remove_setup = ProgressMessage::Remove { job_id: id };
-                    if self.progress_message_sender.send(remove_setup).is_err() {
-                        todo!("LOGGING");
-                    }
-                }
+                self.cleanup_remove_progress_job(setup_id);
                 Err(e)
             })?;
 
@@ -377,12 +356,7 @@ impl TranscriberEngineState {
             .into_whisper_v2_configs();
 
         let n_frames = audio_file_num_frames(&audio_file_path).or_else(|e| {
-            if let Some(id) = setup_id {
-                let remove_setup = ProgressMessage::Remove { job_id: id };
-                if self.progress_message_sender.send(remove_setup).is_err() {
-                    todo!("LOGGING");
-                }
-            }
+            self.cleanup_remove_progress_job(setup_id);
             Err(e)
         })?;
 
@@ -391,7 +365,7 @@ impl TranscriberEngineState {
 
         let load_audio_progress_message = ProgressMessage::Request {
             job: load_audio_progress,
-            source: id_sender,
+            id_return_sender: id_sender,
         };
 
         if self
@@ -411,37 +385,14 @@ impl TranscriberEngineState {
         };
 
         let load_audio_callback = move |progress: usize| {
-            if let Some(id) = load_audio_id {
-                let update_progress_message = ProgressMessage::Increment {
-                    job_id: id,
-                    delta: progress as u64,
-                };
-                if self
-                    .progress_message_sender
-                    .send(update_progress_message)
-                    .is_err()
-                {
-                    todo!("LOGGING.");
-                }
-            }
+            self.update_increment_progress_job(load_audio_id, progress as u64);
         };
 
         // Load the audio file.
         let loaded_audio = load_normalized_audio_file(audio_file_path, Some(load_audio_callback))
             .or_else(|e| {
-                if let Some(id) = setup_id {
-                    let remove_message = ProgressMessage::Remove { job_id: id };
-                    if self.progress_message_sender.send(remove_message).is_err() {
-                        todo!("LOGGING");
-                    }
-                }
-                if let Some(id) = load_audio_id {
-                    let remove_message = ProgressMessage::Remove { job_id: id };
-                    if self.progress_message_sender.send(remove_message).is_err() {
-                        todo!("LOGGING");
-                    }
-                }
-
+                self.cleanup_remove_progress_job(setup_id);
+                self.cleanup_remove_progress_job(load_audio_id);
                 Err(e)
             })?;
 
@@ -457,14 +408,9 @@ impl TranscriberEngineState {
             }
         };
 
-        if let Some(id) = load_audio_id {
-            let remove_message = ProgressMessage::Remove { job_id: id };
-            if self.progress_message_sender.send(remove_message).is_err() {
-                todo!("LOGGING");
-            }
-        }
+        self.cleanup_remove_progress_job(load_audio_id);
 
-        let (sender, receiver) = get_channel(INPUT_BUFFER_CAPACITY);
+        let (sender, receiver) = get_channel(UTILITY_QUEUE_SIZE);
         let mut offline_transcriber_builder = OfflineTranscriberBuilder::<RibbleVAD, _>::new()
             .with_configs(configs)
             .with_audio(audio)
@@ -477,23 +423,13 @@ impl TranscriberEngineState {
         }
 
         let offline_transcriber = offline_transcriber_builder.build().or_else(|e| {
-            if let Some(id) = setup_id {
-                let remove_message = ProgressMessage::Remove { job_id: id };
-                if self.progress_message_sender.send(remove_message).is_err() {
-                    todo!("LOGGING");
-                }
-            }
+            self.cleanup_remove_progress_job(setup_id);
             Err(e)
         })?;
 
         let run_transcription = Arc::clone(&self.offline_running);
         // Remove the setup progress job.
-        if let Some(id) = setup_id {
-            let remove_message = ProgressMessage::Remove { job_id: id };
-            if self.progress_message_sender.send(remove_message).is_err() {
-                todo!("LOGGING");
-            }
-        }
+        self.cleanup_remove_progress_job(setup_id);
 
         let result = scope(|s| {
             // Set up a progress callback for transcription
@@ -502,7 +438,7 @@ impl TranscriberEngineState {
             let (id_sender, id_receiver) = get_channel(1);
             let transcription_progress_message = ProgressMessage::Request {
                 job: transcription_progress,
-                source: id_sender,
+                id_return_sender: id_sender,
             };
 
             if self
@@ -522,19 +458,7 @@ impl TranscriberEngineState {
             };
 
             let transcription_closure = move |percent: i32| {
-                if let Some(id) = transcription_id {
-                    let update_progress_message = ProgressMessage::Increment {
-                        job_id: id,
-                        delta: percent as u64,
-                    };
-                    if self
-                        .progress_message_sender
-                        .send(update_progress_message)
-                        .is_err()
-                    {
-                        todo!("LOGGING.");
-                    }
-                }
+                self.update_increment_progress_job(transcription_id, percent as u64);
             };
 
             let transcription_callback =
@@ -590,17 +514,7 @@ impl TranscriberEngineState {
             let transcription_thread = s.spawn(move || {
                 let res = offline_transcriber
                     .process_with_callbacks(run_transcription, whisper_callbacks);
-
-                if let Some(id) = transcription_id {
-                    let remove_progress_message = ProgressMessage::Remove { job_id: id };
-                    if self
-                        .progress_message_sender
-                        .send(remove_progress_message)
-                        .is_err()
-                    {
-                        todo!("LOGGING");
-                    }
-                }
+                self.cleanup_remove_progress_job(transcription_id);
                 res
             });
 
@@ -612,16 +526,7 @@ impl TranscriberEngineState {
             // one in the buffer, (or it did get removed and the buffer is empty).
             // Test this, but if either prove to be true, then it shouldn't matter wrt remove_progress_job.
             let res = transcription_thread.join().or_else(|e| {
-                if let Some(id) = transcription_id {
-                    let remove_progress_message = ProgressMessage::Remove { job_id: id };
-                    if self
-                        .progress_message_sender
-                        .send(remove_progress_message)
-                        .is_err()
-                    {
-                        todo!("LOGGING");
-                    }
-                }
+                self.cleanup_remove_progress_job(transcription_id);
                 let error = RibbleError::ThreadPanic(format!("{:?}", e));
                 Err(error)
             })??;
@@ -683,31 +588,11 @@ impl TranscriberEngineState {
     }
 }
 
-// This is not strictly necessary, but it's more explicit than a boolean.
-// TODO: move this to the module level.
-pub(super) enum TranscriptionType {
-    Realtime,
-    Offline,
-}
-
 pub(super) struct TranscriberEngine {
     inner: Arc<TranscriberEngineState>,
     work_request_sender: Sender<WorkRequest>,
 }
 
-// TODO: Refactor this -> move the bulk of the logic to the inner state struct
-// Only spawn the threads in the TranscriberEngine
-//
-// ALSO: move to message queues, don't monomorphize, move ModelRetriever<M> to the call site of
-// run_realtime and run_offline by passing IN the model retriever to the method.
-// (Ie. take in the "BUS")
-// ALSO TWICE: pass the VadConfigs IN instead of trying to get
-// ALSO THRICE: Use only one set of configurations -> change the offline configurations mutator to
-// just modify the whisper half & also change from FnOnce callback to just take the new clone
-//
-// ALSO FOURCE: Instead of using ? on operations that can return an error, call or_else() first
-// and send a progress message to remove the old jobs.
-// the progress queue to send a remove request instead of relying on the callback.
 impl TranscriberEngine {
     // These get passed in upon construction; they should be serialized separately.
     pub(super) fn new(
@@ -776,7 +661,7 @@ impl TranscriberEngine {
     pub(super) fn read_transcription_snapshot(&self) -> Arc<TranscriptionSnapshot> {
         self.inner.current_snapshot.load_full()
     }
-    pub(super) fn try_read_latest_control(&self) -> Arc<WhisperControlPhrase> {
+    pub(super) fn read_latest_control_phrase(&self) -> Arc<WhisperControlPhrase> {
         self.inner.current_control_phrase.load_full()
     }
 

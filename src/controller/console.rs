@@ -1,15 +1,13 @@
-use crate::controller::worker::WorkRequest;
-use crate::controller::Bus;
-use crate::controller::RibbleMessage;
+use crate::controller::{Bus, ConsoleMessage};
+use crate::controller::{RibbleMessage, MIN_NUM_CONSOLE_MESSAGES};
+use crate::controller::{WorkRequest, MAX_NUM_CONSOLE_MESSAGES};
 use crate::utils::errors::RibbleError;
-use egui::{RichText, Visuals};
 use parking_lot::RwLock;
 use ribble_whisper::utils::{Receiver, Sender};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use strum::Display;
 
 struct ConsoleEngineState {
     incoming_messages: Receiver<ConsoleMessage>,
@@ -22,13 +20,8 @@ struct ConsoleEngineState {
 }
 
 impl ConsoleEngineState {
-    pub const DEFAULT_NUM_MESSAGES: usize = 32;
-
-    pub const MIN_NUM_MESSAGES: usize = 16;
-    pub const MAX_NUM_MESSAGES: usize = 64;
-
     fn new(incoming_messages: Receiver<ConsoleMessage>, capacity: usize) -> Self {
-        let capacity = capacity.max(Self::MIN_NUM_MESSAGES);
+        let capacity = capacity.max(MIN_NUM_CONSOLE_MESSAGES);
         let queue = RwLock::new(VecDeque::with_capacity(capacity));
         let queue_capacity = AtomicUsize::new(capacity);
         Self {
@@ -60,7 +53,7 @@ impl ConsoleEngineState {
 
     fn resize(&self, new_size: usize) {
         // Clamp the size between min/max
-        let new_size = new_size.max(Self::MIN_NUM_MESSAGES).min(Self::MAX_NUM_MESSAGES);
+        let new_size = new_size.max(MIN_NUM_CONSOLE_MESSAGES).min(MAX_NUM_CONSOLE_MESSAGES);
         // Determine whether to shrink or grow.
         let capacity = self.queue_capacity.load(Ordering::Acquire);
         if new_size > capacity {
@@ -148,25 +141,6 @@ impl ConsoleEngine {
         if self.work_request_sender.send(work_request).is_err() {
             todo!("LOGGING");
         }
-    }
-}
-
-#[derive(Debug, Display)]
-pub(crate) enum ConsoleMessage {
-    Error(RibbleError),
-    Status(String),
-}
-
-impl ConsoleMessage {
-    // NOTE TO SELF: call ui.label(msg.to_console_text(&visuals)) in the console tab when drawing
-    pub(crate) fn to_console_text(&self, visuals: &Visuals) -> RichText {
-        let (color, msg) = match self {
-            ConsoleMessage::Error(msg) => (visuals.error_fg_color, msg.to_string()),
-            ConsoleMessage::Status(msg) => (visuals.text_color(), msg.to_owned()),
-        };
-        // This has to make at least 1 heap allocation to coerce into a string
-        // Test, but expect this to just move the string created above.
-        RichText::new(msg).color(color).monospace()
     }
 }
 

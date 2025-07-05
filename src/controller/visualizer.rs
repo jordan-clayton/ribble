@@ -3,17 +3,15 @@ use atomic_enum::atomic_enum;
 use crossbeam::channel::Receiver;
 use parking_lot::RwLock;
 use realfft::RealFftPlanner;
-use realfft::num_traits::pow;
 use std::f32::consts::PI;
 use std::ops::Deref;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
 use strum::{Display, EnumIter};
 
-// TODO: rename and move to the controller module. "NUM_VISUALIZER_BUCKETS"
-pub const NUM_BUCKETS: usize = 32;
+pub const NUM_VISUALIZER_BUCKETS: usize = 32;
 
 // TODO: might need to move this to somewhere shared.
 pub(crate) enum RotationDirection {
@@ -80,7 +78,7 @@ impl VisualizerSample {
 struct VisualizerEngineState {
     planner: RwLock<RealFftPlanner<f32>>,
     incoming_samples: Receiver<VisualizerSample>,
-    buffer: RwLock<[f32; NUM_BUCKETS]>,
+    buffer: RwLock<[f32; NUM_VISUALIZER_BUCKETS]>,
     visualizer_running: AtomicBool,
     analysis_type: AtomicAnalysisType,
 }
@@ -92,7 +90,7 @@ impl VisualizerEngineState {
     const WAVEFORM_GAIN: f32 = Self::POWER_GAIN / 2.0;
 
     fn new(incoming_samples: Receiver<VisualizerSample>) -> Self {
-        let buffer = RwLock::new([0.0; NUM_BUCKETS]);
+        let buffer = RwLock::new([0.0; NUM_VISUALIZER_BUCKETS]);
         let visualizer_running = AtomicBool::new(false);
         let analysis_type = AtomicAnalysisType::new(AnalysisType::Waveform);
         let planner = RwLock::new(RealFftPlanner::new());
@@ -127,14 +125,14 @@ impl VisualizerEngineState {
         let frames = window_samples.windows(frame_size).step_by(step_size);
         debug_assert_eq!(
             frames.len(),
-            NUM_BUCKETS,
+            NUM_VISUALIZER_BUCKETS,
             "Failed to compute window sizes properly in power analysis."
         );
 
         let fft = self.planner.write().plan_fft_forward(frame_size);
         let mut input = fft.make_input_vec();
         let mut output = fft.make_output_vec();
-        let mut power_samples = vec![0.0; NUM_BUCKETS];
+        let mut power_samples = vec![0.0; NUM_VISUALIZER_BUCKETS];
         for (i, frame) in frames.enumerate() {
             input.copy_from_slice(frame);
             fft.process(&mut input, &mut output)?;
@@ -156,7 +154,7 @@ impl VisualizerEngineState {
         );
         debug_assert_eq!(
             power_samples.len(),
-            NUM_BUCKETS,
+            NUM_VISUALIZER_BUCKETS,
             "Failed to fit power_samples into buckets."
         );
 
@@ -192,7 +190,7 @@ impl VisualizerEngineState {
 
         debug_assert_eq!(
             waveform.len(),
-            NUM_BUCKETS,
+            NUM_VISUALIZER_BUCKETS,
             "Failed to fit waveform into buckets."
         );
 
@@ -212,7 +210,7 @@ impl VisualizerEngineState {
             .windows(frame_size)
             .step_by(step_size)
             .map(|window| {
-                (window.iter().map(|n| pow(*n, 2)).sum::<f32>() / (window.len() as f32)).sqrt()
+                (window.iter().copied().map(|n| n.powi(2)).sum::<f32>() / (window.len() as f32)).sqrt()
             })
             .collect::<Vec<_>>();
 
@@ -225,7 +223,7 @@ impl VisualizerEngineState {
 
         debug_assert_eq!(
             amp_envelope.len(),
-            NUM_BUCKETS,
+            NUM_VISUALIZER_BUCKETS,
             "Failed to fit amplitude_envelope into buckets."
         );
 
@@ -243,7 +241,7 @@ impl VisualizerEngineState {
         let frames = window_samples.windows(frame_size).step_by(step_size);
         debug_assert_eq!(
             frames.len(),
-            NUM_BUCKETS,
+            NUM_VISUALIZER_BUCKETS,
             "Failed to compute window sizes properly in frequency analysis."
         );
 
@@ -253,7 +251,7 @@ impl VisualizerEngineState {
         let fft = self.planner.write().plan_fft_forward(frame_size);
         let mut input = fft.make_input_vec();
         let mut output = fft.make_output_vec();
-        let mut spectrum_samples = vec![0.0; NUM_BUCKETS];
+        let mut spectrum_samples = vec![0.0; NUM_VISUALIZER_BUCKETS];
 
         let frame_size = output.len();
         let min_freq = sample_rate / (frame_size as f64);
@@ -272,8 +270,8 @@ impl VisualizerEngineState {
 
         // Compute edges -> map frequency bins to log-spaced buckets
         // (human perception; low frequencies = tighter resolution).
-        let bucket_edges: Vec<f64> = (0..=NUM_BUCKETS)
-            .map(|k| 10.0f64.powf(log_min + log_range * (k as f64) / (NUM_BUCKETS as f64)))
+        let bucket_edges: Vec<f64> = (0..=NUM_VISUALIZER_BUCKETS)
+            .map(|k| 10.0f64.powf(log_min + log_range * (k as f64) / (NUM_VISUALIZER_BUCKETS as f64)))
             .collect();
 
         for frame in frames {
@@ -346,10 +344,10 @@ fn apply_gain(samples: &mut [f32], gain: f32) {
 }
 
 // (Frame size, step size)
-// TODO: This should probably be pre-computed according to buffer size
+// TODO: This should probably be pre-computed whenever the visualizer is changed.
 // -> handle this in the controller and cache
 fn compute_welch_frames(sample_len: f32, overlap_ratio: f32) -> (usize, usize) {
-    let frame_size = sample_len / (1f32 + (NUM_BUCKETS as f32 - 1f32) * (1f32 - overlap_ratio));
+    let frame_size = sample_len / (1f32 + (NUM_VISUALIZER_BUCKETS as f32 - 1f32) * (1f32 - overlap_ratio));
     let step_size = frame_size * (1f32 - overlap_ratio);
     (frame_size.round() as usize, step_size.round() as usize)
 }
@@ -395,10 +393,10 @@ impl VisualizerEngine {
         Self { inner, work_thread }
     }
 
-    pub(super) fn set_visualizer_visibility(&self, visibility: bool) {
+    pub(super) fn set_visualizer_visibility(&self, is_visible: bool) {
         self.inner
             .visualizer_running
-            .store(visibility, Ordering::Release);
+            .store(is_visible, Ordering::Release);
     }
 
     // TODO: look at removing this --> I don't think the rest of the application needs to know if the visualizer is currently running.
@@ -406,7 +404,7 @@ impl VisualizerEngine {
         self.inner.visualizer_running.load(Ordering::Acquire)
     }
 
-    pub(super) fn try_read_visualization_buffer(&self, copy_buffer: &mut [f32; NUM_BUCKETS]) {
+    pub(super) fn try_read_visualization_buffer(&self, copy_buffer: &mut [f32; NUM_VISUALIZER_BUCKETS]) {
         if let Some(buffer) = self.inner.buffer.try_read() {
             copy_buffer.copy_from_slice(buffer.deref())
         }

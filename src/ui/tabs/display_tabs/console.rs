@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use egui::{CentralPanel, Frame, ScrollArea, Ui, WidgetText};
 use egui_dock::{NodeIndex, SurfaceIndex};
 
-use crate::controller::console::ConsoleMessage;
+use crate::controller::ConsoleMessage;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::tab_view,

@@ -1,10 +1,10 @@
-use crate::controller::Bus;
-use crate::controller::RibbleMessage;
-use crate::controller::console::ConsoleMessage;
-use crate::controller::progress::{Progress, ProgressMessage};
 use crate::controller::visualizer::VisualizerSample;
-use crate::controller::worker::WorkRequest;
 use crate::controller::writer::WriteRequest;
+use crate::controller::Progress;
+use crate::controller::RibbleMessage;
+use crate::controller::WorkRequest;
+use crate::controller::{Bus, UTILITY_QUEUE_SIZE};
+use crate::controller::{ConsoleMessage, ProgressMessage};
 use crate::utils::errors::RibbleError;
 use crate::utils::recorder_configs::RibbleRecordingConfigs;
 use arc_swap::ArcSwap;
@@ -12,10 +12,9 @@ use crossbeam::channel::TrySendError;
 use ribble_whisper::audio::audio_backend::AudioBackend;
 use ribble_whisper::audio::microphone::MicCapture;
 use ribble_whisper::audio::recorder::ArcChannelSink;
-use ribble_whisper::utils::constants::INPUT_BUFFER_CAPACITY;
-use ribble_whisper::utils::{Sender, get_channel};
-use std::sync::Arc;
+use ribble_whisper::utils::{get_channel, Sender};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 struct RecorderEngineState {
     recorder_running: Arc<AtomicBool>,
@@ -36,6 +35,15 @@ impl RecorderEngineState {
         }
     }
 
+    fn cleanup_remove_progress_job(&self, maybe_id: Option<usize>) {
+        if let Some(id) = maybe_id {
+            let remove_setup = ProgressMessage::Remove { job_id: id };
+            if self.progress_message_sender.send(remove_setup).is_err() {
+                todo!("LOGGING");
+            }
+        }
+    }
+
     fn run_recorder_loop<A: AudioBackend<ArcChannelSink<f32>>>(
         &self,
         audio_backend: A,
@@ -46,7 +54,7 @@ impl RecorderEngineState {
 
         let progress_setup_message = ProgressMessage::Request {
             job: setup_progress,
-            source: id_sender,
+            id_return_sender: id_sender,
         };
 
         if self
@@ -65,20 +73,15 @@ impl RecorderEngineState {
             }
         };
 
-        let (audio_sender, audio_receiver) = get_channel::<Arc<[f32]>>(INPUT_BUFFER_CAPACITY);
+        let (audio_sender, audio_receiver) = get_channel::<Arc<[f32]>>(UTILITY_QUEUE_SIZE);
         let sink = ArcChannelSink::new(audio_sender);
         let spec = self.recorder_configs.load_full().into();
         let mic = audio_backend.open_capture(spec, sink).or_else(|e| {
-            if let Some(id) = setup_id {
-                let remove_message = ProgressMessage::Remove { job_id: id };
-                if self.progress_message_sender.send(remove_message).is_err() {
-                    todo!("LOGGING");
-                }
-            }
+            self.cleanup_remove_progress_job(setup_id);
             Err(e)
         })?;
         // TODO: send a write job through a channel -> Send the receiver.
-        let (write_sender, write_receiver) = get_channel::<Arc<[f32]>>(INPUT_BUFFER_CAPACITY);
+        let (write_sender, write_receiver) = get_channel::<Arc<[f32]>>(UTILITY_QUEUE_SIZE);
         let confirmed_specs = RibbleRecordingConfigs::from_mic_capture(&mic);
 
         let request = WriteRequest::new(write_receiver, confirmed_specs);

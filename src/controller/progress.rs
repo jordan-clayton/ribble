@@ -1,187 +1,113 @@
+use crate::controller::{Progress, ProgressMessage};
+use crate::utils::errors::RibbleError;
 use parking_lot::RwLock;
-use ribble_whisper::utils::Sender;
+use ribble_whisper::utils::Receiver;
 use slab::Slab;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread::JoinHandle;
 
-pub(super) enum ProgressMessage {
-    Request {
-        job: Progress,
-        source: Sender<usize>,
-    },
-
-    Increment {
-        job_id: usize,
-        delta: u64,
-    },
-    Decrement {
-        job_id: usize,
-        delta: u64,
-    },
-    Set {
-        job_id: usize,
-        pos: u64,
-    },
-    Reset {
-        job_id: usize,
-    },
-    Remove {
-        job_id: usize,
-    },
+struct ProgressEngineState {
+    current_jobs: RwLock<Slab<Progress>>,
+    incoming_progress_messages: Receiver<ProgressMessage>,
 }
 
-// TODO: migrate to an inner state struct and use RAII bg threads to get new messages.
+impl ProgressEngineState {
+    fn new(initial_capacity: usize, message_receiver: Receiver<ProgressMessage>) -> Self {
+        let slab = Slab::with_capacity(initial_capacity);
+        let current_jobs = RwLock::new(slab);
+        Self { current_jobs, incoming_progress_messages: message_receiver }
+    }
+
+    fn add_progress_job(&self, job: Progress) -> usize {
+        self.current_jobs.write().insert(job)
+    }
+    fn increment_progress_job(&self, id: usize, delta: u64) {
+        if let Some(progress) = self.current_jobs.read().get(id) {
+            progress.inc(delta);
+        }
+    }
+    fn decrement_progress_job(&self, id: usize, delta: u64) {
+        if let Some(progress) = self.current_jobs.read().get(id) {
+            progress.dec(delta);
+        }
+    }
+
+    fn set_progress_job_position(&self, id: usize, pos: u64) {
+        if let Some(progress) = self.current_jobs.read().get(id) {
+            progress.set(pos);
+        }
+    }
+    fn reset_progress_job(&self, id: usize) {
+        if let Some(progress) = self.current_jobs.read().get(id) {
+            progress.reset();
+        }
+    }
+    fn remove_progress_job(&self, id: usize) {
+        self.current_jobs.write().remove(id);
+    }
+}
+
 pub(super) struct ProgressEngine {
-    current_jobs: Arc<RwLock<Slab<Progress>>>,
+    inner: Arc<ProgressEngineState>,
+    work_thread: Option<JoinHandle<Result<(), RibbleError>>>,
 }
 
 impl ProgressEngine {
     // Require capacity at construction time.
     // This will dynamically resize according to its needs
     // It's fine to send 0 as an initial capacity; it'll just suffer some initial allocation overhead.
-    pub(super) fn new(initial_capacity: usize) -> Self {
-        let slab = Slab::with_capacity(initial_capacity);
-        let current_jobs = Arc::new(RwLock::new(slab));
-        Self { current_jobs }
+    pub(super) fn new(initial_capacity: usize, message_receiver: Receiver<ProgressMessage>) -> Self {
+        let inner = Arc::new(ProgressEngineState::new(initial_capacity, message_receiver));
+        let thread_inner = Arc::clone(&inner);
+        let worker = std::thread::spawn(move || {
+            while let Ok(message) = thread_inner.incoming_progress_messages.recv() {
+                match message {
+                    ProgressMessage::Request { job, id_return_sender } => {
+                        let id = thread_inner.add_progress_job(job);
+                        if id_return_sender.send(id).is_err() {
+                            todo!("LOGGING");
+                        }
+                    }
+                    ProgressMessage::Increment { job_id, delta } => {
+                        thread_inner.increment_progress_job(job_id, delta);
+                    }
+                    ProgressMessage::Decrement { job_id, delta } => {
+                        thread_inner.decrement_progress_job(job_id, delta);
+                    }
+                    ProgressMessage::Set { job_id, pos } => {
+                        thread_inner.set_progress_job_position(job_id, pos);
+                    }
+                    ProgressMessage::Reset { job_id } => {
+                        thread_inner.reset_progress_job(job_id);
+                    }
+                    ProgressMessage::Remove { job_id } => {
+                        thread_inner.remove_progress_job(job_id);
+                    }
+                }
+            }
+            Ok(())
+        });
+
+        let work_thread = Some(worker);
+        Self { inner, work_thread }
     }
 
-    pub(super) fn add_progress_job(&self, job: Progress) -> usize {
-        self.current_jobs.write().insert(job)
-    }
-    pub(super) fn update_progress_job(&self, id: usize, delta: u64) {
-        if let Some(progress) = self.current_jobs.write().get(id) {
-            progress.inc(delta);
-        }
-    }
-    pub(super) fn remove_progress_job(&self, id: usize) {
-        self.current_jobs.write().remove(id);
-    }
     pub(super) fn try_get_current_jobs(&self, copy_buffer: &mut Vec<Progress>) {
-        if let Some(jobs) = self.current_jobs.try_read() {
+        if let Some(jobs) = self.inner.current_jobs.try_read() {
             copy_buffer.clear();
             copy_buffer.extend(jobs.iter().cloned())
         }
     }
 }
 
-#[derive(Debug)]
-struct AtomicProgress {
-    pos: AtomicU64,
-    capacity: AtomicU64,
-}
-
-impl AtomicProgress {
-    fn new() -> Self {
-        Self {
-            pos: AtomicU64::new(0),
-            capacity: AtomicU64::new(0),
-        }
-    }
-    fn with_capacity(self, capacity: u64) -> Self {
-        self.capacity.store(capacity, Ordering::Release);
-        self
-    }
-
-    // TODO: remove if unused.
-    fn set(&self, pos: u64) {
-        self.pos.store(pos, Ordering::Release);
-    }
-    fn inc(&self, delta: u64) {
-        self.pos.fetch_add(delta, Ordering::Release);
-    }
-    fn dec(&self, delta: u64) {
-        self.pos.fetch_sub(delta, Ordering::Release);
-    }
-
-    fn reset(&self) {
-        self.pos.store(0, Ordering::Release);
-    }
-    // Progress in the range [0, 1] where 1 means 100% completion
-    fn normalized(&self) -> f32 {
-        (self.pos.load(Ordering::Acquire) as f64 / self.capacity.load(Ordering::Acquire) as f64)
-            as f32
-    }
-    fn is_finished(&self) -> bool {
-        self.pos.load(Ordering::Acquire) == self.capacity.load(Ordering::Acquire)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum Progress {
-    Determinate {
-        job_name: &'static str,
-        progress: Arc<AtomicProgress>,
-    },
-    Indeterminate {
-        job_name: &'static str,
-    },
-}
-
-impl Progress {
-    pub(crate) fn new_indeterminate(job_name: &'static str) -> Self {
-        Self::Indeterminate { job_name }
-    }
-    pub(crate) fn new_determinate(job_name: &'static str, total_size: u64) -> Self {
-        let progress = AtomicProgress::new().with_capacity(total_size);
-        let progress = Arc::new(progress);
-        Self::Determinate { job_name, progress }
-    }
-
-    pub(crate) fn inc(&self, delta: u64) {
-        if let Self::Determinate {
-            job_name: _,
-            progress,
-        } = self
-        {
-            progress.inc(delta);
-        }
-    }
-    pub(crate) fn dec(&self, delta: u64) {
-        if let Self::Determinate {
-            job_name: _,
-            progress,
-        } = self
-        {
-            progress.dec(delta);
-        }
-    }
-    pub(crate) fn set(&self, pos: u64) {
-        if let Self::Determinate {
-            job_name: _,
-            progress,
-        } = self
-        {
-            progress.set(pos);
-        }
-    }
-    pub(crate) fn reset(&self) {
-        if let Self::Determinate {
-            job_name: _,
-            progress,
-        } = self
-        {
-            progress.reset();
-        }
-    }
-
-    pub(crate) fn progress(&self) -> f32 {
-        match self {
-            Progress::Determinate {
-                job_name: _,
-                progress,
-            } => progress.normalized(),
-            Progress::Indeterminate { .. } => 1.0,
-        }
-    }
-
-    // TODO: remove if never called
-    pub(crate) fn is_finished(&self) -> bool {
-        match self {
-            Progress::Determinate {
-                job_name: _,
-                progress,
-            } => progress.is_finished(),
-            Progress::Indeterminate { .. } => false,
+impl Drop for ProgressEngine {
+    fn drop(&mut self) {
+        // TODO: determine whether or not to just have a void JoinHandle.
+        if let Some(thread) = self.work_thread.take() {
+            thread.join()
+                .expect("The progress worker thread is expected to never panic.").expect(
+                "I'm not quite sure what error conditions might ever happen with the thread.--This is being determined"
+            );
         }
     }
 }

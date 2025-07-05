@@ -11,7 +11,7 @@ use crate::utils::audio_backend_proxy::{AudioCaptureRequest, AudioBackendProxy};
 use crate::utils::errors::RibbleError;
 use ribble_whisper::utils::{Sender, Receiver, get_channel};
 
-use crate::controller::console::ConsoleMessage;
+use crate::controller::ConsoleMessage;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::{

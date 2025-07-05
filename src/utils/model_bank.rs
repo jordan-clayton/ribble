@@ -15,7 +15,6 @@ use twox_hash::XxHash3_64;
 
 // TODO: methods for downloading models (take in a bus to send download jobs).
 // TODO: explicit methods for copying files over by path to create a model.
-// TODO: explicit method for renaming (user name) a model.
 // Methods for to retrieve file_name from url slug/file path.
 
 pub(crate) struct RibbleModelBank {

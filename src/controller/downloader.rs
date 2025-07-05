@@ -1,78 +1,21 @@
-use crate::controller::Bus;
-use crate::controller::console::ConsoleMessage;
-use crate::controller::progress::{Progress, ProgressMessage};
-use crate::controller::worker::WorkRequest;
+use crate::controller::Progress;
+use crate::controller::WorkRequest;
+use crate::controller::{Bus, DownloadRequest};
+use crate::controller::{ConsoleMessage, ProgressMessage};
 use crate::controller::{RibbleMessage, RibbleWorkerHandle};
 use crate::utils::errors::RibbleError;
-use ribble_whisper::downloader::SyncDownload;
 use ribble_whisper::downloader::downloaders::sync_download_request;
+use ribble_whisper::downloader::SyncDownload;
 use ribble_whisper::utils::callback::RibbleWhisperCallback;
-use ribble_whisper::utils::{Receiver, Sender, get_channel};
-use std::path::{Path, PathBuf};
+use ribble_whisper::utils::{get_channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-
-pub(crate) struct DownloadRequest {
-    url: String,
-    // NOTE: this should probably just take the file_name from the slug
-    // HANDLE THIS LOGIC HIGHER UP IN THE CONTROLLER.
-    // e.g. Url::parse(url)?, url.path_segments_mut()?.pop() => returns the last bit of the URL.
-    // OTHERWISE, take it in as an argument from the user.
-    file_name: String,
-    directory: PathBuf,
-    // This is a pipe for sending back the file_name when
-    // the download is completed so the caller can respond.
-    // (e.g. Place the new entry in a ModelBank, refresh the bank, etc.)
-    return_sender: Option<Sender<String>>,
-}
 
 // NOTE: when making a downlaod request in the model bank, spawn a wrapper thread that spawns the
 // smaller download thread first and then waits for the file_name to be returned (possibly with
 // timeout).
 // THEN: on receipt of the string (or an err if the thread panics and memory gets deallocated),
 // respond accordingly (e.g. put the new model in the model bank)
-
-impl DownloadRequest {
-    pub(crate) fn new() -> Self {
-        Self {
-            url: Default::default(),
-            file_name: Default::default(),
-            directory: Default::default(),
-            return_sender: None,
-        }
-    }
-
-    pub(crate) fn with_url(mut self, url: String) -> Self {
-        self.url = url;
-        self
-    }
-    pub(crate) fn with_file_name(mut self, file_name: String) -> Self {
-        self.file_name = file_name;
-        self
-    }
-    pub(crate) fn with_directory(mut self, directory: &Path) -> Self {
-        self.directory = directory.to_path_buf();
-        self
-    }
-    pub(crate) fn with_return_sender(mut self, sender: Sender<String>) -> Self {
-        self.return_sender = Some(sender);
-        self
-    }
-
-    fn decompose(self) -> (String, String, PathBuf, Option<Sender<String>>) {
-        (self.url, self.file_name, self.directory, self.return_sender)
-    }
-
-    pub(crate) fn url(&self) -> &String {
-        &self.url
-    }
-    pub(crate) fn file_name(&self) -> &String {
-        &self.file_name
-    }
-    pub(crate) fn directory(&self) -> &Path {
-        self.directory.as_path()
-    }
-}
 
 struct DownloadEngineState {
     incoming_jobs: Receiver<DownloadRequest>,
@@ -101,7 +44,7 @@ impl DownloadEngineState {
             let (id_sender, id_receiver) = get_channel(1);
             let progress_message = ProgressMessage::Request {
                 job: progress_job,
-                source: id_sender,
+                id_return_sender: id_sender,
             };
             if self.progress_sender.send(progress_message).is_err() {
                 todo!("LOGGING");
