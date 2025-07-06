@@ -1,0 +1,10 @@
+pub(crate) use super::realtime_tab::RealtimeTab;
+pub(crate) use super::offline_tab::OfflineTab;
+pub(crate) use super::recording_tab::RecordingTab;
+pub(crate) use super::transcription_tab::TranscriptionTab;
+pub(crate) use super::visualizer_tab::VisualizerTab;
+pub(crate) use super::progress_tab::ProgressTab;
+pub(crate) use super::console_tab::ConsoleTab;
+pub(crate) use super::model_tab::{DownloadModelTab, CopyModelTab};
+pub(crate) use super::user_preferences::UserPreferencesTab;
+pub(crate) use super::vad_configs::VadConfigsTab;

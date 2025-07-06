@@ -1,6 +1,6 @@
 use crate::controller::kernel::Kernel;
 use crate::controller::visualizer::{AnalysisType, RotationDirection, NUM_VISUALIZER_BUCKETS};
-use crate::controller::{CompletedRecordingJobs, ConsoleMessage, OfflineTranscriberFeedback, Progress};
+use crate::controller::{AmortizedProgress, CompletedRecordingJobs, ConsoleMessage, OfflineTranscriberFeedback, Progress};
 use crate::utils::errors::RibbleError;
 use crate::utils::model_bank::RibbleModelBankIter;
 use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExportFormat};
@@ -161,6 +161,10 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> RibbleController<A> {
     // PROGRESS
     pub(crate) fn try_get_current_jobs(&self, copy_buffer: &mut Vec<Progress>) {
         self.kernel.try_get_current_jobs(copy_buffer);
+    }
+
+    pub(crate) fn try_get_amortized_progress(&self) -> Option<AmortizedProgress> {
+        self.kernel.try_get_amortized_jobs()
     }
 
     // VISUALIZER

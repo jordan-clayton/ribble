@@ -1,4 +1,4 @@
-use crate::controller::{Progress, ProgressMessage};
+use crate::controller::{AmortizedProgress, Progress, ProgressMessage};
 use crate::utils::errors::RibbleError;
 use parking_lot::RwLock;
 use ribble_whisper::utils::Receiver;
@@ -96,6 +96,29 @@ impl ProgressEngine {
         if let Some(jobs) = self.inner.current_jobs.try_read() {
             copy_buffer.clear();
             copy_buffer.extend(jobs.iter().cloned())
+        }
+    }
+
+    pub(super) fn try_get_amortized_progress(&self) -> Option<AmortizedProgress> {
+        if let Some(jobs) = self.inner.current_jobs.try_read() {
+            if jobs.is_empty() {
+                Some(AmortizedProgress::NoJobs)
+            } else {
+                let mut current = 0usize;
+                let mut total_size = 0usize;
+                for (_, job) in jobs.iter() {
+                    if let Progress::Determinate { job_name: _, progress } = job {
+                        current += progress.current_position() as usize;
+                        total_size += progress.total_size() as usize;
+                    } else {
+                        return Some(AmortizedProgress::Indeterminate);
+                    }
+                }
+
+                Some(AmortizedProgress::Determinate { current, total_size })
+            }
+        } else {
+            None
         }
     }
 }

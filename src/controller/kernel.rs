@@ -6,7 +6,7 @@ use crate::controller::transcriber::TranscriberEngine;
 use crate::controller::visualizer::{AnalysisType, RotationDirection, VisualizerEngine, NUM_VISUALIZER_BUCKETS};
 use crate::controller::worker::WorkerEngine;
 use crate::controller::writer::WriterEngine;
-use crate::controller::{Bus, CompletedRecordingJobs, ConsoleMessage, OfflineTranscriberFeedback, Progress, DEFAULT_PROGRESS_SLAB_CAPACITY, SMALL_UTILITY_QUEUE_SIZE, UTILITY_QUEUE_SIZE};
+use crate::controller::{AmortizedProgress, Bus, CompletedRecordingJobs, ConsoleMessage, OfflineTranscriberFeedback, Progress, DEFAULT_PROGRESS_SLAB_CAPACITY, SMALL_UTILITY_QUEUE_SIZE, UTILITY_QUEUE_SIZE};
 use crate::utils::errors::RibbleError;
 use crate::utils::model_bank::{RibbleModelBank, RibbleModelBankIter};
 use crate::utils::preferences::UserPreferences;
@@ -249,6 +249,10 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
     // PROGRESS
     pub(super) fn try_get_current_jobs(&self, copy_buffer: &mut Vec<Progress>) {
         self.progress_engine.try_get_current_jobs(copy_buffer);
+    }
+
+    pub(super) fn try_get_amortized_jobs(&self) -> Option<AmortizedProgress> {
+        self.progress_engine.try_get_amortized_progress()
     }
 
     // VISUALIZER

@@ -1,5 +1,5 @@
 use catppuccin_egui::{Theme, MOCHA};
-use eframe::epaint::Hsva;
+use eframe::epaint::{Hsva, StrokeKind};
 use egui::{
     emath::easing::{cubic_out, exponential_in},
     lerp, vec2, Pos2, Rgba, Sense, Stroke, Ui,
@@ -7,8 +7,21 @@ use egui::{
 
 use crate::utils::constants;
 
+// Notes about how to re-approach this:
+// - Precompute the gradient stops on a theme change.
+// - the rolling "main" index should just be x.pos mod gradient_stops, possibly + some smoothing.
+// - Also: maybe make the mouse an offset-> when the audio is running, just move the rolling index pointer
+//      by some sort of velocity.
+// - There should be some sort of gradient instead: check egui-colorgradient or hand-roll.
+// - The default bar height should be smaller? And grow way higher when the mouse is nearer.
+// - Also, should have larger falloff.
+// - The color sat. lerp based on height needs to be way more dramatic, possibly cubic interp.
+// - The number of buckets should be within MIN_BUCKETS / NUM_BUCKETS based on a window_min and window_max
+// - Beyond the window, just increase the bar width...
+
 pub fn draw_fft(ui: &mut Ui, data: &[f32; constants::NUM_BUCKETS], theme: Option<Theme>) {
     let theme = theme.unwrap_or(MOCHA);
+    // TODO: this should be precomputed on a theme change.
     let gradient_stops: Vec<Rgba> = vec![
         theme.mauve.into(),
         theme.pink.into(),
@@ -28,6 +41,7 @@ pub fn draw_fft(ui: &mut Ui, data: &[f32; constants::NUM_BUCKETS], theme: Option
     let pos = mouse_state.latest_pos().unwrap_or_default();
     let pos_x = pos.x;
 
+    // Why is this remappping on a logarithmic scale?
     let index = pos_x.ln().round() as usize;
     let grad_len = gradient_stops.len();
     let grad_index = index.rem_euclid(grad_len);
@@ -47,6 +61,7 @@ pub fn draw_fft(ui: &mut Ui, data: &[f32; constants::NUM_BUCKETS], theme: Option
     let max_linear = lerp(10.0..=(float_buckets - 1.0), p).ceil() as usize;
     let max_num_columns = max_linear;
 
+    // WTF?
     let double_bars = minimum_total_spacing >= double_bars_threshold;
     let all_bars = minimum_total_spacing >= spacing_threshold;
 
@@ -146,6 +161,6 @@ fn fft_bar(ui: &mut Ui, color: Rgba, amp: f32, mouse_position: &Pos2) {
         let rect = rect.expand2(expansion);
 
         let rounding = 0.5 * rect.height();
-        ui.painter().rect(rect, rounding, color, Stroke::NONE);
+        ui.painter().rect(rect, rounding, color, Stroke::NONE, StrokeKind::Inside);
     }
 }

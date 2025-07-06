@@ -180,13 +180,13 @@ impl DownloadRequest {
         self
     }
 
-    fn url(&self) -> &String {
+    pub(crate) fn url(&self) -> &String {
         &self.url
     }
-    fn file_name(&self) -> &String {
+    pub(crate) fn file_name(&self) -> &String {
         &self.file_name
     }
-    fn directory(&self) -> &Path {
+    pub(crate) fn directory(&self) -> &Path {
         self.directory.as_path()
     }
 }
@@ -249,6 +249,13 @@ impl AtomicProgress {
     fn reset(&self) {
         self.pos.store(0, Ordering::Release);
     }
+
+    fn current_position(&self) -> u64 {
+        self.pos.load(Ordering::Acquire)
+    }
+    fn total_size(&self) -> u64 {
+        self.capacity.load(Ordering::Acquire)
+    }
     // Progress in the range [0, 1] where 1 means 100% completion
     fn normalized(&self) -> f32 {
         (self.pos.load(Ordering::Acquire) as f64 / self.capacity.load(Ordering::Acquire) as f64)
@@ -257,6 +264,12 @@ impl AtomicProgress {
     fn is_finished(&self) -> bool {
         self.pos.load(Ordering::Acquire) == self.capacity.load(Ordering::Acquire)
     }
+}
+
+pub(crate) enum AmortizedProgress {
+    NoJobs,
+    Determinate { current: usize, total_size: usize },
+    Indeterminate,
 }
 
 #[derive(Debug, Clone)]
@@ -271,16 +284,16 @@ pub(crate) enum Progress {
 }
 
 impl Progress {
-    pub(crate) fn new_indeterminate(job_name: &'static str) -> Self {
+    fn new_indeterminate(job_name: &'static str) -> Self {
         Self::Indeterminate { job_name }
     }
-    pub(crate) fn new_determinate(job_name: &'static str, total_size: u64) -> Self {
+    fn new_determinate(job_name: &'static str, total_size: u64) -> Self {
         let progress = AtomicProgress::new().with_capacity(total_size);
         let progress = Arc::new(progress);
         Self::Determinate { job_name, progress }
     }
 
-    pub(crate) fn inc(&self, delta: u64) {
+    fn inc(&self, delta: u64) {
         if let Self::Determinate {
             job_name: _,
             progress,
@@ -289,7 +302,7 @@ impl Progress {
             progress.inc(delta);
         }
     }
-    pub(crate) fn dec(&self, delta: u64) {
+    fn dec(&self, delta: u64) {
         if let Self::Determinate {
             job_name: _,
             progress,
@@ -298,7 +311,7 @@ impl Progress {
             progress.dec(delta);
         }
     }
-    pub(crate) fn set(&self, pos: u64) {
+    fn set(&self, pos: u64) {
         if let Self::Determinate {
             job_name: _,
             progress,
@@ -307,7 +320,7 @@ impl Progress {
             progress.set(pos);
         }
     }
-    pub(crate) fn reset(&self) {
+    fn reset(&self) {
         if let Self::Determinate {
             job_name: _,
             progress,
@@ -317,13 +330,26 @@ impl Progress {
         }
     }
 
-    pub(crate) fn progress(&self) -> f32 {
+    pub(crate) fn current_progress(&self) -> Option<usize> {
+        match self {
+            Progress::Determinate { progress, .. } => Some(progress.current_position() as usize),
+            Progress::Indeterminate { .. } => None
+        }
+    }
+    pub(crate) fn total_size(&self) -> Option<usize> {
+        match self {
+            Progress::Determinate { progress, .. } => Some(progress.total_size() as usize),
+            Progress::Indeterminate { .. } => None
+        }
+    }
+
+    pub(crate) fn progress(&self) -> Option<f32> {
         match self {
             Progress::Determinate {
                 job_name: _,
                 progress,
-            } => progress.normalized(),
-            Progress::Indeterminate { .. } => 1.0,
+            } => Some(progress.normalized()),
+            Progress::Indeterminate { .. } => None,
         }
     }
 

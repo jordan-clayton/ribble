@@ -9,6 +9,7 @@ use eframe::Storage;
 use egui::{Event, Key, ViewportCommand, Visuals};
 use egui_dock::{DockArea, DockState, NodeIndex, Style, SurfaceIndex, TabIndex};
 use ribble_whisper::audio::audio_backend::{default_backend, Sdl2Backend};
+use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::utils::{get_channel, Receiver};
 
 use crate::controller::ribble_controller::RibbleController;
@@ -28,18 +29,25 @@ use crate::{
         preferences,
     },
 };
+use crate::ui::new_tabs::ribble_tab::RibbleTab;
+use crate::ui::new_tabs::RibbleTree;
 
 pub struct Ribble {
-    // TODO: determine whether it's sensible to store the local_cache.
+    // TODO: remove this -> it's handled internally in the tree.
     local_cache_dir: PathBuf,
-    tree: DockState<WhisperTab>,
-    // TODO: rewrite controller
-    //controller: RibbleController,
+    // Alternatively, encapsulate the Tree + TreeBehaviour within a struct that has its own
+    // serialization.
+    // TODO: seriously consider getting rid of the generics here - it's a little too gnarly.
+    tree: RibbleTree<ArcChannelSink<f32>, AudioBackendProxy>,
     sdl: sdl2::Sdl,
     backend: Sdl2Backend,
     // This needs to be polled in the UI loop to handle
     capture_requests: Receiver<AudioCaptureRequest>,
     // TODO: background thread for saving, RAII
+    // TODO: add a RibbleTreeBehaviour struct
+    // NOTE: since RibbleTreeBehaviour has to have a copy of the controller, it might make sense
+    // to just implement an accessor on it to grab the controller for serializing?
+    // Alternatively, just implement tree serialization on a struct and use RAII + Accessors.
     controller: RibbleController<AudioBackendProxy>,
 
     // TODO: if only logging, remove the result.
@@ -59,10 +67,10 @@ impl Ribble {
         // Send this to the kernel
         let backend_proxy = AudioBackendProxy::new(request_sender);
         let controller = RibbleController::new(data_directory, backend_proxy)?;
-        // Deserialize the app tree
-        let tree = todo!("DESERIALIZE THE APP TREE & implement default layout");
+        // Deserialize/default construct the app tree
+        let tree = RibbleTree::new(data_directory, controller.clone())?;
 
-        Ok(Self { local_cache_dir: data_directory.to_path_buf(), tree, sdl: sdl_ctx, backend, capture_requests: request_receiver, controller })
+        Ok(Self { local_cache_dir: data_directory.to_path_buf(), tree, sdl: sdl_ctx, backend, capture_requests: request_receiver, controller, periodic_serialize: None })
     }
 
     fn check_join_last_save(&mut self) {
@@ -79,9 +87,13 @@ impl Ribble {
         self.check_join_last_save();
 
         let controller = self.controller.clone();
-        // TODO: clone the tree? or possibly move the reference -> not sure.
+        let tree = &self.tree;
+
         let worker = std::thread::spawn(move || {
+            // TODO: expect there to be a borrow issue; self cannot be shared across threads safely (technically) due to SDL,
+            // so the internal references may not be allowed.
             controller.serialize_user_data();
+            tree.serialize_tree();
             Ok(())
         });
 
@@ -92,7 +104,8 @@ impl Ribble {
 impl Drop for Ribble {
     fn drop(&mut self) {
         self.check_join_last_save();
-        // TODO: serialize tree -> kernel serializes on drop.
+        // NOTE: the kernel and the RibbleTree both serialize on drop.
+        // This is just to join the last eframe::App save() call.
     }
 }
 
@@ -102,8 +115,21 @@ impl eframe::App for Ribble {
         while let Ok(request) = self.capture_requests.try_recv() {
             request(&self.backend);
         }
-        todo!("Finish draw loop ->> should probably just be the DockArea.")
+        todo!("Finish draw loop.")
+        // First: Set the theme -> possibly cache it and set a transition lerp when changing.
+        // Next: Paint a top bar with a little recording icon to let the user know what's going on
+        // with the mic.
+        // TODO: this might require a separate flag in RecorderEngine/TranscriberEngine -> a flag should suffice.
+        // Then: the central panel -> self.tree.ui(ui); that's it
+        // All tree logic is in RibbleTree.
+        // Then: the bottom panel -> a bar that shows an amortized progress bar for any jobs that are happening.
+
     }
+
+    // TODO: determine whether to actually use this method at all,
+    // or whether to just spawn a separate thread and periodically run the save method.
+    // It'll get a little bit spicy on close, seeing as this also gets called on shutdown,
+    // And each individual resource also serializes itself on shutdown.
     fn save(&mut self, _storage: &mut dyn Storage) {
         self.serialize_app_state();
     }

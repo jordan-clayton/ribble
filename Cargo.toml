@@ -9,12 +9,15 @@ atomic_enum = "0.3.0"
 biquad = "0.5.0"
 # TODO: this can probably go. Ron is fine.
 bson = "2.11.0"
+# TODO: determine what actual feature flag is required for catppuccin
 catppuccin-egui = { version = "5.2.0", default-features = false, features = ["egui28"] }
 crossbeam = "0.8.4"
 directories = "6.0.0"
 eframe = { version = "0.31.1", features = ["persistence", "wgpu"] }
-egui = { version = "0.31.1", features = ["persistence", "serde", "deadlock_detection"] }
+egui = { version = "0.31.1", features = ["persistence", "serde"] }
+# TODO: get rid of this -> using egui_tiles
 egui_dock = { version = "0.16.0", features = ["serde"] }
+# If no longer needing SVG icons, just remove this.
 egui_extras = { version = "0.31.1", features = ["svg"] }
 hound = "3.5.1"
 # TODO: this is probably unnecessary?
@@ -55,6 +58,7 @@ twox-hash = { version = "2.1.1", features = ["xxhash3_64"] }
 enum_dispatch = "0.3.13"
 mimalloc = "0.1.47"
 url = "2.5.4"
+egui_tiles = "0.12.0"
 
 [target.x86_64-apple-darwin.dependencies]
 metal = "0.32.0"
