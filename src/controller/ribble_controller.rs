@@ -15,6 +15,8 @@ use std::sync::Arc;
 
 // NOTE: if deciding to swap the backend, make the sink generic, S: Sink<f32>
 // NOTE TWICE: Possibly look at making the Kernel generic and implement methods on it.
+// TODO: Heavily consider removing the generics here until it's absolutely necessary.
+// It's a bit of a pain and the app is currently non-generic--it's much easier to deal with concrete types.
 #[derive(Clone)]
 pub(crate) struct RibbleController<A: AudioBackend<ArcChannelSink<f32>>> {
     kernel: Arc<Kernel<A>>,
