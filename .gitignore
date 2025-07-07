@@ -3,3 +3,4 @@
 /signing.txt
 /dist
 /release_builds
+Cargo.lock
