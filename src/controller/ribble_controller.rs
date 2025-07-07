@@ -18,17 +18,27 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub(crate) struct RibbleController<A: AudioBackend<ArcChannelSink<f32>>> {
     kernel: Arc<Kernel<A>>,
+    max_whisper_threads: usize,
 }
 
 impl<A: AudioBackend<ArcChannelSink<f32>>> RibbleController<A> {
+    const RECOMMENDED_MAX_WHISPER_THREADS: usize = 8;
     // NOTE: The AudioBackendProxy will need to be constructed higher up in the app and passed in.
     pub(crate) fn new(data_directory: &Path, audio_backend: A) -> Result<Self, RibbleError> {
         let kernel = Arc::new(Kernel::new(data_directory, audio_backend)?);
-        Ok(Self { kernel })
+        let available_threads = std::thread::available_parallelism()?.get();
+        let max_whisper_threads = available_threads.min(Self::RECOMMENDED_MAX_WHISPER_THREADS);
+        Ok(Self { kernel, max_whisper_threads })
     }
 
     pub(crate) fn serialize_user_data(&self) {
         self.kernel.serialize_user_data();
+    }
+
+    // TODO: either add to the kernel or create a second state struct for hardware configurations.
+    // As of right now, the number of available threads
+    pub(crate) fn max_whisper_threads(&self) -> usize {
+        self.max_whisper_threads
     }
 
     // MODEL MANAGEMENT
@@ -51,12 +61,17 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> RibbleController<A> {
         Ok(self.kernel.remove_model(model_id)?)
     }
 
+    // TODO: expect this to be a void method after refactoring ->
+    // The ModelBank needs handles for downloading/work threads.
     pub(crate) fn refresh_model_bank(&self) -> Result<(), RibbleError> {
         Ok(self.kernel.refresh_model_bank()?)
     }
 
     pub(crate) fn get_model_list(&self) -> RibbleModelBankIter {
         self.kernel.iter()
+    }
+    pub(crate) fn get_model_directory(&self) -> &Path {
+        self.kernel.get_model_directory()
     }
 
     // TRANSCRIBER
@@ -94,6 +109,13 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> RibbleController<A> {
     pub(crate) fn stop_offline(&self) {
         self.kernel.stop_realtime()
     }
+
+    // It's easiest from the transcription windows to just kill both.
+    pub(crate) fn stop_transcription(&self) {
+        self.kernel.stop_realtime();
+        self.kernel.stop_offline();
+    }
+
     pub(crate) fn read_transcription_snapshot(&self) -> Arc<TranscriptionSnapshot> {
         self.kernel.read_transcription_snapshot()
     }
@@ -101,14 +123,29 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> RibbleController<A> {
         self.kernel.read_latest_control_phrase()
     }
 
+    pub(crate) fn read_current_audio_file_path(&self) -> Arc<Option<PathBuf>> {
+        self.kernel.read_current_audio_file_path()
+    }
+
     pub(crate) fn start_realtime_transcription(&self) {
         self.kernel
             .start_realtime_transcription();
     }
 
-    pub(crate) fn start_offline_transcription(&self, audio_file: &Path) {
+    pub(crate) fn set_audio_file_path(&self, path: PathBuf) {
+        self.kernel.set_audio_file_path(path);
+    }
+    pub(crate) fn clear_audio_file_path(&self) {
+        self.kernel.clear_audio_file_path();
+    }
+
+    pub(crate) fn start_offline_transcription(&self) {
         self.kernel
-            .start_offline_transcription(audio_file);
+            .start_offline_transcription();
+    }
+
+    pub(crate) fn try_retranscribe_latest(&self) {
+        self.kernel.try_retranscribe_latest();
     }
 
     // RECORDER
@@ -136,6 +173,16 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> RibbleController<A> {
     }
     pub(crate) fn try_get_latest_recording(&self) -> Option<PathBuf> {
         self.kernel.try_get_latest()
+    }
+
+    // NOTE: if lock-contention is ever an issue (if this method even gets used),
+    // swap to a try_get and respond accordingly in the UI.
+    pub(crate) fn get_num_recordings(&self) -> usize {
+        self.kernel.get_num_recordings()
+    }
+
+    pub(crate) fn latest_recording_exists(&self) -> bool {
+        self.kernel.latest_recording_exists()
     }
     pub(crate) fn try_get_completed_recordings(&self, copy_buffer: &mut Vec<(String, CompletedRecordingJobs)>) {
         self.kernel.try_get_completed_jobs(copy_buffer)

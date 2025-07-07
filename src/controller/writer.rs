@@ -40,6 +40,7 @@ impl WriteRequest {
 struct WriterEngineState {
     ticket: AtomicUsize,
     clearing: AtomicBool,
+    latest_exists: AtomicBool,
     data_directory: PathBuf,
     completed_jobs: RwLock<IndexMap<String, CompletedRecordingJobs>>,
     incoming_jobs: Receiver<WriteRequest>,
@@ -53,10 +54,13 @@ impl WriterEngineState {
     fn new(data_directory: PathBuf, incoming_jobs: Receiver<WriteRequest>, bus: &Bus) -> Self {
         let ticket = AtomicUsize::new(0);
         let clearing = AtomicBool::new(false);
+        let latest_exists = AtomicBool::new(false);
         let completed_jobs = RwLock::new(IndexMap::with_capacity(Self::DEFAULT_CACHE_SIZE));
+
         Self {
             ticket,
             clearing,
+            latest_exists,
             data_directory,
             completed_jobs,
             incoming_jobs,
@@ -69,10 +73,24 @@ impl WriterEngineState {
 
     fn try_get_latest(&self) -> Option<PathBuf> {
         // Try and get the last inserted key
-        self.completed_jobs
+        let latest = self.completed_jobs
             .read()
             .last()
-            .and_then(|(file_name, _)| Some(self.data_directory.join(file_name)))
+            .and_then(|(file_name, _)| Some(self.data_directory.join(file_name)));
+
+        // If it doesn't exist, internally update the status and return the Option.
+        if latest.is_none() {
+            self.latest_exists.store(false, Ordering::Release);
+        }
+
+        latest
+    }
+
+    // NOTE: if this is causing issues with the UI loop, return an option instead and use heuristics.
+    // If the offline/recording has been run at least once, there must exist a recording that can
+    // be loaded.
+    fn get_num_completed(&self) -> usize {
+        self.completed_jobs.read().len()
     }
 
     fn get_recording_path(&self, file_name: &str) -> Option<PathBuf> {
@@ -112,6 +130,8 @@ impl WriterEngineState {
                     }
                 }
             }
+
+            self.latest_exists.store(false, Ordering::Release);
             // Then empty the hashmap and reset the accumulator.
             completed_jobs.clear();
             self.ticket.store(0, Ordering::Release);
@@ -255,6 +275,10 @@ impl WriterEngineState {
             let console_message = ConsoleMessage::Status(format!(
                 "Finished Recording. Total duration: {hours}:{minutes}:{seconds}"
             ));
+
+            // Update the latest_exists flag --> if the transcription was written, it has to exist
+            // and be accessible.
+            self.latest_exists.fetch_or(true, Ordering::AcqRel);
             let ribble_message = RibbleMessage::Console(console_message);
             Ok(ribble_message)
         })
@@ -311,12 +335,22 @@ impl WriterEngine {
         }
     }
 
+    pub(super) fn latest_exists(&self) -> bool {
+        self.inner.latest_exists.load(Ordering::Acquire)
+    }
+
     // NOTE: use this if a user wants to re-transcribe their last recording.
     // In the UI, label this button: Re-Transcribe latest (recording)
     // If this is none, that means either writing hasn't finished, or there are no recordings.
     // This is not necessarily an error.
     pub(super) fn try_get_latest(&self) -> Option<PathBuf> {
         self.inner.try_get_latest()
+    }
+
+    // NOTE: if this is causing noticeable UI jank with the lock contention,
+    // return an option and respond accordingly in the UI.
+    pub(super) fn get_num_completed(&self) -> usize {
+        self.inner.get_num_completed()
     }
 
     pub(super) fn get_recording_path(&self, file_name: &str) -> Option<PathBuf> {

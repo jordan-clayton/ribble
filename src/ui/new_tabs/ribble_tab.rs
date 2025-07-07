@@ -7,8 +7,7 @@ use crate::ui::new_tabs::tabs::*;
 #[derive(serde::Serialize, serde::Deserialize, strum::EnumCount, Clone)]
 #[enum_dispatch]
 pub(in crate::ui) enum RibbleTab {
-    RealtimeTab,
-    OfflineTab,
+    TranscriberTab,
     VadConfigsTab,
     RecordingTab,
     TranscriptionTab,
@@ -22,8 +21,7 @@ pub(in crate::ui) enum RibbleTab {
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
 pub(in crate::ui) enum RibbleTabId {
-    Realtime,
-    Offline,
+    Transcriber,
     VadConfigs,
     Recording,
     Transcription,
@@ -38,8 +36,7 @@ pub(in crate::ui) enum RibbleTabId {
 impl From<RibbleTabId> for RibbleTab {
     fn from(value: RibbleTabId) -> Self {
         match value {
-            RibbleTabId::Realtime => RibbleTab::RealtimeTab(RibbleTab {}),
-            RibbleTabId::Offline => RibbleTab::OfflineTab(OfflineTab {}),
+            RibbleTabId::Transcriber => RibbleTab::TranscriberTab(TranscriberTab { realtime: true }),
             RibbleTabId::VadConfigs => RibbleTab::VadConfigsTab(VadConfigsTab {}),
             RibbleTabId::Recording => RibbleTab::RecordingTab(RecordingTab {}),
             RibbleTabId::Transcription => RibbleTab::TranscriptionTab(TranscriptionTab {}),

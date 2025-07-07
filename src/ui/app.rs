@@ -55,6 +55,10 @@ pub struct Ribble {
 }
 
 impl Ribble {
+    // TODO: FIND AN APPROPRIATE SPOT FOR GUI/STYLING CONSTANTS
+    const TOOLTIP_GRACE_TIME: f32 = 0.0;
+    const TOOLTIP_DELAY: f32 = 0.5;
+
     // NOTE: this should really only take the system theme if it's... necessary?
     // I do not remember what the heck I was doing.
     pub(crate) fn new(data_directory: &Path) -> Result<Self, RibbleError> {
@@ -115,6 +119,15 @@ impl eframe::App for Ribble {
         while let Ok(request) = self.capture_requests.try_recv() {
             request(&self.backend);
         }
+
+        // Set the GUI constants.
+        ctx.style_mut(|style| {
+            style.interaction.show_tooltips_only_when_still = true;
+            style.interaction.tooltip_grace_time = Self::TOOLTIP_GRACE_TIME;
+            style.interaction.tooltip_delay = Self::TOOLTIP_DELAY;
+            style.interaction.show_tooltips_only_when_still = true;
+        });
+
         todo!("Finish draw loop.")
         // First: Set the theme -> possibly cache it and set a transition lerp when changing.
         // Next: Paint a top bar with a little recording icon to let the user know what's going on

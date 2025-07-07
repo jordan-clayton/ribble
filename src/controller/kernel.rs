@@ -136,12 +136,17 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
         Ok(self.model_bank.remove_model(model_id)?)
     }
 
+    // TODO: expect this to be a void method after refactoring ->
+    // The ModelBank needs handles for downloading/work threads.
     pub(super) fn refresh_model_bank(&self) -> Result<(), RibbleError> {
         Ok(self.model_bank.refresh_model_bank()?)
     }
 
     pub(super) fn get_model_list(&self) -> RibbleModelBankIter {
         self.model_bank.iter()
+    }
+    pub(super) fn get_model_directory(&self) -> &Path {
+        self.model_bank.model_directory()
     }
 
     // TRANSCRIBER
@@ -186,6 +191,10 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
         self.transcriber_engine.read_latest_control_phrase()
     }
 
+    pub(super) fn read_current_audio_file_path(&self) -> Arc<Option<PathBuf>> {
+        self.transcriber_engine.read_current_audio_file_path()
+    }
+
     pub(super) fn start_realtime_transcription(&self) {
         let bank = Arc::clone(&self.model_bank);
 
@@ -193,10 +202,26 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
             .start_realtime_transcription(&self.audio_backend, bank);
     }
 
-    pub(super) fn start_offline_transcription(&self, audio_file: &Path) {
+    pub(super) fn set_audio_file_path(&self, path: PathBuf) {
+        self.transcriber_engine.set_current_audio_file_path(path);
+    }
+    pub(super) fn clear_audio_file_path(&self) {
+        self.transcriber_engine.clear_current_audio_file_path();
+    }
+
+    // NOTE: The WriterEngine will update its own state if its recording cache is empty.
+    // NOTE TWICE: This does not guarantee there won't be a file issue if the recording is missing.
+    pub(super) fn try_retranscribe_latest(&self) {
+        if let Some(path) = self.try_get_latest_recording() {
+            self.set_audio_file(path);
+            self.start_realtime_transcription();
+        }
+    }
+
+    pub(super) fn start_offline_transcription(&self) {
         let bank = Arc::clone(&self.model_bank);
         self.transcriber_engine
-            .start_offline_transcription(audio_file, bank);
+            .start_offline_transcription(bank);
     }
 
     // RECORDER
@@ -222,8 +247,15 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
     pub(super) fn clear_recording_cache(&self) {
         self.writer_engine.clear_cache()
     }
+    pub(super) fn latest_recording_exists(&self) -> bool {
+        self.writer_engine.latest_exists()
+    }
     pub(super) fn try_get_latest_recording(&self) -> Option<PathBuf> {
         self.writer_engine.try_get_latest()
+    }
+
+    pub(super) fn get_num_recordings(&self) -> usize {
+        self.writer_engine.get_num_completed()
     }
     pub(super) fn try_get_completed_recordings(&self, copy_buffer: &mut Vec<(String, CompletedRecordingJobs)>) {
         self.writer_engine.try_get_completed_jobs(copy_buffer)

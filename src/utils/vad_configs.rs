@@ -1,15 +1,7 @@
 use crate::utils::errors::RibbleError;
 use ribble_whisper::audio::pcm::PcmS16Convertible;
-use ribble_whisper::transcriber::vad::{
-    Earshot, Resettable, Silero, SileroBuilder, VAD, WebRtc, WebRtcBuilder,
-    WebRtcFilterAggressiveness, WebRtcFrameLengthMillis, WebRtcSampleRate,
-};
-
-// TODO: this should probably be re-thought; the constants dump is a little less than ideal.
-use ribble_whisper::utils::constants::{
-    OFFLINE_VOICE_PROBABILITY_THRESHOLD, SILERO_CHUNK_SIZE, SILERO_VOICE_PROBABILITY_THRESHOLD,
-    WEBRTC_VOICE_PROBABILITY_THRESHOLD, WHISPER_SAMPLE_RATE,
-};
+use ribble_whisper::transcriber::vad::{Earshot, Resettable, Silero, SileroBuilder, VAD, WebRtc, WebRtcBuilder, WebRtcFilterAggressiveness, WebRtcFrameLengthMillis, WebRtcSampleRate, WEBRTC_VOICE_PROBABILITY_THRESHOLD, SILERO_VOICE_PROBABILITY_THRESHOLD, OFFLINE_VOICE_PROBABILITY_THRESHOLD, DEFAULT_SILERO_CHUNK_SIZE};
+use ribble_whisper::transcriber::WHISPER_SAMPLE_RATE;
 use strum::{AsRefStr, Display, EnumIter, IntoStaticStr};
 
 // NOTE: this should probably be kept/modified separately for Offline/Real-time configurations.
@@ -69,11 +61,13 @@ impl VadConfigs {
     }
 
     // Frame size, Aggressiveness, Probability
+    // Since it's not particularly great/meaningful to use 10ms chunks for VAD,
+    // Auto picks the largest frame size for WebRtc
     fn prep_webrtc(&self) -> (WebRtcFrameLengthMillis, WebRtcFilterAggressiveness, f32) {
         let frame_size = match self.frame_size() {
-            VadFrameSize::Small | VadFrameSize::Auto => WebRtcFrameLengthMillis::MS10,
+            VadFrameSize::Small => WebRtcFrameLengthMillis::MS10,
             VadFrameSize::Medium => WebRtcFrameLengthMillis::MS20,
-            VadFrameSize::Large => WebRtcFrameLengthMillis::MS30,
+            VadFrameSize::Auto | VadFrameSize::Large => WebRtcFrameLengthMillis::MS30,
         };
 
         let (aggressiveness, probability) = match self.strictness() {
@@ -105,8 +99,11 @@ impl VadConfigs {
     pub(crate) fn build_vad(&self) -> Result<RibbleVAD, RibbleError> {
         match self.vad_type() {
             VadType::Auto | VadType::Silero => {
+                // Larger sizes may introduce latency and 512 is perfectly sufficient
+                // as an "AUTO" chunk size. This is in contrast with WebRtc for the reasons mentioned
+                // above.
                 let frame_size = match self.frame_size() {
-                    VadFrameSize::Small | VadFrameSize::Auto => SILERO_CHUNK_SIZE,
+                    VadFrameSize::Small | VadFrameSize::Auto => DEFAULT_SILERO_CHUNK_SIZE,
                     VadFrameSize::Medium => 768usize,
                     VadFrameSize::Large => 1024usize,
                 };
@@ -167,6 +164,17 @@ pub(crate) enum VadType {
     Silero,
     WebRtc,
     Earshot,
+}
+
+impl VadType {
+    pub(crate) fn tooltip(&self) -> &'static str {
+        match self {
+            VadType::Auto => "Use the default algorithm.",
+            VadType::Silero => "Most accurate, higher performance overhead.\nGenerally suitable for real-time on most hardware.",
+            VadType::WebRtc => "Good accuracy, low performance overhead.\n Good for all purposes.",
+            VadType::Earshot => "Lower accuracy, lowest overhead.\n Use as a fallback.",
+        }
+    }
 }
 
 #[derive(Clone, Copy, EnumIter, IntoStaticStr, AsRefStr, Display)]

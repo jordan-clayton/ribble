@@ -126,6 +126,7 @@ impl tab_view::TabView for StaticTab {
         let style = ui.style_mut();
         style.interaction.show_tooltips_only_when_still = true;
         style.interaction.tooltip_grace_time = constants::TOOLTIP_GRACE_TIME;
+        style.interaction.show_tooltips_only_when_still = true;
         style.interaction.tooltip_delay = constants::TOOLTIP_DELAY;
 
         // Workaround for egui's default tooltip behaviour.
@@ -298,8 +299,7 @@ impl tab_view::TabView for StaticTab {
         _controller: &mut WhisperAppController,
         _surface: SurfaceIndex,
         _node: NodeIndex,
-    ) {
-    }
+    ) {}
 
     fn closeable(&mut self) -> bool {
         true

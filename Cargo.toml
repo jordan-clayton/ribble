@@ -59,6 +59,7 @@ enum_dispatch = "0.3.13"
 mimalloc = "0.1.47"
 url = "2.5.4"
 egui_tiles = "0.12.0"
+opener = { version = "0.8.2", features = ["reveal"] }
 
 [target.x86_64-apple-darwin.dependencies]
 metal = "0.32.0"

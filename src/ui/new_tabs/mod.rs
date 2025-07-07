@@ -1,5 +1,5 @@
 mod offline_tab;
-mod realtime_tab;
+mod transcriber_tab;
 mod recording_tab;
 pub(in crate::ui) mod ribble_tab;
 
@@ -377,6 +377,8 @@ where
         // NOTE: this is super cheap, it's perfectly fine to add sensing events inside the tab
         let resp = ui
             .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
+            // TODO: the on_hover_cursor might get confusing with clickable-settings
+            // Not 100% sure how to deal with this yet.
             .on_hover_cursor(egui::CursorIcon::Grab);
         let dragged = resp.dragged();
 

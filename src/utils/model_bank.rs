@@ -14,6 +14,9 @@ use std::path::{Path, PathBuf};
 use twox_hash::XxHash3_64;
 
 // TODO: methods for downloading models (take in a bus to send download jobs).
+// NOTE: this should also spawn jobs in the worker engine for file-clearing.
+// e.g, upon downloading/copying a file over, it's 100% better to just refresh the directory.
+
 // TODO: explicit methods for copying files over by path to create a model.
 // Methods for to retrieve file_name from url slug/file path.
 
@@ -199,8 +202,6 @@ impl<'a> Iterator for RibbleModelBankIter<'a> {
 }
 
 impl ConcurrentModelBank for RibbleModelBank {
-    // TODO: this very obviously will not compile, but it gets the point across.
-    // Make a wrapper struct that implements Iterator that holds the write guard.
     type Iter<'a>
     = RibbleModelBankIter<'a>
     where

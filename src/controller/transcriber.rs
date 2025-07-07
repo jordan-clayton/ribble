@@ -32,16 +32,23 @@ use ribble_whisper::utils::callback::{
 use ribble_whisper::utils::{get_channel, Receiver, Sender};
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model::ModelRetriever;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+// TODO: possibly take in an ArcSwap<PathBuf> to share the audio state for offline transcription.
+// Pros: encapsulated, trivial to implement, easy UI, can easily pass paths between engine components.
+// Cons: more state.
+// vs Argument:
+// Pros: state passes through functions
+// Cons: state maintained in UI, possible for incoherence (2x+ screens, different paths), pointer chasing.
 struct TranscriberEngineState {
     transcription_configs: ArcSwap<WhisperRealtimeConfigs>,
     vad_configs: ArcSwap<VadConfigs>,
     realtime_running: Arc<AtomicBool>,
     offline_running: Arc<AtomicBool>,
+    current_audio_file_path: ArcSwap<Option<PathBuf>>,
     offline_transcriber_feedback: Arc<AtomicOfflineTranscriberFeedback>,
     feedback_callback_rate: Arc<AtomicU64>,
     current_snapshot: ArcSwap<TranscriptionSnapshot>,
@@ -66,6 +73,7 @@ impl TranscriberEngineState {
         let vad_configs = ArcSwap::new(Arc::new(v_configs));
         let realtime_running = Arc::new(AtomicBool::new(false));
         let offline_running = Arc::new(AtomicBool::new(false));
+        let current_audio_file_path = ArcSwap::new(Arc::new(None));
         let transcriber_feedback = AtomicOfflineTranscriberFeedback::new(feedback_type);
         let offline_transcriber_feedback = Arc::new(transcriber_feedback);
         let feedback_callback_rate = Arc::new(AtomicU64::new(Self::DEFAULT_FEEDBACK_RATE_MILLIS));
@@ -76,6 +84,7 @@ impl TranscriberEngineState {
             vad_configs,
             realtime_running,
             offline_running,
+            current_audio_file_path,
             offline_transcriber_feedback,
             feedback_callback_rate,
             current_snapshot,
@@ -306,9 +315,20 @@ impl TranscriberEngineState {
 
     fn run_offline_transcription<M: ModelRetriever>(
         &self,
-        audio_file_path: &Path,
         shared_model_retriever: Arc<M>,
     ) -> Result<RibbleMessage, RibbleError> {
+        // Unpack the audio.
+        let audio_path = self.current_audio_file_path.load_full();
+
+        let audio_file_path = if let Some(path) = audio_path.as_ref() {
+            Ok(path.clone())
+        } else {
+            Err(
+                RibbleError::Core("Audio file path not loaded.".to_string())
+            )
+        }?;
+
+
         // Send a progress job so the UI can be updated.
         let setup_progress = Progress::new_indeterminate("Setting up offline transcription.");
 
@@ -355,7 +375,7 @@ impl TranscriberEngineState {
             .load_full()
             .into_whisper_v2_configs();
 
-        let n_frames = audio_file_num_frames(&audio_file_path).or_else(|e| {
+        let n_frames = audio_file_num_frames(audio_file_path.as_path()).or_else(|e| {
             self.cleanup_remove_progress_job(setup_id);
             Err(e)
         })?;
@@ -389,7 +409,7 @@ impl TranscriberEngineState {
         };
 
         // Load the audio file.
-        let loaded_audio = load_normalized_audio_file(audio_file_path, Some(load_audio_callback))
+        let loaded_audio = load_normalized_audio_file(audio_file_path.as_path(), Some(load_audio_callback))
             .or_else(|e| {
                 self.cleanup_remove_progress_job(setup_id);
                 self.cleanup_remove_progress_job(load_audio_id);
@@ -536,7 +556,7 @@ impl TranscriberEngineState {
         self.finalize_transcription(result);
 
         // Finalize by preparing a status message for the console.
-        let message = format!("Finished transcribing: {}!", audio_file_path);
+        let message = format!("Finished transcribing: {}!", audio_file_path.as_path());
         let console_message = ConsoleMessage::Status(message);
         Ok(RibbleMessage::Console(console_message))
     }
@@ -665,6 +685,22 @@ impl TranscriberEngine {
         self.inner.current_control_phrase.load_full()
     }
 
+    fn update_current_audio_file_path(&self, path: Option<PathBuf>) {
+        let new_path = Arc::new(path);
+        self.inner.current_audio_file_path.swap(new_path);
+    }
+
+    pub(super) fn set_current_audio_file_path(&self, path: PathBuf) {
+        self.update_current_audio_file_path(Some(path));
+    }
+    pub(super) fn clear_current_audio_file_path(&self) {
+        self.update_current_audio_file_path(None);
+    }
+
+    pub(super) fn read_current_audio_file_path(&self) -> Arc<Option<PathBuf>> {
+        self.inner.current_audio_file_path.load_full()
+    }
+
     pub(super) fn start_realtime_transcription<M, A>(
         &self,
         audio_backend: &A,
@@ -688,7 +724,6 @@ impl TranscriberEngine {
 
     pub(super) fn start_offline_transcription<M: ModelRetriever>(
         &self,
-        audio_file_path: &Path,
         shared_model_retriever: Arc<M>,
     ) {
         // Set the flag that the offline runner is running so that the UI can update.
@@ -698,7 +733,7 @@ impl TranscriberEngine {
 
         // Set up the worker.
         let worker = std::thread::spawn(move || {
-            thread_inner.run_offline_transcription(audio_file_path, shared_model_retriever)
+            thread_inner.run_offline_transcription(shared_model_retriever)
         });
 
         // Send off the request

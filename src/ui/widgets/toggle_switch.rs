@@ -19,7 +19,7 @@ fn draw_toggle(ui: &mut Ui, on: &mut bool) -> Response {
         let radius = 0.5 * rect.height();
 
         ui.painter()
-            .rect(rect, radius, visuals.bg_fill, visuals.bg_stroke);
+            .rect(rect, radius, visuals.bg_fill, visuals.bg_stroke, egui::StrokeKind::Outside);
 
         let circle_x = lerp((rect.left() + radius)..=(rect.right() - radius), t);
         let center = pos2(circle_x, rect.center().y);
