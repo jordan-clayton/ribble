@@ -1,28 +1,36 @@
 use crate::controller::ribble_controller::RibbleController;
+use crate::controller::{CompletedRecordingJobs, OfflineTranscriberFeedback};
 use crate::ui::new_tabs::TabView;
 use crate::ui::new_tabs::ribble_tab::RibbleTabId;
 use crate::ui::widgets::toggle_switch::toggle;
 use crate::utils::vad_configs::{VadFrameSize, VadStrictness, VadType};
 use ribble_whisper::audio::audio_backend::AudioBackend;
-use ribble_whisper::audio::recorder::SampleSink;
+use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::whisper::configs::Language;
 use strum::IntoEnumIterator;
-use crate::controller::{CompletedRecordingJobs, OfflineTranscriberFeedback};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(in crate::ui) struct TranscriberTab {
-    #[serde(default = "true")]
+    #[serde(default = "set_realtime")]
     pub realtime: bool,
+    #[serde(skip)]
     #[serde(default)]
     pub recordings_buffer: Vec<(String, CompletedRecordingJobs)>,
     // TODO: maybe define these modals in separate files instead of tabs?
     // or just write it at the bottom of the draw method.
-    #[serde(default = "false")]
+    #[serde(skip)]
+    #[serde(default)]
     pub recording_modal: bool,
-    #[serde(default = "false")]
+    #[serde(skip)]
+    #[serde(default)]
     pub download_modal: bool,
-    #[serde(default = "false")]
+    #[serde(skip)]
+    #[serde(default)]
     pub copy_modal: bool,
+}
+// This is for serde.
+fn set_realtime() -> bool {
+    true
 }
 
 impl Default for TranscriberTab {
@@ -38,7 +46,7 @@ impl Default for TranscriberTab {
 }
 
 impl TabView for TranscriberTab {
-    fn tab_id(&self) -> RibbleTabId {
+    fn tile_id(&self) -> RibbleTabId {
         RibbleTabId::Transcriber
     }
 
@@ -50,17 +58,16 @@ impl TabView for TranscriberTab {
         }
     }
 
-    fn pane_ui<S, A>(
+    fn pane_ui<A>(
         &mut self,
         ui: &mut egui::Ui,
         _tile_id: egui_tiles::TileId,
         controller: RibbleController<A>,
-    ) -> egui_tiles::UiResponse
+    ) -> egui::Response
     where
-        S: SampleSink,
-        A: AudioBackend<S>,
+        A: AudioBackend<ArcChannelSink<f32>>,
     {
-        let transcription_running = controller.transcription_running();
+        let transcription_running = controller.transcriber_running();
         let audio_worker_running = controller.recorder_running() || transcription_running;
 
         let configs = *controller.read_transcription_configs();
@@ -381,9 +388,9 @@ impl TabView for TranscriberTab {
                                             // Since real-time configs expose some more parameters,
                                             // Only reset the whisper configs if resetting from offline mode.
                                             let new_configs = if self.realtime {
-                                                Default::default();
+                                                Default::default()
                                             } else {
-                                                configs.with_whisper_configs(Default::default());
+                                                configs.with_whisper_configs(Default::default())
                                             };
 
                                             controller.write_transcription_configs(new_configs);
@@ -487,7 +494,6 @@ impl TabView for TranscriberTab {
             });
         });
 
-
         // TODO: finish Modals
         // MODALS -> this doesn't need to be in the scroll area.
         if self.recording_modal {
@@ -519,9 +525,8 @@ impl TabView for TranscriberTab {
         }
 
         if self.copy_modal {
-            let modal = egui::Modal::new(egui::Id::from("copy_modal")).show(ui.ctx(), |ui| {
-                todo!("Copy Modal.")
-            });
+            let modal = egui::Modal::new(egui::Id::from("copy_modal"))
+                .show(ui.ctx(), |ui| todo!("Copy Modal."));
 
             if modal.should_close() {
                 *self.copy_modal = false;
@@ -530,16 +535,13 @@ impl TabView for TranscriberTab {
         // Handle dragging the UI.
         let pane_id = egui::Id::from("transcriber_pane");
 
-        let resp = ui.interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::Grab);
-        // Return the drag response
-        if resp.dragged() {
-            egui_tiles::UiResponse::DragStarted
-        } else {
-            egui_tiles::UiResponse::None
-        }
+        // Return the interaction response.
+        ui.interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::Grab)
     }
 
     fn is_tab_closable(&self) -> bool {
         true
     }
 }
+

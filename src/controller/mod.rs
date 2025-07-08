@@ -392,3 +392,50 @@ impl CompletedRecordingJobs {
         self.sample_rate
     }
 }
+
+pub(crate) const NUM_VISUALIZER_BUCKETS: usize = 32;
+
+pub(crate) enum RotationDirection {
+    Clockwise,
+    CounterClockwise,
+}
+
+#[atomic_enum]
+#[derive(Default, PartialEq, EnumIter, Display)]
+pub(crate) enum AnalysisType {
+    #[strum(to_string = "Amplitude")]
+    #[default]
+    AmplitudeEnvelope = 0,
+    Waveform,
+    Power,
+    #[strum(to_string = "Spectrum Density")]
+    SpectrumDensity,
+}
+
+impl AnalysisType {
+    // NOTE: this is obviously a little un-maintainable and not the greatest solution if the AnalysisTypes grow.
+    // If it becomes untenable, look into a macro-based solution.
+    // TODO: write a quick test to stamp out bugs here
+    pub(crate) fn rotate(&self, direction: RotationDirection) -> Self {
+        match (self, direction) {
+            (AnalysisType::AmplitudeEnvelope, RotationDirection::Clockwise) => {
+                AnalysisType::Waveform
+            }
+            (AnalysisType::AmplitudeEnvelope, RotationDirection::CounterClockwise) => {
+                AnalysisType::SpectrumDensity
+            }
+            (AnalysisType::Waveform, RotationDirection::Clockwise) => AnalysisType::Power,
+            (AnalysisType::Waveform, RotationDirection::CounterClockwise) => {
+                AnalysisType::AmplitudeEnvelope
+            }
+            (AnalysisType::Power, RotationDirection::Clockwise) => AnalysisType::SpectrumDensity,
+            (AnalysisType::Power, RotationDirection::CounterClockwise) => AnalysisType::Waveform,
+            (AnalysisType::SpectrumDensity, RotationDirection::Clockwise) => {
+                AnalysisType::AmplitudeEnvelope
+            }
+            (AnalysisType::SpectrumDensity, RotationDirection::CounterClockwise) => {
+                AnalysisType::Power
+            }
+        }
+    }
+}

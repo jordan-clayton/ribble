@@ -1,7 +1,7 @@
 use crate::utils::errors::RibbleError;
 use case_style::CaseStyle;
-use indexmap::map::Iter;
 use indexmap::IndexMap;
+use indexmap::map::Iter;
 use parking_lot::{RwLock, RwLockReadGuard};
 use ribble_whisper::utils::errors::RibbleWhisperError;
 use ribble_whisper::whisper::model::{ConcurrentModelBank, Model, ModelId, ModelRetriever};
@@ -45,7 +45,7 @@ impl RibbleModelBank {
                 model_directory,
                 model_map,
             }
-                .init()
+            .init()
         }
     }
 
@@ -58,11 +58,7 @@ impl RibbleModelBank {
         self.model_map.write().clear();
     }
 
-    fn handle_removal(
-        &self,
-        model_id: ModelId,
-        swap: bool,
-    ) -> Result<Option<Model>, RibbleWhisperError> {
+    fn handle_removal(&self, model_id: ModelId, swap: bool) -> Result<ModelId, RibbleWhisperError> {
         let mut write_guard = self.model_map.write();
         if let Some(model) = write_guard.get(&model_id) {
             // First check to see that it exists in the file_system before removing.
@@ -75,10 +71,20 @@ impl RibbleModelBank {
                 },
             };
         };
+
+        // It doesn't really matter if the old entry existed, but this really should
+        // return an Option<ModelId>
+        // TODO: CONSIDER GOING BACK TO RIBBLE_WHISPER TO UPDATE THE TRAIT DEF.
         if swap {
-            Ok(write_guard.swap_remove(&model_id))
+            Ok({
+                write_guard.swap_remove(&model_id);
+                model_id
+            })
         } else {
-            Ok(write_guard.shift_remove(&model_id))
+            Ok({
+                write_guard.shift_remove(&model_id);
+                model_id
+            })
         }
     }
 
@@ -159,7 +165,10 @@ impl RibbleModelBank {
         if let Ok(file) = model_file {
             let writer = BufWriter::new(file);
 
-            if ron::Options::default().to_io_writer_pretty(writer, &model_map, PrettyConfig::default()).is_err() {
+            if ron::Options::default()
+                .to_io_writer_pretty(writer, &model_map, PrettyConfig::default())
+                .is_err()
+            {
                 todo!("LOGGING")
             }
         } else {
@@ -203,7 +212,7 @@ impl<'a> Iterator for RibbleModelBankIter<'a> {
 
 impl ConcurrentModelBank for RibbleModelBank {
     type Iter<'a>
-    = RibbleModelBankIter<'a>
+        = RibbleModelBankIter<'a>
     where
         Self: 'a;
 
@@ -328,7 +337,7 @@ impl ConcurrentModelBank for RibbleModelBank {
     // The file needs to be removed before removing from the map.
     // NOTE: there should be checks in the UI to prevent the user from running transcription with an old model
     // Removal is a shift_remove (moves all elements so order is preserved)
-    fn remove_model(&self, model_id: ModelId) -> Result<Option<Model>, RibbleWhisperError> {
+    fn remove_model(&self, model_id: ModelId) -> Result<Option<ModelId>, RibbleWhisperError> {
         self.handle_removal(model_id, false)
     }
 

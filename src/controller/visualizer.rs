@@ -1,5 +1,4 @@
 use crate::utils::errors::RibbleError;
-use atomic_enum::atomic_enum;
 use crossbeam::channel::Receiver;
 use parking_lot::RwLock;
 use realfft::RealFftPlanner;
@@ -9,57 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
-use strum::{Display, EnumIter};
-
-pub const NUM_VISUALIZER_BUCKETS: usize = 32;
-
-// TODO: might need to move this to somewhere shared.
-pub(crate) enum RotationDirection {
-    Clockwise,
-    CounterClockwise,
-}
-#[atomic_enum]
-#[derive(Default, PartialEq, EnumIter, Display)]
-pub(crate) enum AnalysisType {
-    #[strum(to_string = "Amplitude")]
-    #[default]
-    AmplitudeEnvelope = 0,
-    Waveform,
-    Power,
-    #[strum(to_string = "Spectrum Density")]
-    SpectrumDensity,
-}
-
-impl AnalysisType {
-    // NOTE: this is obviously a little un-maintainable and not the greatest solution if the AnalysisTypes grow.
-    // If it becomes untenable, look into a macro-based solution.
-    // TODO: write a quick test to stamp out bugs here
-    pub(crate) fn rotate(&self, direction: RotationDirection) -> Self {
-        match (self, direction) {
-            (AnalysisType::AmplitudeEnvelope, RotationDirection::Clockwise) => {
-                AnalysisType::Waveform
-            }
-            (AnalysisType::AmplitudeEnvelope, RotationDirection::CounterClockwise) => {
-                AnalysisType::SpectrumDensity
-            }
-            (AnalysisType::Waveform, RotationDirection::Clockwise) => AnalysisType::Power,
-            (AnalysisType::Waveform, RotationDirection::CounterClockwise) => {
-                AnalysisType::AmplitudeEnvelope
-            }
-            (AnalysisType::Power, RotationDirection::Clockwise) => AnalysisType::SpectrumDensity,
-            (AnalysisType::Power, RotationDirection::CounterClockwise) => AnalysisType::Waveform,
-            (AnalysisType::SpectrumDensity, RotationDirection::Clockwise) => {
-                AnalysisType::AmplitudeEnvelope
-            }
-            (AnalysisType::SpectrumDensity, RotationDirection::CounterClockwise) => {
-                AnalysisType::Power
-            }
-        }
-    }
-}
-
-// TODO: Expect to need to return to this (The underlying FFT utils need significant refactoring)
-// TODO: construct the FFT planner inside the Engine + move all utility methods here.
+use crate::controller::{AnalysisType, AtomicAnalysisType, RotationDirection, NUM_VISUALIZER_BUCKETS};
 
 pub(super) struct VisualizerSample {
     sample: Arc<[f32]>,

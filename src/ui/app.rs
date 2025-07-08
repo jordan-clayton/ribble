@@ -8,29 +8,21 @@ use eframe::Storage;
 use egui::{Event, Key, ViewportCommand};
 use egui_dock::{DockArea, DockState, NodeIndex, Style, SurfaceIndex, TabIndex};
 use egui_theme_lerp::ThemeAnimator;
-use ribble_whisper::audio::audio_backend::{default_backend, Sdl2Backend};
-use ribble_whisper::audio::recorder::ArcChannelSink;
-use ribble_whisper::utils::{get_channel, Receiver};
+use ribble_whisper::audio::audio_backend::{Sdl2Backend, default_backend};
+use ribble_whisper::utils::{Receiver, get_channel};
 
-use crate::controller::ribble_controller::RibbleController;
 use crate::controller::ConsoleMessage;
+use crate::controller::ribble_controller::RibbleController;
+use crate::ui::new_tabs::RibbleTree;
 use crate::{
     controller::whisper_app_controller::WhisperAppController,
     ui::tabs::{
-        controller_tabs::{r#static, realtime, recording},
+        controller_tabs::{realtime, recording, r#static},
         display_tabs::{console, progress, transcription, visualizer},
         tab_viewer,
         whisper_tab::{FocusTab, WhisperTab},
     },
-    utils::{
-        console_message::ConsoleMessageType,
-        errors::WhisperAppError,
-        file_mgmt::{load_app_state, save_app_state},
-        preferences,
-    },
 };
-use crate::ui::new_tabs::ribble_tab::RibbleTab;
-use crate::ui::new_tabs::RibbleTree;
 
 pub struct Ribble {
     // TODO: remove this -> it's handled internally in the tree.
@@ -38,7 +30,7 @@ pub struct Ribble {
     // Alternatively, encapsulate the Tree + TreeBehaviour within a struct that has its own
     // serialization.
     // TODO: seriously consider getting rid of the generics here - it's a little too gnarly.
-    tree: RibbleTree<ArcChannelSink<f32>, AudioBackendProxy>,
+    tree: RibbleTree<AudioBackendProxy>,
     sdl: sdl2::Sdl,
     backend: Sdl2Backend,
     // This needs to be polled in the UI loop to handle
@@ -64,7 +56,10 @@ impl Ribble {
     // This is in seconds
     const THEME_TRANSITION_TIME: f32 = 0.3;
 
-    pub(crate) fn new(data_directory: &Path, cc: &eframe::CreationContext<'_>) -> Result<Self, RibbleError> {
+    pub(crate) fn new(
+        data_directory: &Path,
+        cc: &eframe::CreationContext<'_>,
+    ) -> Result<Self, RibbleError> {
         // Pack these in the app struct so they live on the main thread.
         let (sdl_ctx, backend) = default_backend()?;
 
@@ -84,23 +79,30 @@ impl Ribble {
             // None => "System" theme, extract the information from the creation context.
             // The default ThemePreference is ThemePreference::System (macOS, Windows),
             // So this will return Some(theme) for those platforms, None for Linux (default to Dark)
-            None => {
-                Self::get_system_theme(&cc.egui_ctx)
-            }
+            None => Self::get_system_theme(&cc.egui_ctx),
         };
 
         let theme_animator = ThemeAnimator::new(system_visuals.clone(), system_visuals.clone())
             .animation_time(Self::THEME_TRANSITION_TIME);
 
-
-        Ok(Self { local_cache_dir: data_directory.to_path_buf(), tree, sdl: sdl_ctx, backend, capture_requests: request_receiver, controller, theme_animator, periodic_serialize: None })
+        Ok(Self {
+            local_cache_dir: data_directory.to_path_buf(),
+            tree,
+            sdl: sdl_ctx,
+            backend,
+            capture_requests: request_receiver,
+            controller,
+            theme_animator,
+            periodic_serialize: None,
+        })
     }
 
     fn get_system_theme(ctx: &egui::Context) -> egui::Visuals {
         match ctx.system_theme() {
-            None => { egui::Theme::Dark }
-            Some(theme) => { theme }
-        }.default_visuals()
+            None => egui::Theme::Dark,
+            Some(theme) => theme,
+        }
+        .default_visuals()
     }
 
     fn check_join_last_save(&mut self) {
@@ -139,17 +141,17 @@ impl Drop for Ribble {
     }
 }
 
-
 impl eframe::App for Ribble {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Check requests for an audio handle and produce an AudioDevice for capture.
         while let Ok(request) = self.capture_requests.try_recv() {
             request(&self.backend);
         }
 
         // Set the system theme.
         let system_theme = match self.controller.get_system_visuals() {
-            None => { Self::get_system_theme(ctx) }
-            Some(visuals) => { visuals }
+            None => Self::get_system_theme(ctx),
+            Some(visuals) => visuals,
         };
 
         // Check to see if the system theme has been changed (via user preferences).

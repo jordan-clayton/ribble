@@ -1,7 +1,6 @@
-mod offline_tab;
-mod transcriber_tab;
 mod recording_tab;
 pub(in crate::ui) mod ribble_tab;
+mod transcriber_tab;
 
 mod console_tab;
 mod model_tab;
@@ -13,58 +12,25 @@ mod vad_configs;
 mod visualizer_tab;
 
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::new_tabs::ribble_tab::{RibbleTab, RibbleTabId};
+use crate::ui::new_tabs::ribble_tab::{RibbleTab, RibbleTabId, TabView};
 use crate::utils::errors::RibbleError;
-use enum_dispatch::enum_dispatch;
 use ribble_whisper::audio::audio_backend::AudioBackend;
-use ribble_whisper::audio::recorder::SampleSink;
+use ribble_whisper::audio::recorder::ArcChannelSink;
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use strum::EnumCount;
 
-#[enum_dispatch(RibbleTab)]
-trait TabView {
-    fn tab_id(&self) -> RibbleTabId;
-    fn tab_title(&mut self) -> egui::WidgetText;
-    /// # Arguments:
-    /// * ui: egui::Ui, for drawing,
-    /// * tile_id: egui_tiles::TileId, this Pane's id
-    /// * controller: RibbleController, for accessing internal data.
-    /// TODO: add an argument so that a pane can request to be closed.
-    /// OR: use an enumeration: PaneResponse::UiResponse(..), PaneResponse::Close,
-    fn pane_ui<S: SampleSink, A: AudioBackend<S>>(
-        &mut self,
-        ui: &mut egui::Ui,
-        tile_id: egui_tiles::TileId,
-        // If there's significant atomic overhead, swap to a reference.
-        // It shouldn't be an issue though.
-        controller: RibbleController<A>,
-    ) -> egui_tiles::UiResponse;
-
-    /// Should this tab be closable?
-    fn is_tab_closable(&self) -> bool;
-
-    /// Fires whenever a tab is closed
-    /// * return true if the tab should still be closed.
-    /// * return false if the tab should remain open
-    fn on_tab_close(&mut self) -> bool {
-        self.is_tab_closable()
-    }
-}
-
 // TODO: consider moving this to its own file.
 #[derive(Clone)]
-pub(in crate::ui) struct RibbleTree<S, A> {
+pub(in crate::ui) struct RibbleTree<A: AudioBackend<ArcChannelSink<f32>>> {
     data_directory: PathBuf,
     tree: egui_tiles::Tree<RibbleTab>,
-    behavior: RibbleTreeBehavior<S, A>,
+    behavior: RibbleTreeBehavior<A>,
 }
 
-impl<S, A> RibbleTree<S, A>
+impl<A> RibbleTree<A>
 where
-    S: SampleSink,
-    A: AudioBackend<S>,
+    A: AudioBackend<ArcChannelSink<f32>>,
 {
     // TODO: decide on an appropriate name
     const TREE_FILE: &'static str = "ribble_layout.ron";
@@ -189,7 +155,10 @@ where
                 );
                 // If there's a parent and the parent is a tab container, set it to be the active tab
                 if let Some(parent_id) = tiles.parent_of(*pane_id) {
-                    if let Some(egui_tiles::Container::Tabs(container)) = tiles.get_mut(parent_id) {
+                    if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(
+                        container,
+                    ))) = tiles.get_mut(parent_id)
+                    {
                         container.set_active(*pane_id);
                         return;
                     }
@@ -214,7 +183,7 @@ where
         tree: &mut egui_tiles::Tree<RibbleTab>,
         tiles: &mut egui_tiles::Tiles<RibbleTab>,
         new_child: egui_tiles::TileId,
-        behavior: &mut RibbleTreeBehavior<S, A>,
+        behavior: &mut RibbleTreeBehavior<A>,
     ) {
         let root = tree.root.expect("The tree should never be empty.");
         let tile = tiles
@@ -227,7 +196,7 @@ where
                 debug_assert!(
                     tiles.len() == 1,
                     "Root is a pane, but the length of the tree is: {}; there are dangling references.",
-                    tree.len()
+                    tiles.len()
                 );
                 // Insert it as a tab; just makes everything easier.
                 let new_root = tiles.insert_tab_tile(vec![root, new_child]);
@@ -235,7 +204,7 @@ where
                     .get_mut(new_root)
                     .expect("The new root node was just inserted.");
                 // Set the active child.
-                if let egui_tiles::Container::Tabs(tabs) = tile {
+                if let egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs)) = tile {
                     tabs.set_active(new_child)
                 }
 
@@ -266,10 +235,9 @@ where
     }
 }
 
-impl<S, A> Drop for RibbleTree<S, A>
+impl<A> Drop for RibbleTree<A>
 where
-    S: SampleSink,
-    A: AudioBackend<S>,
+    A: AudioBackend<ArcChannelSink<f32>>,
 {
     fn drop(&mut self) {
         self.serialize_tree()
@@ -277,10 +245,9 @@ where
 }
 
 // TODO: if it doesn't make sense to keep this generic, then just make concrete based on the current controller.
-pub(in crate::ui) struct RibbleTreeBehavior<S, A>
+pub(in crate::ui) struct RibbleTreeBehavior<A>
 where
-    S: SampleSink,
-    A: AudioBackend<S>,
+    A: AudioBackend<ArcChannelSink<f32>>,
 {
     controller: RibbleController<A>,
     opened_tabs: HashMap<RibbleTabId, egui_tiles::TileId>,
@@ -291,15 +258,13 @@ where
     // Basicially, match on whether it's a Pane ID or a Container ID.
     add_child_to: Option<(egui_tiles::TileId, RibbleTabId)>,
     focus_non_tab_pane: Option<egui_tiles::TileId>,
-    _marker: PhantomData<S>,
 }
 
 // TODO: double check the default implementation and make any changes necessary so that
 // intended behaviour is maintained.
-impl<S, A> RibbleTreeBehavior<S, A>
+impl<A> RibbleTreeBehavior<A>
 where
-    S: SampleSink,
-    A: AudioBackend<S>,
+    A: AudioBackend<ArcChannelSink<f32>>,
 {
     const TAB_BAR_HEIGHT: f32 = 24.0;
     const GAP_WIDTH: f32 = 2.0;
@@ -315,7 +280,6 @@ where
             gap_width: Self::GAP_WIDTH,
             add_child_to: None,
             focus_non_tab_pane: None,
-            _marker: PhantomData,
         }
     }
 
@@ -335,7 +299,7 @@ where
                 egui_tiles::Tile::Pane(ribble_tab) => {
                     let ribble_id = ribble_tab.tile_id();
                     // TileId implements Copy, so this can just be dereferenced.
-                    opened_tabs.insert(&ribble_id, *tile_id);
+                    opened_tabs.insert(ribble_id, *tile_id);
                 }
                 egui_tiles::Tile::Container(_) => continue,
             }
@@ -349,15 +313,13 @@ where
             gap_width: Self::GAP_WIDTH,
             add_child_to: None,
             focus_non_tab_pane: None,
-            _marker: PhantomData,
         }
     }
 }
 
-impl<S, A> egui_tiles::Behavior<RibbleTab> for RibbleTreeBehavior<S, A>
+impl<A> egui_tiles::Behavior<RibbleTab> for RibbleTreeBehavior<A>
 where
-    S: SampleSink,
-    A: AudioBackend<S>,
+    A: AudioBackend<ArcChannelSink<f32>>,
 {
     fn pane_ui(
         &mut self,
@@ -368,14 +330,9 @@ where
     ) -> egui_tiles::UiResponse {
         let pane_id = egui::Id::new(tile_id);
 
-        // NOTE: this is super cheap, it's perfectly fine to add sensing events inside the tab
-        let resp = ui
-            .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
-            // TODO: the on_hover_cursor might get confusing with clickable-settings
-            // Not 100% sure how to deal with this yet.
-            .on_hover_cursor(egui::CursorIcon::Grab);
-        let dragged = resp.dragged();
-
+        // It's cheap to clone the controller; just an atomic increment.
+        // If it somehow becomes a bottleneck, take it in by reference.
+        let resp = pane.pane_ui(ui, tile_id, self.controller.clone());
         if let Some(focus_id) = self.focus_non_tab_pane {
             // If the user has noticed that the tab they tried to open is in focus and move their
             // mouse to it, turn off the focus.
@@ -384,9 +341,11 @@ where
             }
         }
 
-        // It's cheap to clone the controller; just an atomic increment.
-        // If it somehow becomes a bottleneck, take it in by reference.
-        pane.pane_ui(ui, tile_id, self.controller.clone())
+        if resp.dragged() {
+            egui_tiles::UiResponse::DragStarted
+        } else {
+            egui_tiles::UiResponse::None
+        }
     }
 
     fn tab_title_for_pane(&mut self, pane: &RibbleTab) -> egui::WidgetText {
@@ -419,18 +378,19 @@ where
         if let Some(tile) = tiles.get_mut(tile_id) {
             match tile {
                 egui_tiles::Tile::Pane(ribble_tab) => {
-                    let close_tab = ribble_tab.on_tab_close();
+                    let close_tab = ribble_tab.on_tab_close(self.controller.clone());
                     // If it's a close-able tab, remove it from the mapping.
                     if close_tab {
-                        let id = ribble_tab.tab_id();
+                        let id = ribble_tab.tile_id();
                         self.opened_tabs.remove(&id);
                     }
                     close_tab
                 }
                 egui_tiles::Tile::Container(_) => true,
             }
+        } else {
+            true
         }
-        true
     }
 
     fn top_bar_right_ui(

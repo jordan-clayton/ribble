@@ -1,12 +1,17 @@
+use crate::controller::AnalysisType;
 use crate::controller::console::ConsoleEngine;
 use crate::controller::downloader::DownloadEngine;
 use crate::controller::progress::ProgressEngine;
 use crate::controller::recorder::RecorderEngine;
 use crate::controller::transcriber::TranscriberEngine;
-use crate::controller::visualizer::{AnalysisType, RotationDirection, VisualizerEngine, NUM_VISUALIZER_BUCKETS};
+use crate::controller::visualizer::VisualizerEngine;
 use crate::controller::worker::WorkerEngine;
 use crate::controller::writer::WriterEngine;
-use crate::controller::{AmortizedProgress, Bus, CompletedRecordingJobs, ConsoleMessage, OfflineTranscriberFeedback, Progress, DEFAULT_PROGRESS_SLAB_CAPACITY, SMALL_UTILITY_QUEUE_SIZE, UTILITY_QUEUE_SIZE};
+use crate::controller::{
+    AmortizedProgress, Bus, CompletedRecordingJobs, ConsoleMessage, DEFAULT_PROGRESS_SLAB_CAPACITY,
+    NUM_VISUALIZER_BUCKETS, OfflineTranscriberFeedback, Progress, RotationDirection,
+    SMALL_UTILITY_QUEUE_SIZE, UTILITY_QUEUE_SIZE,
+};
 use crate::utils::errors::RibbleError;
 use crate::utils::model_bank::{RibbleModelBank, RibbleModelBankIter};
 use crate::utils::preferences::UserPreferences;
@@ -18,7 +23,7 @@ use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::transcriber::{TranscriptionSnapshot, WhisperControlPhrase};
 use ribble_whisper::utils::get_channel;
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
-use ribble_whisper::whisper::model::{ConcurrentModelBank, Model, ModelId};
+use ribble_whisper::whisper::model::{ConcurrentModelBank, ModelId};
 use ron::ser::PrettyConfig;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
@@ -88,7 +93,8 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
             user_preferences.console_message_size(),
             &bus,
         );
-        let progress_engine = ProgressEngine::new(DEFAULT_PROGRESS_SLAB_CAPACITY, progress_receiver);
+        let progress_engine =
+            ProgressEngine::new(DEFAULT_PROGRESS_SLAB_CAPACITY, progress_receiver);
         let visualizer_engine = VisualizerEngine::new(visualizer_receiver);
         let worker_engine = WorkerEngine::new(work_receiver, &bus);
 
@@ -131,7 +137,11 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
         todo!("Refactor new Model method in RibbleModelBank")
     }
 
-    pub(super) fn rename_model(&self, model_id: ModelId, new_name: String) -> Result<Option<ModelId>, RibbleError> {
+    pub(super) fn rename_model(
+        &self,
+        model_id: ModelId,
+        new_name: String,
+    ) -> Result<Option<ModelId>, RibbleError> {
         Ok(self.model_bank.rename_model(model_id, new_name)?)
     }
 
@@ -139,7 +149,7 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
         Ok(self.model_bank.model_exists_in_storage(model_id)?)
     }
 
-    pub(super) fn delete_model(&self, model_id: ModelId) -> Result<Option<Model>, RibbleError> {
+    pub(super) fn delete_model(&self, model_id: ModelId) -> Result<ModelId, RibbleError> {
         Ok(self.model_bank.remove_model(model_id)?)
     }
 
@@ -161,7 +171,8 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
         self.transcriber_engine.read_transcription_configs()
     }
     pub(super) fn write_transcription_configs(&self, new_configs: WhisperRealtimeConfigs) {
-        self.transcriber_engine.write_transcription_configs(new_configs);
+        self.transcriber_engine
+            .write_transcription_configs(new_configs);
     }
     pub(super) fn read_vad_configs(&self) -> Arc<VadConfigs> {
         self.transcriber_engine.read_vad_configs()
@@ -172,8 +183,12 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
     pub(super) fn read_offline_transcriber_feedback(&self) -> OfflineTranscriberFeedback {
         self.transcriber_engine.read_offline_transcriber_feedback()
     }
-    pub(super) fn write_offline_transcriber_feedback(&self, new_feedback: OfflineTranscriberFeedback) {
-        self.transcriber_engine.write_offline_transcriber_feedback(new_feedback);
+    pub(super) fn write_offline_transcriber_feedback(
+        &self,
+        new_feedback: OfflineTranscriberFeedback,
+    ) {
+        self.transcriber_engine
+            .write_offline_transcriber_feedback(new_feedback);
     }
     pub(super) fn realtime_running(&self) -> bool {
         self.transcriber_engine.realtime_running()
@@ -220,15 +235,14 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
     // NOTE TWICE: This does not guarantee there won't be a file issue if the recording is missing.
     pub(super) fn try_retranscribe_latest(&self) {
         if let Some(path) = self.try_get_latest_recording() {
-            self.set_audio_file(path);
+            self.set_audio_file_path(path);
             self.start_realtime_transcription();
         }
     }
 
     pub(super) fn start_offline_transcription(&self) {
         let bank = Arc::clone(&self.model_bank);
-        self.transcriber_engine
-            .start_offline_transcription(bank);
+        self.transcriber_engine.start_offline_transcription(bank);
     }
 
     // RECORDER
@@ -264,7 +278,10 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
     pub(super) fn get_num_recordings(&self) -> usize {
         self.writer_engine.get_num_completed()
     }
-    pub(super) fn try_get_completed_recordings(&self, copy_buffer: &mut Vec<(String, CompletedRecordingJobs)>) {
+    pub(super) fn try_get_completed_recordings(
+        &self,
+        copy_buffer: &mut Vec<(String, CompletedRecordingJobs)>,
+    ) {
         self.writer_engine.try_get_completed_jobs(copy_buffer)
     }
 
@@ -273,8 +290,14 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
     }
 
     // NOTE: recording_file_name is internal -- It's the left-half of the (String, CompletedRecordingJobs) tuple.
-    pub(super) fn export_recording(&self, out_path: &Path, recording_file_name: &str, output_format: RibbleRecordingExportFormat) {
-        self.writer_engine.export(out_path, recording_file_name, output_format);
+    pub(super) fn export_recording(
+        &self,
+        out_path: &Path,
+        recording_file_name: &str,
+        output_format: RibbleRecordingExportFormat,
+    ) {
+        self.writer_engine
+            .export(out_path, recording_file_name, output_format);
     }
 
     // CONSOLE
@@ -298,8 +321,12 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
     pub(super) fn set_visualizer_visibility(&self, is_visible: bool) {
         self.set_visualizer_visibility(is_visible);
     }
-    pub(super) fn try_read_visualization_buffer(&self, copy_buffer: &mut [f32; NUM_VISUALIZER_BUCKETS]) {
-        self.visualizer_engine.try_read_visualization_buffer(copy_buffer);
+    pub(super) fn try_read_visualization_buffer(
+        &self,
+        copy_buffer: &mut [f32; NUM_VISUALIZER_BUCKETS],
+    ) {
+        self.visualizer_engine
+            .try_read_visualization_buffer(copy_buffer);
     }
 
     pub(super) fn get_visualizer_analysis_type(&self) -> AnalysisType {
@@ -329,7 +356,10 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
         let configs_file = File::open(self.data_directory.as_path());
         if let Ok(file) = configs_file {
             let writer = BufWriter::new(file);
-            if ron::Options::default().to_io_writer_pretty(writer, &state, PrettyConfig::default()).is_err() {
+            if ron::Options::default()
+                .to_io_writer_pretty(writer, &state, PrettyConfig::default())
+                .is_err()
+            {
                 todo!("LOGGING");
             }
         } else {
