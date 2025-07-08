@@ -6,11 +6,8 @@ edition = "2024"
 # TODO: MAJOR refactor - bring in ribble-whisper core crate and fit the new API in
 [dependencies]
 atomic_enum = "0.3.0"
-biquad = "0.5.0"
-# TODO: this can probably go. Ron is fine.
-bson = "2.11.0"
 # TODO: determine what actual feature flag is required for catppuccin
-catppuccin-egui = { version = "5.2.0", default-features = false, features = ["egui28"] }
+catppuccin-egui = { version = "5.2.0", default-features = false, features = ["egui31"] }
 crossbeam = "0.8.4"
 directories = "6.0.0"
 eframe = { version = "0.31.1", features = ["persistence", "wgpu"] }
@@ -24,8 +21,8 @@ hound = "3.5.1"
 nvml-wrapper = "0.11.0"
 realfft = "3.3.0"
 rfd = "0.15.3"
-# TODO: get rid of external sdl2, should be in core crate -> Add static-link/bundled feature flags, or code in dependencies.
-# I don't remember, it's a macos thing.
+# Due to the way SDL works in ribble_whisper, this needs to be accessed.
+# TODO: consider publicly exporting SDL when using the SDL backend in ribble_whisper.
 sdl2 = { version = "0.37.0", features = ["static-link", "bundled"] }
 serde = { version = "1.0.204", features = ["derive"] }
 # If strum can be eliminated here, do so.
@@ -58,8 +55,9 @@ twox-hash = { version = "2.1.1", features = ["xxhash3_64"] }
 enum_dispatch = "0.3.13"
 mimalloc = "0.1.47"
 url = "2.5.4"
-egui_tiles = "0.12.0"
+egui_tiles = { version = "0.12.0", features = ["serde"] }
 opener = { version = "0.8.2", features = ["reveal"] }
+egui-theme-lerp = "0.2.0"
 
 [target.x86_64-apple-darwin.dependencies]
 metal = "0.32.0"

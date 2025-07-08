@@ -12,6 +12,7 @@ use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model::{Model, ModelId};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use crate::utils::preferences::UserPreferences;
 
 // NOTE: if deciding to swap the backend, make the sink generic, S: Sink<f32>
 // NOTE TWICE: Possibly look at making the Kernel generic and implement methods on it.
@@ -41,6 +42,14 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> RibbleController<A> {
     // As of right now, the number of available threads
     pub(crate) fn max_whisper_threads(&self) -> usize {
         self.max_whisper_threads
+    }
+
+    pub(crate) fn get_user_preferences(&self) -> Arc<UserPreferences> {
+        self.kernel.get_user_preferences()
+    }
+
+    pub(crate) fn get_system_visuals(&self) -> Option<egui::Visuals> {
+        self.kernel.get_system_visuals()
     }
 
     // MODEL MANAGEMENT
@@ -200,8 +209,8 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> RibbleController<A> {
     }
 
     // CONSOLE
-    pub(crate) fn try_get_current_message(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
-        self.kernel.try_get_current_message(copy_buffer);
+    pub(crate) fn try_get_current_messages(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
+        self.kernel.try_get_current_messages(copy_buffer);
     }
     pub(crate) fn resize_console_message_buffer(&self, new_size: usize) {
         self.kernel.resize(new_size)

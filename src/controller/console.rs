@@ -122,7 +122,7 @@ impl ConsoleEngine {
 
     // Implementing Clone for ConsoleMessage would get expensive; it's cheaper to just use
     // shared pointers
-    pub(super) fn try_get_current_message(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
+    pub(super) fn try_get_current_messages(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
         if let Some(buffer) = self.inner.queue.try_read() {
             copy_buffer.clear();
             copy_buffer.extend(buffer.iter().cloned())

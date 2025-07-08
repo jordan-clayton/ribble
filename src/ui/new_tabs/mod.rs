@@ -15,9 +15,6 @@ mod visualizer_tab;
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::new_tabs::ribble_tab::{RibbleTab, RibbleTabId};
 use crate::utils::errors::RibbleError;
-use eframe::emath::Rect;
-use egui;
-use egui_tiles;
 use enum_dispatch::enum_dispatch;
 use ribble_whisper::audio::audio_backend::AudioBackend;
 use ribble_whisper::audio::recorder::SampleSink;
@@ -34,8 +31,8 @@ trait TabView {
     /// * ui: egui::Ui, for drawing,
     /// * tile_id: egui_tiles::TileId, this Pane's id
     /// * controller: RibbleController, for accessing internal data.
-    /// TODO: Add this to the method signature.
-    /// * add_child_to: &mut Option<(egui_tiles::TileId, RibbleTabId)>, for tabs that need to open up/focus another tab in the tree.
+    /// TODO: add an argument so that a pane can request to be closed.
+    /// OR: use an enumeration: PaneResponse::UiResponse(..), PaneResponse::Close,
     fn pane_ui<S: SampleSink, A: AudioBackend<S>>(
         &mut self,
         ui: &mut egui::Ui,
@@ -135,7 +132,7 @@ where
             // Otherwise, it's a Pane and needs to be contained in a (parent) tab.
             let insert_at_tile = insert_at_tile.unwrap();
             match insert_at_tile {
-                egui_tiles::Tile::Pane(pane) => {
+                egui_tiles::Tile::Pane(_) => {
                     // Try and get the Pane's parent
                     if let Some(parent) = tiles.parent_of(tile_id) {
                         if let Some(egui_tiles::Tile::Container(container)) = tiles.get_mut(parent)
@@ -369,9 +366,6 @@ where
         tile_id: egui_tiles::TileId,
         pane: &mut RibbleTab,
     ) -> egui_tiles::UiResponse {
-        // TODO: also maybe make "draggable" a trait method to determine what kind of hover cursor
-        // NOTE: this will also receive hover events
-        // POSSIBLY, instead get the response from the UI.
         let pane_id = egui::Id::new(tile_id);
 
         // NOTE: this is super cheap, it's perfectly fine to add sensing events inside the tab
@@ -392,14 +386,7 @@ where
 
         // It's cheap to clone the controller; just an atomic increment.
         // If it somehow becomes a bottleneck, take it in by reference.
-        // TODO: also, make this a void method and let the sensing exist in this parent method.
-        pane.pane_ui(ui, tile_id, self.controller.clone());
-
-        if dragged {
-            egui_tiles::UiResponse::DragStarted
-        } else {
-            egui_tiles::UiResponse::None
-        }
+        pane.pane_ui(ui, tile_id, self.controller.clone())
     }
 
     fn tab_title_for_pane(&mut self, pane: &RibbleTab) -> egui::WidgetText {
@@ -481,7 +468,7 @@ where
         painter: &egui::Painter,
         style: &egui::Style,
         tile_id: egui_tiles::TileId,
-        rect: Rect,
+        rect: eframe::emath::Rect,
     ) {
         if let Some(focused_pane) = self.focus_non_tab_pane {
             if focused_pane == tile_id {

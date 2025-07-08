@@ -30,11 +30,40 @@ pub(crate) enum RibbleAppTheme {
 }
 
 impl RibbleAppTheme {
-    // TODO: this should not be an enum method; this should be an app method.
-    // TODO: look into egui-theme-lerp crate, check out catppuccin source code for methods to extract the visuals
-    // This should probably return a ThemeAnimator (if lerping) + New theme -> or just handle in the gui.
-    pub(crate) fn set_theme(ctx: &egui::Context, new_theme: RibbleAppTheme) {
-        todo!("Theme lerping logic.")
+    // NOTE: if the user prefs is set to System, the information needs to be queried from the 
+    // viewport.
+    // Rather than taking in an egui::context, it's easiest to just get the input state in the paint 
+    // loop.
+    pub(crate) fn visuals(&self) -> Option<egui::Visuals> {
+        match self {
+            RibbleAppTheme::System => { None }
+            RibbleAppTheme::Light => { Some(egui::Visuals::light()) }
+            RibbleAppTheme::Dark => { Some(egui::Visuals::dark()) }
+            // NOTE: atm, catppuccin::Theme::visuals(...) isn't public, so this has to be done
+            // through one of the public functions.
+            // Since set_style_theme() only extracts the visuals anyway, it's fine to just use
+            // egui's default visuals (dark mode) -- these should all be consistent with which style they modify.
+            RibbleAppTheme::Latte => {
+                let mut style = egui::Style::default();
+                catppuccin_egui::set_style_theme(&mut style, catppuccin_egui::LATTE);
+                Some(style.visuals)
+            }
+            RibbleAppTheme::Frappe => {
+                let mut style = egui::Style::default();
+                catppuccin_egui::set_style_theme(&mut style, catppuccin_egui::FRAPPE);
+                Some(style.visuals)
+            }
+            RibbleAppTheme::Macchiato => {
+                let mut style = egui::Style::default();
+                catppuccin_egui::set_style_theme(&mut style, catppuccin_egui::MACCHIATO);
+                Some(style.visuals)
+            }
+            RibbleAppTheme::Mocha => {
+                let mut style = egui::Style::default();
+                catppuccin_egui::set_style_theme(&mut style, catppuccin_egui::MACCHIATO);
+                Some(style.visuals)
+            }
+        }
     }
 }
 

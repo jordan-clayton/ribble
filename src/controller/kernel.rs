@@ -114,6 +114,13 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
             model_bank,
         })
     }
+    // USER PREFERENCES
+    pub(super) fn get_user_preferences(&self) -> Arc<UserPreferences> {
+        self.user_preferences.load_full()
+    }
+    pub(super) fn get_system_visuals(&self) -> Option<egui::Visuals> {
+        self.user_preferences.load().system_theme().visuals()
+    }
 
     // TODO: perhaps these methods should be trait methods if the controller needs to be testable.
     // MODEL MANAGEMENT
@@ -271,8 +278,8 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
     }
 
     // CONSOLE
-    pub(super) fn try_get_current_message(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
-        self.console_engine.try_get_current_message(copy_buffer);
+    pub(super) fn try_get_current_messages(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
+        self.console_engine.try_get_current_messages(copy_buffer);
     }
     pub(super) fn resize_console_message_buffer(&self, new_size: usize) {
         self.console_engine.resize(new_size)
