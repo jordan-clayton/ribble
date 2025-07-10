@@ -3,26 +3,28 @@ use strum::{AsRefStr, EnumIter, EnumString, IntoStaticStr};
 // NOTE: these need to be brought into scope so that enum_dispatch can run its macros
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::new_tabs::tabs::*;
-use ribble_whisper::audio::audio_backend::AudioBackend;
-use ribble_whisper::audio::recorder::ArcChannelSink;
+
+// TODO: rename the trait methods, and the trait.
+// This should be "TileView"
 
 #[enum_dispatch(RibbleTab)]
 pub(in crate::ui) trait TabView {
     fn tile_id(&self) -> RibbleTabId;
-    fn tab_title(&mut self) -> egui::WidgetText;
+
+    fn tab_title(&self) -> egui::WidgetText;
     /// # Arguments:
     /// * ui: egui::Ui, for drawing,
     /// * tile_id: egui_tiles::TileId, this Pane's id
     /// * controller: RibbleController, for accessing internal data.
     /// TODO: add an argument so that a pane can request to be closed.
     /// OR: use an enumeration: PaneResponse::UiResponse(..), PaneResponse::Close,
-    fn pane_ui<A: AudioBackend<ArcChannelSink<f32>>>(
+    fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
         tile_id: egui_tiles::TileId,
         // If there's significant atomic overhead, swap to a reference.
         // It shouldn't be an issue though.
-        controller: RibbleController<A>,
+        controller: RibbleController,
     ) -> egui::Response;
 
     /// Should this tab be closable?
@@ -31,10 +33,7 @@ pub(in crate::ui) trait TabView {
     /// Fires whenever a tab is closed
     /// * return true if the tab should still be closed.
     /// * return false if the tab should remain open
-    fn on_tab_close<A: AudioBackend<ArcChannelSink<f32>>>(
-        &mut self,
-        _controller: RibbleController<A>,
-    ) -> bool {
+    fn on_tab_close(&mut self, _controller: RibbleController) -> bool {
         self.is_tab_closable()
     }
 }

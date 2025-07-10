@@ -1,12 +1,12 @@
 use crate::controller::{Bus, ConsoleMessage};
-use crate::controller::{RibbleMessage, MIN_NUM_CONSOLE_MESSAGES};
-use crate::controller::{WorkRequest, MAX_NUM_CONSOLE_MESSAGES};
+use crate::controller::{MAX_NUM_CONSOLE_MESSAGES, WorkRequest};
+use crate::controller::{MIN_NUM_CONSOLE_MESSAGES, RibbleMessage};
 use crate::utils::errors::RibbleError;
 use parking_lot::RwLock;
 use ribble_whisper::utils::{Receiver, Sender};
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread::JoinHandle;
 
 struct ConsoleEngineState {
@@ -50,10 +50,11 @@ impl ConsoleEngineState {
         );
     }
 
-
     fn resize(&self, new_size: usize) {
         // Clamp the size between min/max
-        let new_size = new_size.max(MIN_NUM_CONSOLE_MESSAGES).min(MAX_NUM_CONSOLE_MESSAGES);
+        let new_size = new_size
+            .max(MIN_NUM_CONSOLE_MESSAGES)
+            .min(MAX_NUM_CONSOLE_MESSAGES);
         // Determine whether to shrink or grow.
         let capacity = self.queue_capacity.load(Ordering::Acquire);
         if new_size > capacity {
@@ -100,7 +101,11 @@ pub(super) struct ConsoleEngine {
 
 // Provide access to inner
 impl ConsoleEngine {
-    pub(super) fn new(incoming_messages: Receiver<ConsoleMessage>, capacity: usize, bus: &Bus) -> Self {
+    pub(super) fn new(
+        incoming_messages: Receiver<ConsoleMessage>,
+        capacity: usize,
+        bus: &Bus,
+    ) -> Self {
         let inner = Arc::new(ConsoleEngineState::new(incoming_messages, capacity));
         let thread_inner = Arc::clone(&inner);
 
@@ -132,8 +137,9 @@ impl ConsoleEngine {
     // Since resizing can block, this dispatches a very short-lived thread to perform the resize in
     // the background.
     pub(super) fn resize(&self, new_size: usize) {
+        let thread_inner = Arc::clone(&self.inner);
         let work = std::thread::spawn(move || {
-            self.inner.resize(new_size);
+            thread_inner.resize(new_size);
             Ok(RibbleMessage::BackgroundWork(Ok(())))
         });
 
@@ -147,10 +153,10 @@ impl ConsoleEngine {
 impl Drop for ConsoleEngine {
     fn drop(&mut self) {
         if let Some(handle) = self.work_thread.take() {
-            handle.join()
+            handle
+                .join()
                 .expect("The Console thread should never panic.")
                 .expect("I do not know what sort of error conditions would be relevant here")
         }
     }
 }
-

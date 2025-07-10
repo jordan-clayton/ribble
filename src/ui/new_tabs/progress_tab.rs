@@ -2,10 +2,8 @@ use crate::controller::Progress;
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::new_tabs::TabView;
 use crate::ui::new_tabs::ribble_tab::RibbleTabId;
-use ribble_whisper::audio::audio_backend::AudioBackend;
-use ribble_whisper::audio::recorder::ArcChannelSink;
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ProgressTab {
     #[serde(default)]
     #[serde(skip)]
@@ -25,19 +23,16 @@ impl TabView for ProgressTab {
         RibbleTabId::Progress
     }
 
-    fn tab_title(&mut self) -> egui::WidgetText {
+    fn tab_title(&self) -> egui::WidgetText {
         "Progress".into()
     }
 
-    fn pane_ui<A>(
+    fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
         tile_id: egui_tiles::TileId,
-        controller: RibbleController<A>,
-    ) -> egui::Response
-    where
-        A: AudioBackend<ArcChannelSink<f32>>,
-    {
+        controller: RibbleController,
+    ) -> egui::Response {
         // Get the current list of jobs.
         controller.try_get_current_jobs(&mut self.current_jobs);
         let spacing = ui.spacing().interact_size.y;
@@ -93,5 +88,3 @@ impl TabView for ProgressTab {
         true
     }
 }
-
-

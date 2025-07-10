@@ -3,13 +3,11 @@ use crate::controller::{
     AmortizedProgress, AnalysisType, CompletedRecordingJobs, ConsoleMessage,
     NUM_VISUALIZER_BUCKETS, OfflineTranscriberFeedback, Progress, RotationDirection,
 };
+use crate::utils::audio_backend_proxy::AudioBackendProxy;
 use crate::utils::errors::RibbleError;
-use crate::utils::model_bank::RibbleModelBankIter;
 use crate::utils::preferences::UserPreferences;
 use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExportFormat};
 use crate::utils::vad_configs::VadConfigs;
-use ribble_whisper::audio::audio_backend::AudioBackend;
-use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::transcriber::{TranscriptionSnapshot, WhisperControlPhrase};
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model::ModelId;
@@ -20,24 +18,27 @@ use std::sync::Arc;
 // NOTE TWICE: Possibly look at making the Kernel generic and implement methods on it.
 // TODO: Heavily consider removing the generics here until it's absolutely necessary.
 // It's a bit of a pain and the app is currently non-generic--it's much easier to deal with concrete types.
-pub(crate) struct RibbleController<A: AudioBackend<ArcChannelSink<f32>>> {
-    kernel: Arc<Kernel<A>>,
+pub(crate) struct RibbleController {
+    kernel: Arc<Kernel>,
     max_whisper_threads: usize,
 }
 
-impl<A: AudioBackend<ArcChannelSink<f32>>> Clone for RibbleController<A> {
+impl Clone for RibbleController {
     fn clone(&self) -> Self {
         Self {
             kernel: Arc::clone(&self.kernel),
-            max_whisper_threads: *self.max_whisper_threads,
+            max_whisper_threads: self.max_whisper_threads,
         }
     }
 }
 
-impl<A: AudioBackend<ArcChannelSink<f32>>> RibbleController<A> {
+impl RibbleController {
     const RECOMMENDED_MAX_WHISPER_THREADS: usize = 8;
     // NOTE: The AudioBackendProxy will need to be constructed higher up in the app and passed in.
-    pub(crate) fn new(data_directory: &Path, audio_backend: A) -> Result<Self, RibbleError> {
+    pub(crate) fn new(
+        data_directory: &Path,
+        audio_backend: AudioBackendProxy,
+    ) -> Result<Self, RibbleError> {
         let kernel = Arc::new(Kernel::new(data_directory, audio_backend)?);
         let available_threads = std::thread::available_parallelism()?.get();
         let max_whisper_threads = available_threads.min(Self::RECOMMENDED_MAX_WHISPER_THREADS);
@@ -85,7 +86,7 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> RibbleController<A> {
         Ok(self.kernel.model_exists_in_storage(model_id)?)
     }
 
-    pub(crate) fn delete_model(&self, model_id: ModelId) -> Result<ModelId, RibbleError> {
+    pub(crate) fn delete_model(&self, model_id: ModelId) -> Result<Option<ModelId>, RibbleError> {
         self.kernel.delete_model(model_id)
     }
 
@@ -95,6 +96,7 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> RibbleController<A> {
         Ok(self.kernel.refresh_model_bank()?)
     }
 
+    // TODO: migrate this to a UI passthrough with the for_each_capture_mut method
     pub(crate) fn get_model_list(&self) -> RibbleModelBankIter {
         self.kernel.get_model_list()
     }
@@ -270,4 +272,3 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> RibbleController<A> {
         self.kernel.rotate_visualizer_type(direction);
     }
 }
-

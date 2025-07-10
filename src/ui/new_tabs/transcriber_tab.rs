@@ -4,12 +4,10 @@ use crate::ui::new_tabs::TabView;
 use crate::ui::new_tabs::ribble_tab::RibbleTabId;
 use crate::ui::widgets::toggle_switch::toggle;
 use crate::utils::vad_configs::{VadFrameSize, VadStrictness, VadType};
-use ribble_whisper::audio::audio_backend::AudioBackend;
-use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::whisper::configs::Language;
 use strum::IntoEnumIterator;
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(in crate::ui) struct TranscriberTab {
     #[serde(default = "set_realtime")]
     pub realtime: bool,
@@ -50,7 +48,7 @@ impl TabView for TranscriberTab {
         RibbleTabId::Transcriber
     }
 
-    fn tab_title(&mut self) -> egui::WidgetText {
+    fn tab_title(&self) -> egui::WidgetText {
         if self.realtime {
             "Real-time Transcription".into()
         } else {
@@ -58,15 +56,12 @@ impl TabView for TranscriberTab {
         }
     }
 
-    fn pane_ui<A>(
+    fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
         _tile_id: egui_tiles::TileId,
-        controller: RibbleController<A>,
-    ) -> egui::Response
-    where
-        A: AudioBackend<ArcChannelSink<f32>>,
-    {
+        controller: RibbleController,
+    ) -> egui::Response {
         let transcription_running = controller.transcriber_running();
         let audio_worker_running = controller.recorder_running() || transcription_running;
 
@@ -172,7 +167,7 @@ impl TabView for TranscriberTab {
                         egui::Grid::new("audio_file").num_columns(2).show(ui, |ui| {
                             ui.label("Current audio file:");
                             ui.horizontal(|ui| {
-                                ui.label(current_file);
+                                ui.label(format!("{:#?}", current_file));
                                 if ui.button("Clear").clicked() {
                                     controller.clear_audio_file_path();
                                 }
@@ -206,7 +201,7 @@ impl TabView for TranscriberTab {
                         }
                         ui.add_space(button_spacing);
                         if ui.add_enabled(!transcription_running, egui::Button::new("Load recording")).clicked() {
-                            *self.recording_modal = true;
+                            self.recording_modal = true;
                             todo!("Define recording modal");
                         }
                     });
@@ -271,10 +266,10 @@ impl TabView for TranscriberTab {
                                         ui.horizontal_wrapped(|ui| {
                                             // TODO: combobox of selectable values
                                             if ui.button("Open Model").clicked() {
-                                                *self.copy_modal = true;
+                                                self.copy_modal = true;
                                             }
                                             if ui.button("Download Model").clicked() {
-                                                *self.download_modal = true;
+                                                self.download_modal = true;
                                             }
 
                                             if ui.button("Open Models Folder").clicked() {
@@ -510,7 +505,7 @@ impl TabView for TranscriberTab {
             });
 
             if modal.should_close() {
-                *self.recording_modal = false;
+                self.recording_modal = false;
             }
         }
 
@@ -520,7 +515,7 @@ impl TabView for TranscriberTab {
             });
 
             if modal.should_close() {
-                *self.download_modal = false;
+                self.download_modal = false;
             }
         }
 
@@ -529,7 +524,7 @@ impl TabView for TranscriberTab {
                 .show(ui.ctx(), |ui| todo!("Copy Modal."));
 
             if modal.should_close() {
-                *self.copy_modal = false;
+                self.copy_modal = false;
             }
         }
         // Handle dragging the UI.
@@ -544,4 +539,3 @@ impl TabView for TranscriberTab {
         true
     }
 }
-

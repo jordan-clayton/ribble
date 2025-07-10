@@ -30,15 +30,15 @@ pub(crate) enum RibbleAppTheme {
 }
 
 impl RibbleAppTheme {
-    // NOTE: if the user prefs is set to System, the information needs to be queried from the 
+    // NOTE: if the user prefs is set to System, the information needs to be queried from the
     // viewport.
-    // Rather than taking in an egui::context, it's easiest to just get the input state in the paint 
+    // Rather than taking in an egui::context, it's easiest to just get the input state in the paint
     // loop.
     pub(crate) fn visuals(&self) -> Option<egui::Visuals> {
         match self {
-            RibbleAppTheme::System => { None }
-            RibbleAppTheme::Light => { Some(egui::Visuals::light()) }
-            RibbleAppTheme::Dark => { Some(egui::Visuals::dark()) }
+            RibbleAppTheme::System => None,
+            RibbleAppTheme::Light => Some(egui::Visuals::light()),
+            RibbleAppTheme::Dark => Some(egui::Visuals::dark()),
             // NOTE: atm, catppuccin::Theme::visuals(...) isn't public, so this has to be done
             // through one of the public functions.
             // Since set_style_theme() only extracts the visuals anyway, it's fine to just use
@@ -67,7 +67,7 @@ impl RibbleAppTheme {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct UserPreferences {
     console_message_size: usize,
     system_theme: RibbleAppTheme,

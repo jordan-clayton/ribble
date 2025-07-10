@@ -1,11 +1,10 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::new_tabs::TabView;
 use crate::ui::new_tabs::ribble_tab::RibbleTabId;
-use ribble_whisper::audio::audio_backend::AudioBackend;
-use ribble_whisper::audio::recorder::ArcChannelSink;
 
 // NOTE: I'm not sure that any state is actually going to be stored in this tab.
 // It might just be loaded from the controller.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct UserPreferencesTab {}
 
 impl TabView for UserPreferencesTab {
@@ -13,19 +12,16 @@ impl TabView for UserPreferencesTab {
         RibbleTabId::UserPreferences
     }
 
-    fn tab_title(&mut self) -> egui::WidgetText {
-        todo!();
+    fn tab_title(&self) -> egui::WidgetText {
+        "Settings".into()
     }
 
-    fn pane_ui<A>(
+    fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
         tile_id: egui_tiles::TileId,
-        controller: RibbleController<A>,
-    ) -> egui::Response
-    where
-        A: AudioBackend<ArcChannelSink<f32>>,
-    {
+        controller: RibbleController,
+    ) -> egui::Response {
         let prefs = controller.get_user_preferences();
         // Simple drawing:
         // Theme switcher -> can just be a drop-down
@@ -46,4 +42,3 @@ impl Default for UserPreferencesTab {
         Self {}
     }
 }
-

@@ -13,13 +13,13 @@ use crate::controller::{
     SMALL_UTILITY_QUEUE_SIZE, UTILITY_QUEUE_SIZE,
 };
 use crate::utils::errors::RibbleError;
-use crate::utils::model_bank::{RibbleModelBank, RibbleModelBankIter};
+use crate::utils::model_bank::RibbleModelBank;
 use crate::utils::preferences::UserPreferences;
 use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExportFormat};
 use crate::utils::vad_configs::VadConfigs;
+
+use crate::utils::audio_backend_proxy::AudioBackendProxy;
 use arc_swap::ArcSwap;
-use ribble_whisper::audio::audio_backend::AudioBackend;
-use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::transcriber::{TranscriptionSnapshot, WhisperControlPhrase};
 use ribble_whisper::utils::get_channel;
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
@@ -30,13 +30,13 @@ use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-// TODO: NOTE TO SELF, store this in the controller instead of the old spaghetti.
-// The spaghetti is now portioned onto different plates, to make things easier to manage.
-pub(super) struct Kernel<A: AudioBackend<ArcChannelSink<f32>>> {
+// NOTE: At the moment, it's a lot easier to just work with the concrete proxy.
+// Until generics are absolutely required for testing, avoid using them here.
+pub(super) struct Kernel {
     data_directory: PathBuf,
     user_preferences: ArcSwap<UserPreferences>,
     // NOTE: pass this -in- to the RecorderEngine/TranscriberEngine as arguments
-    audio_backend: A,
+    audio_backend: AudioBackendProxy,
     transcriber_engine: TranscriberEngine,
     recorder_engine: RecorderEngine,
     console_engine: ConsoleEngine,
@@ -50,14 +50,17 @@ pub(super) struct Kernel<A: AudioBackend<ArcChannelSink<f32>>> {
     model_bank: Arc<RibbleModelBank>,
 }
 
-impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
+impl Kernel {
     const CONFIGS_FILE: &'static str = "ribble_configs.ron";
     const MODEL_BANK_DIR_SLUG: &'static str = "models";
     const TEMP_AUDIO_DIR_SLUG: &'static str = "recordings";
 
     // NOTE: this needs to take in the audio capture request sender from the app (main thread)
     // because of SDL invariants.
-    pub(super) fn new(data_directory: &Path, audio_backend: A) -> Result<Self, RibbleError> {
+    pub(super) fn new(
+        data_directory: &Path,
+        audio_backend: AudioBackendProxy,
+    ) -> Result<Self, RibbleError> {
         let KernelState {
             transcriber_configs,
             offline_transcriber_feedback,
@@ -103,6 +106,8 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
         let download_engine = DownloadEngine::new(download_receiver, &bus);
 
         let model_directory = data_directory.join(Self::MODEL_BANK_DIR_SLUG);
+        // TODO: this needs to be brought into the module here.
+        // TODO TWICE: this also needs the bus for worker/downloader jobs.
         let model_bank = Arc::new(RibbleModelBank::new(model_directory.as_path())?);
 
         Ok(Self {
@@ -149,7 +154,7 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
         Ok(self.model_bank.model_exists_in_storage(model_id)?)
     }
 
-    pub(super) fn delete_model(&self, model_id: ModelId) -> Result<ModelId, RibbleError> {
+    pub(super) fn delete_model(&self, model_id: ModelId) -> Result<Option<ModelId>, RibbleError> {
         Ok(self.model_bank.remove_model(model_id)?)
     }
 
@@ -159,9 +164,6 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
         Ok(self.model_bank.refresh_model_bank()?)
     }
 
-    pub(super) fn get_model_list(&self) -> RibbleModelBankIter {
-        self.model_bank.iter()
-    }
     pub(super) fn get_model_directory(&self) -> &Path {
         self.model_bank.model_directory()
     }
@@ -197,7 +199,7 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
         self.transcriber_engine.offline_running()
     }
     pub(super) fn transcriber_running(&self) -> bool {
-        self.transcriber_running()
+        self.transcriber_engine.transcriber_running()
     }
 
     pub(super) fn stop_realtime(&self) {
@@ -217,9 +219,11 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
         self.transcriber_engine.read_current_audio_file_path()
     }
 
+    // TODO: fix the lifetime issue here -> std::thread needs static bounds
+    // It might be easiest to just send the AudioBackend as an Arc pointer
+    // Or, implement clone on the backend; it's very cheap to do.
     pub(super) fn start_realtime_transcription(&self) {
         let bank = Arc::clone(&self.model_bank);
-
         self.transcriber_engine
             .start_realtime_transcription(&self.audio_backend, bank);
     }
@@ -388,7 +392,7 @@ impl<A: AudioBackend<ArcChannelSink<f32>>> Kernel<A> {
     }
 }
 
-impl<A: AudioBackend<ArcChannelSink<f32>>> Drop for Kernel<A> {
+impl Drop for Kernel {
     fn drop(&mut self) {
         self.serialize_user_data();
     }

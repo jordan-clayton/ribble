@@ -1,13 +1,19 @@
 use crate::utils::errors::RibbleError;
 use ribble_whisper::audio::pcm::PcmS16Convertible;
-use ribble_whisper::transcriber::vad::{Earshot, Resettable, Silero, SileroBuilder, VAD, WebRtc, WebRtcBuilder, WebRtcFilterAggressiveness, WebRtcFrameLengthMillis, WebRtcSampleRate, WEBRTC_VOICE_PROBABILITY_THRESHOLD, SILERO_VOICE_PROBABILITY_THRESHOLD, OFFLINE_VOICE_PROBABILITY_THRESHOLD, DEFAULT_SILERO_CHUNK_SIZE};
+use ribble_whisper::audio::recorder::RecorderSample;
 use ribble_whisper::transcriber::WHISPER_SAMPLE_RATE;
+use ribble_whisper::transcriber::vad::{
+    DEFAULT_SILERO_CHUNK_SIZE, Earshot, OFFLINE_VOICE_PROBABILITY_THRESHOLD, Resettable,
+    SILERO_VOICE_PROBABILITY_THRESHOLD, Silero, SileroBuilder, VAD,
+    WEBRTC_VOICE_PROBABILITY_THRESHOLD, WebRtc, WebRtcBuilder, WebRtcFilterAggressiveness,
+    WebRtcFrameLengthMillis, WebRtcSampleRate,
+};
 use strum::{AsRefStr, Display, EnumIter, IntoStaticStr};
 
 // NOTE: this should probably be kept/modified separately for Offline/Real-time configurations.
 // Use a toggle in the UI to swap between Real-time VAD and Offline-Vad
 // Offline can turn this off.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct VadConfigs {
     vad_type: VadType,
     frame_size: VadFrameSize,
@@ -158,7 +164,18 @@ impl Default for VadConfigs {
     }
 }
 
-#[derive(Clone, Copy, EnumIter, IntoStaticStr, AsRefStr, Display)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    EnumIter,
+    IntoStaticStr,
+    AsRefStr,
+    Display,
+)]
 pub(crate) enum VadType {
     Auto,
     Silero,
@@ -170,14 +187,18 @@ impl VadType {
     pub(crate) fn tooltip(&self) -> &'static str {
         match self {
             VadType::Auto => "Use the default algorithm.",
-            VadType::Silero => "Most accurate, higher performance overhead.\nGenerally suitable for real-time on most hardware.",
+            VadType::Silero => {
+                "Most accurate, higher performance overhead.\nGenerally suitable for real-time on most hardware."
+            }
             VadType::WebRtc => "Good accuracy, low performance overhead.\n Good for all purposes.",
             VadType::Earshot => "Lower accuracy, lowest overhead.\n Use as a fallback.",
         }
     }
 }
 
-#[derive(Clone, Copy, EnumIter, IntoStaticStr, AsRefStr, Display)]
+#[derive(
+    Clone, Copy, serde::Serialize, serde::Deserialize, EnumIter, IntoStaticStr, AsRefStr, Display,
+)]
 pub(crate) enum VadFrameSize {
     Auto,
     Small,
@@ -185,7 +206,9 @@ pub(crate) enum VadFrameSize {
     Large,
 }
 
-#[derive(Clone, Copy, EnumIter, IntoStaticStr, AsRefStr, Display)]
+#[derive(
+    Clone, Copy, serde::Serialize, serde::Deserialize, EnumIter, IntoStaticStr, AsRefStr, Display,
+)]
 pub(crate) enum VadStrictness {
     Auto,
     Flexible,
@@ -199,7 +222,7 @@ pub(crate) enum RibbleVAD {
     Earshot(Earshot),
 }
 
-impl<T: PcmS16Convertible> VAD<T> for RibbleVAD {
+impl<T: PcmS16Convertible + RecorderSample> VAD<T> for RibbleVAD {
     fn voice_detected(&mut self, samples: &[T]) -> bool {
         match self {
             Self::Silero(vad) => vad.voice_detected(samples),

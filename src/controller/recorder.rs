@@ -1,8 +1,8 @@
-use crate::controller::visualizer::VisualizerSample;
-use crate::controller::writer::WriteRequest;
 use crate::controller::Progress;
 use crate::controller::RibbleMessage;
 use crate::controller::WorkRequest;
+use crate::controller::visualizer::VisualizerSample;
+use crate::controller::writer::WriteRequest;
 use crate::controller::{Bus, UTILITY_QUEUE_SIZE};
 use crate::controller::{ConsoleMessage, ProgressMessage};
 use crate::utils::errors::RibbleError;
@@ -12,9 +12,9 @@ use crossbeam::channel::TrySendError;
 use ribble_whisper::audio::audio_backend::AudioBackend;
 use ribble_whisper::audio::microphone::MicCapture;
 use ribble_whisper::audio::recorder::ArcChannelSink;
-use ribble_whisper::utils::{get_channel, Sender};
-use std::sync::atomic::{AtomicBool, Ordering};
+use ribble_whisper::utils::{Sender, get_channel};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 struct RecorderEngineState {
     recorder_running: Arc<AtomicBool>,
@@ -44,10 +44,10 @@ impl RecorderEngineState {
         }
     }
 
-    fn run_recorder_loop<A: AudioBackend<ArcChannelSink<f32>>>(
-        &self,
-        audio_backend: A,
-    ) -> Result<(), RibbleError> {
+    fn run_recorder_loop<A>(&self, audio_backend: &A) -> Result<(), RibbleError>
+    where
+        A: AudioBackend<ArcChannelSink<f32>> + Send + Sync,
+    {
         // TODO: set up the progress engine message queue
         let setup_progress = Progress::new_indeterminate("Setting up recording.");
         let (id_sender, id_receiver) = get_channel(1);
@@ -75,7 +75,7 @@ impl RecorderEngineState {
 
         let (audio_sender, audio_receiver) = get_channel::<Arc<[f32]>>(UTILITY_QUEUE_SIZE);
         let sink = ArcChannelSink::new(audio_sender);
-        let spec = self.recorder_configs.load_full().into();
+        let spec = (*self.recorder_configs.load_full()).into();
         let mic = audio_backend.open_capture(spec, sink).or_else(|e| {
             self.cleanup_remove_progress_job(setup_id);
             Err(e)
@@ -145,7 +145,12 @@ impl RecorderEngine {
         }
     }
 
-    pub(super) fn start_recording<A: AudioBackend<ArcChannelSink<f32>>>(&self, audio_backend: &A) {
+    // TODO: figure out the cheapest way to solve this issue;
+    // Either by taking an Arc<A>, or by consuming A (and imposing Clone restrictions)
+    pub(super) fn start_recording<A>(&self, audio_backend: &'static A)
+    where
+        A: AudioBackend<ArcChannelSink<f32>> + Send + Sync + 'static,
+    {
         // Set the state flag so that the UI can update.
         self.inner.recorder_running.store(true, Ordering::Release);
 

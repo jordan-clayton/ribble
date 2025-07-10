@@ -15,7 +15,10 @@ impl ProgressEngineState {
     fn new(initial_capacity: usize, message_receiver: Receiver<ProgressMessage>) -> Self {
         let slab = Slab::with_capacity(initial_capacity);
         let current_jobs = RwLock::new(slab);
-        Self { current_jobs, incoming_progress_messages: message_receiver }
+        Self {
+            current_jobs,
+            incoming_progress_messages: message_receiver,
+        }
     }
 
     fn add_progress_job(&self, job: Progress) -> usize {
@@ -56,13 +59,19 @@ impl ProgressEngine {
     // Require capacity at construction time.
     // This will dynamically resize according to its needs
     // It's fine to send 0 as an initial capacity; it'll just suffer some initial allocation overhead.
-    pub(super) fn new(initial_capacity: usize, message_receiver: Receiver<ProgressMessage>) -> Self {
+    pub(super) fn new(
+        initial_capacity: usize,
+        message_receiver: Receiver<ProgressMessage>,
+    ) -> Self {
         let inner = Arc::new(ProgressEngineState::new(initial_capacity, message_receiver));
         let thread_inner = Arc::clone(&inner);
         let worker = std::thread::spawn(move || {
             while let Ok(message) = thread_inner.incoming_progress_messages.recv() {
                 match message {
-                    ProgressMessage::Request { job, id_return_sender } => {
+                    ProgressMessage::Request {
+                        job,
+                        id_return_sender,
+                    } => {
                         let id = thread_inner.add_progress_job(job);
                         if id_return_sender.send(id).is_err() {
                             todo!("LOGGING");
@@ -95,7 +104,7 @@ impl ProgressEngine {
     pub(super) fn try_get_current_jobs(&self, copy_buffer: &mut Vec<Progress>) {
         if let Some(jobs) = self.inner.current_jobs.try_read() {
             copy_buffer.clear();
-            copy_buffer.extend(jobs.iter().cloned())
+            copy_buffer.extend(jobs.iter().map(|(_, progress)| progress.clone()))
         }
     }
 
@@ -107,7 +116,11 @@ impl ProgressEngine {
                 let mut current = 0usize;
                 let mut total_size = 0usize;
                 for (_, job) in jobs.iter() {
-                    if let Progress::Determinate { job_name: _, progress } = job {
+                    if let Progress::Determinate {
+                        job_name: _,
+                        progress,
+                    } = job
+                    {
                         current += progress.current_position() as usize;
                         total_size += progress.total_size() as usize;
                     } else {
@@ -115,7 +128,10 @@ impl ProgressEngine {
                     }
                 }
 
-                Some(AmortizedProgress::Determinate { current, total_size })
+                Some(AmortizedProgress::Determinate {
+                    current,
+                    total_size,
+                })
             }
         } else {
             None
@@ -134,3 +150,4 @@ impl Drop for ProgressEngine {
         }
     }
 }
+

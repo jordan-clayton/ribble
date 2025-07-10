@@ -2,11 +2,9 @@ use crate::controller::ConsoleMessage;
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::new_tabs::TabView;
 use crate::ui::new_tabs::ribble_tab::RibbleTabId;
-use ribble_whisper::audio::audio_backend::AudioBackend;
-use ribble_whisper::audio::recorder::ArcChannelSink;
 use std::sync::Arc;
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ConsoleTab {
     // NOTE: These are shared ConsoleMessages (held in the ConsoleEngine).
     // It's cheaper to clone an Arc, versus String clones.
@@ -28,24 +26,22 @@ impl TabView for ConsoleTab {
         RibbleTabId::Console
     }
 
-    fn tab_title(&mut self) -> egui::WidgetText {
+    fn tab_title(&self) -> egui::WidgetText {
         "Console".into()
     }
 
-    fn pane_ui<A>(
+    fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
         _tile_id: egui_tiles::TileId,
-        controller: RibbleController<A>,
-    ) -> egui::Response
-    where
-        A: AudioBackend<ArcChannelSink<f32>>,
-    {
+        controller: RibbleController,
+    ) -> egui::Response {
         // Try to read the current messages (non-blocking).
         controller.try_get_current_messages(&mut self.message_buffer);
 
         // Set the background color
-        let visuals = ui.visuals();
+        let visuals = ui.visuals().clone();
+
         let bg_col = visuals.extreme_bg_color;
         egui::Frame::new().fill(bg_col).show(ui, |ui| {
             egui::ScrollArea::both()
@@ -55,7 +51,7 @@ impl TabView for ConsoleTab {
                         egui::Layout::top_down(egui::Align::LEFT).with_cross_justify(true),
                         |ui| {
                             for msg in self.message_buffer.iter() {
-                                ui.label(msg.to_console_text(visuals));
+                                ui.label(msg.to_console_text(&visuals));
                             }
                         },
                     );

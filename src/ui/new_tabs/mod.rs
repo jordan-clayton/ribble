@@ -14,29 +14,23 @@ mod visualizer_tab;
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::new_tabs::ribble_tab::{RibbleTab, RibbleTabId, TabView};
 use crate::utils::errors::RibbleError;
-use ribble_whisper::audio::audio_backend::AudioBackend;
-use ribble_whisper::audio::recorder::ArcChannelSink;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use strum::EnumCount;
 
-// TODO: consider moving this to its own file.
 #[derive(Clone)]
-pub(in crate::ui) struct RibbleTree<A: AudioBackend<ArcChannelSink<f32>>> {
+pub(in crate::ui) struct RibbleTree {
     data_directory: PathBuf,
     tree: egui_tiles::Tree<RibbleTab>,
-    behavior: RibbleTreeBehavior<A>,
+    behavior: RibbleTreeBehavior,
 }
 
-impl<A> RibbleTree<A>
-where
-    A: AudioBackend<ArcChannelSink<f32>>,
-{
+impl RibbleTree {
     // TODO: decide on an appropriate name
     const TREE_FILE: &'static str = "ribble_layout.ron";
     pub(in crate::ui) fn new(
         data_directory: &Path,
-        controller: RibbleController<A>,
+        controller: RibbleController,
     ) -> Result<Self, RibbleError> {
         let tree_file = data_directory.join(Self::TREE_FILE);
         let tree = Self::deserialize_tree(tree_file.as_path());
@@ -81,13 +75,14 @@ where
 
         // Not opened yet, add a pane and focus it if it's a tab.
         if pane_id.is_none() {
+            // It should be cheap enough to just copy this.
             let tiles = &mut tree.tiles;
             let new_child = tiles.insert_pane(ribble_id.into());
             let insert_at_tile = tiles.get_mut(tile_id);
 
             // If there's no insertion node, insert somewhere at the root.
             if insert_at_tile.is_none() {
-                Self::handle_missing_node(tree, tiles, new_child, behavior);
+                Self::handle_missing_node(tree, new_child, behavior);
                 // Add an entry into the opened_tabs map.
                 behavior.opened_tabs.insert(ribble_id, new_child);
                 return;
@@ -125,7 +120,7 @@ where
                             tile_id.0, root.0
                         );
                         // Insert at the root and make the parent container into tabs.
-                        Self::handle_missing_node(tree, tiles, new_child, behavior);
+                        Self::handle_missing_node(tree, new_child, behavior);
                         // Make an entry into the hashmap so that records are maintained.
                         behavior.opened_tabs.insert(ribble_id, new_child);
                     }
@@ -144,7 +139,7 @@ where
             // The parent of this pane must be a container, otherwise there's something seriously wrong.
         } else {
             let pane_id = pane_id.unwrap();
-            let tiles = &mut tree.tiles;
+            let mut tiles = tree.tiles.clone();
             // First, check that the tile is actually in the tree
             let ribble_tile = tiles.get(*pane_id);
             // If it's in the tree, make sure the tile is a pane
@@ -169,7 +164,7 @@ where
                 // The tile is somehow -not- in the tree, and therefore has no parent.
                 // Update the record in the hashmap after getting the new id.
                 let new_child = tiles.insert_pane(ribble_id.into());
-                Self::handle_missing_node(tree, tiles, new_child, behavior);
+                Self::handle_missing_node(tree, new_child, behavior);
                 // Update the entry in the map.
                 behavior.opened_tabs.insert(ribble_id, new_child);
             }
@@ -181,10 +176,10 @@ where
     // This finds the root node (if
     fn handle_missing_node(
         tree: &mut egui_tiles::Tree<RibbleTab>,
-        tiles: &mut egui_tiles::Tiles<RibbleTab>,
         new_child: egui_tiles::TileId,
-        behavior: &mut RibbleTreeBehavior<A>,
+        behavior: &mut RibbleTreeBehavior,
     ) {
+        let tiles = &mut tree.tiles;
         let root = tree.root.expect("The tree should never be empty.");
         let tile = tiles
             .get_mut(root)
@@ -235,21 +230,15 @@ where
     }
 }
 
-impl<A> Drop for RibbleTree<A>
-where
-    A: AudioBackend<ArcChannelSink<f32>>,
-{
+impl Drop for RibbleTree {
     fn drop(&mut self) {
         self.serialize_tree()
     }
 }
 
-// TODO: if it doesn't make sense to keep this generic, then just make concrete based on the current controller.
-pub(in crate::ui) struct RibbleTreeBehavior<A>
-where
-    A: AudioBackend<ArcChannelSink<f32>>,
-{
-    controller: RibbleController<A>,
+#[derive(Clone)]
+pub(in crate::ui) struct RibbleTreeBehavior {
+    controller: RibbleController,
     opened_tabs: HashMap<RibbleTabId, egui_tiles::TileId>,
     simplification_options: egui_tiles::SimplificationOptions,
     tab_bar_height: f32,
@@ -262,14 +251,11 @@ where
 
 // TODO: double check the default implementation and make any changes necessary so that
 // intended behaviour is maintained.
-impl<A> RibbleTreeBehavior<A>
-where
-    A: AudioBackend<ArcChannelSink<f32>>,
-{
+impl RibbleTreeBehavior {
     const TAB_BAR_HEIGHT: f32 = 24.0;
     const GAP_WIDTH: f32 = 2.0;
     const FOCUS_STROKE_WIDTH: f32 = 2.0;
-    pub(in crate::ui) fn new(controller: RibbleController<A>) -> Self {
+    pub(in crate::ui) fn new(controller: RibbleController) -> Self {
         Self {
             controller,
             // Allocate for at least 1 of each tab.
@@ -284,7 +270,7 @@ where
     }
 
     pub(in crate::ui) fn from_tree(
-        controller: RibbleController<A>,
+        controller: RibbleController,
         tree: &egui_tiles::Tree<RibbleTab>,
     ) -> Self {
         // Preallocate for at least RibbleTab::COUNT, such that there exists a bucket for each tab.
@@ -317,10 +303,7 @@ where
     }
 }
 
-impl<A> egui_tiles::Behavior<RibbleTab> for RibbleTreeBehavior<A>
-where
-    A: AudioBackend<ArcChannelSink<f32>>,
-{
+impl egui_tiles::Behavior<RibbleTab> for RibbleTreeBehavior {
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,

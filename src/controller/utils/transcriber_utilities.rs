@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
 use crossbeam::channel::Sender;
-use sdl2::audio::{AudioDevice, AudioSpecDesired};
 use sdl2::AudioSubsystem;
+use sdl2::audio::{AudioDevice, AudioSpecDesired};
 use whisper_realtime::{
     audio_ring_buffer::AudioRingBuffer, microphone, model::Model, recorder::Recorder, whisper_rs,
 };
 
+// TODO: just get rid of this file
 use crate::utils::constants;
 
 pub fn init_audio_ring_buffer<

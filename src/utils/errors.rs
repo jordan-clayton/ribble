@@ -1,10 +1,11 @@
+use ribble_whisper::utils::errors::RibbleWhisperError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub(crate) enum RibbleError {
     // RibbleWhisper has its own to_string impls.
     #[error("Ribble Whisper: {0}")]
-    RibbleWhisper(#[from] ribble_whisper::utils::errors::RibbleWhisperError),
+    RibbleWhisper(#[from] RibbleWhisperError),
     // TODO: this is a placeholder, replace with clearer errors.
     #[error("Core: {0}")]
     Core(String),

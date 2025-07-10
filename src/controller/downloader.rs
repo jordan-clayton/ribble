@@ -4,10 +4,10 @@ use crate::controller::{Bus, DownloadRequest};
 use crate::controller::{ConsoleMessage, ProgressMessage};
 use crate::controller::{RibbleMessage, RibbleWorkerHandle};
 use crate::utils::errors::RibbleError;
-use ribble_whisper::downloader::downloaders::sync_download_request;
 use ribble_whisper::downloader::SyncDownload;
+use ribble_whisper::downloader::downloaders::sync_download_request;
 use ribble_whisper::utils::callback::RibbleWhisperCallback;
-use ribble_whisper::utils::{get_channel, Receiver, Sender};
+use ribble_whisper::utils::{Receiver, Sender, get_channel};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -16,6 +16,9 @@ use std::thread::JoinHandle;
 // timeout).
 // THEN: on receipt of the string (or an err if the thread panics and memory gets deallocated),
 // respond accordingly (e.g. put the new model in the model bank)
+//
+// TODO: Downloads are now cancellable -> expose methods to display this/expose functions in the
+// UI.
 
 struct DownloadEngineState {
     incoming_jobs: Receiver<DownloadRequest>,
@@ -32,6 +35,9 @@ impl DownloadEngineState {
         }
     }
 
+    // TODO: fix the lifetime issues here -> start_download needs to be a closure that lives longer
+    // than the reference to self.
+    // The logic can remain, the callback has to operate on a clone of the state
     fn start_download(&self, job: DownloadRequest) -> RibbleWorkerHandle {
         std::thread::spawn(move || {
             let (url, file_name, dest_dir, return_sender) = job.decompose();

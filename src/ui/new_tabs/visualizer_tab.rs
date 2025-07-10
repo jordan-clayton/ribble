@@ -2,10 +2,8 @@ use crate::controller::NUM_VISUALIZER_BUCKETS;
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::new_tabs::TabView;
 use crate::ui::new_tabs::ribble_tab::RibbleTabId;
-use ribble_whisper::audio::audio_backend::AudioBackend;
-use ribble_whisper::audio::recorder::ArcChannelSink;
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct VisualizerTab {
     #[serde(skip)]
     #[serde(default)]
@@ -27,19 +25,16 @@ impl TabView for VisualizerTab {
         RibbleTabId::Visualizer
     }
 
-    fn tab_title(&mut self) -> egui::WidgetText {
+    fn tab_title(&self) -> egui::WidgetText {
         "Visualizer".into()
     }
 
-    fn pane_ui<A>(
+    fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
         tile_id: egui_tiles::TileId,
-        controller: RibbleController<A>,
-    ) -> egui::Response
-    where
-        A: AudioBackend<ArcChannelSink<f32>>,
-    {
+        controller: RibbleController,
+    ) -> egui::Response {
         // If this is painting, a visualizer is in view, so set the visualizer to true to continue
         // processing audio data if it's coming in.
         controller.set_visualizer_visibility(true);
@@ -101,10 +96,7 @@ impl TabView for VisualizerTab {
     fn is_tab_closable(&self) -> bool {
         true
     }
-    fn on_tab_close<A>(&mut self, controller: RibbleController<A>) -> bool
-    where
-        A: AudioBackend<ArcChannelSink<f32>>,
-    {
+    fn on_tab_close(&mut self, controller: RibbleController) -> bool {
         controller.set_visualizer_visibility(false);
         true
     }
@@ -116,4 +108,3 @@ fn smoothing(src: &[f32], dst: &mut [f32]) {
     assert_eq!(src.len(), dst.len());
     todo!("Smoothing");
 }
-

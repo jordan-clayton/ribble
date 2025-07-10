@@ -3,7 +3,6 @@ name = "ribble"
 version = "0.1.2"
 edition = "2024"
 
-# TODO: MAJOR refactor - bring in ribble-whisper core crate and fit the new API in
 [dependencies]
 atomic_enum = "0.3.0"
 # TODO: determine what actual feature flag is required for catppuccin
@@ -17,7 +16,7 @@ egui_dock = { version = "0.16.0", features = ["serde"] }
 # If no longer needing SVG icons, just remove this.
 egui_extras = { version = "0.31.1", features = ["svg"] }
 hound = "3.5.1"
-# TODO: this is probably unnecessary?
+# TODO: Remove this - it's completely unnecessary.
 nvml-wrapper = "0.11.0"
 realfft = "3.3.0"
 rfd = "0.15.3"
@@ -25,13 +24,13 @@ rfd = "0.15.3"
 # TODO: consider publicly exporting SDL when using the SDL backend in ribble_whisper.
 sdl2 = { version = "0.37.0", features = ["static-link", "bundled"] }
 serde = { version = "1.0.204", features = ["derive"] }
-# If strum can be eliminated here, do so.
 strum = "0.27.1"
 # TODO: determine whether or not to include integrity checking utilities; might be out of scope
 ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.1.1", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler", "sdl2-static"] }
 # Implement genuine logging once the app has been rewritten.
 log = "0.4.22"
 # TODO: This is for clipboard but might be deprecated; check for alternatives
+# TODO TWICE: Egui already has clipboard support, just remove this.
 arboard = "3.4.0"
 ron = "0.10.1"
 # TODO: This is for image/svg loading but might be deprecated; check for alternatives
@@ -58,7 +57,9 @@ url = "2.5.4"
 egui_tiles = { version = "0.12.0", features = ["serde"] }
 opener = { version = "0.8.2", features = ["reveal"] }
 egui-theme-lerp = "0.2.0"
+notify = "8.1.0"
 
+# TODO: this can likely be removed - it's not up to Ribble to make decisions based on system requirements.
 [target.x86_64-apple-darwin.dependencies]
 metal = "0.32.0"
 

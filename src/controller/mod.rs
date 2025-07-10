@@ -3,8 +3,8 @@ use atomic_enum::atomic_enum;
 use egui::{RichText, Visuals};
 use ribble_whisper::utils::Sender;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumIter, EnumString};
@@ -18,11 +18,11 @@ mod downloader;
 mod kernel;
 mod progress;
 mod recorder;
+pub(crate) mod ribble_controller;
 mod transcriber;
 mod visualizer;
 mod worker;
 mod writer;
-pub(crate) mod ribble_controller;
 
 type RibbleWorkerHandle = JoinHandle<Result<RibbleMessage, RibbleError>>;
 
@@ -101,7 +101,9 @@ impl Bus {
 // Progressive: progress bar + snapshotting when new segments are decoded.
 #[atomic_enum]
 #[repr(C)]
-#[derive(Default, PartialEq, Eq, EnumIter, EnumString, AsRefStr)]
+#[derive(
+    Default, PartialEq, Eq, EnumIter, EnumString, AsRefStr, serde::Serialize, serde::Deserialize,
+)]
 pub(crate) enum OfflineTranscriberFeedback {
     #[default]
     Minimal = 0,
@@ -147,7 +149,6 @@ struct DownloadRequest {
     // (e.g. Place the new entry in a ModelBank, refresh the bank, etc.)
     return_sender: Option<Sender<String>>,
 }
-
 
 impl DownloadRequest {
     fn new() -> Self {
@@ -333,13 +334,13 @@ impl Progress {
     pub(crate) fn current_progress(&self) -> Option<usize> {
         match self {
             Progress::Determinate { progress, .. } => Some(progress.current_position() as usize),
-            Progress::Indeterminate { .. } => None
+            Progress::Indeterminate { .. } => None,
         }
     }
     pub(crate) fn total_size(&self) -> Option<usize> {
         match self {
             Progress::Determinate { progress, .. } => Some(progress.total_size() as usize),
-            Progress::Indeterminate { .. } => None
+            Progress::Indeterminate { .. } => None,
         }
     }
 
@@ -375,8 +376,18 @@ pub(crate) struct CompletedRecordingJobs {
 }
 
 impl CompletedRecordingJobs {
-    pub(crate) fn new(file_size_estimate: usize, total_duration: Duration, channels: usize, sample_rate: usize) -> Self {
-        Self { file_size_estimate, total_duration, channels, sample_rate }
+    pub(crate) fn new(
+        file_size_estimate: usize,
+        total_duration: Duration,
+        channels: usize,
+        sample_rate: usize,
+    ) -> Self {
+        Self {
+            file_size_estimate,
+            total_duration,
+            channels,
+            sample_rate,
+        }
     }
 
     pub(crate) fn file_size_estimate(&self) -> usize {
@@ -439,3 +450,4 @@ impl AnalysisType {
         }
     }
 }
+

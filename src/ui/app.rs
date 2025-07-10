@@ -2,14 +2,24 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::thread::JoinHandle;
 
-use crate::utils::audio_backend_proxy::{AudioBackendProxy, AudioCaptureRequest};
+use slab::Slab;
+
+use crate::utils::audio_backend_proxy::{
+    AudioBackendProxy, AudioCaptureRequest, SharedSdl2Capture,
+};
 use crate::utils::errors::RibbleError;
 use eframe::Storage;
 use egui::{Event, Key, ViewportCommand};
 use egui_dock::{DockArea, DockState, NodeIndex, Style, SurfaceIndex, TabIndex};
 use egui_theme_lerp::ThemeAnimator;
-use ribble_whisper::audio::audio_backend::{Sdl2Backend, default_backend};
+use ribble_whisper::audio::audio_backend::{
+    AudioBackend, CaptureSpec, Sdl2Backend, default_backend,
+};
+use ribble_whisper::audio::microphone::Sdl2Capture;
+use ribble_whisper::audio::recorder::ArcChannelSink;
+use ribble_whisper::utils::errors::RibbleWhisperError;
 use ribble_whisper::utils::{Receiver, get_channel};
+use std::sync::Arc;
 
 use crate::controller::ConsoleMessage;
 use crate::controller::ribble_controller::RibbleController;
@@ -24,23 +34,15 @@ use crate::{
     },
 };
 
+// NOTE: it might be the case that the local cache dir does need to come back. Not sure yet.
 pub struct Ribble {
-    // TODO: remove this -> it's handled internally in the tree.
-    local_cache_dir: PathBuf,
-    // Alternatively, encapsulate the Tree + TreeBehaviour within a struct that has its own
-    // serialization.
-    // TODO: seriously consider getting rid of the generics here - it's a little too gnarly.
-    tree: RibbleTree<AudioBackendProxy>,
+    tree: RibbleTree,
     sdl: sdl2::Sdl,
     backend: Sdl2Backend,
     // This needs to be polled in the UI loop to handle
     capture_requests: Receiver<AudioCaptureRequest>,
-    // TODO: background thread for saving, RAII
-    // TODO: add a RibbleTreeBehaviour struct
-    // NOTE: since RibbleTreeBehaviour has to have a copy of the controller, it might make sense
-    // to just implement an accessor on it to grab the controller for serializing?
-    // Alternatively, just implement tree serialization on a struct and use RAII + Accessors.
-    controller: RibbleController<AudioBackendProxy>,
+    current_devices: Slab<Arc<Sdl2Capture<ArcChannelSink<f32>>>>,
+    controller: RibbleController,
 
     theme_animator: ThemeAnimator,
 
@@ -85,16 +87,57 @@ impl Ribble {
         let theme_animator = ThemeAnimator::new(system_visuals.clone(), system_visuals.clone())
             .animation_time(Self::THEME_TRANSITION_TIME);
 
+        let current_devices = Slab::new();
+
         Ok(Self {
-            local_cache_dir: data_directory.to_path_buf(),
             tree,
             sdl: sdl_ctx,
             backend,
             capture_requests: request_receiver,
+            current_devices,
             controller,
             theme_animator,
             periodic_serialize: None,
         })
+    }
+
+    fn open_audio_device(
+        &mut self,
+        spec: CaptureSpec,
+        sink: ArcChannelSink<f32>,
+    ) -> Result<SharedSdl2Capture<ArcChannelSink<f32>>, RibbleWhisperError> {
+        // Try to open capture
+        // Give ownership to the Arc temporarily
+        let device = Arc::new(self.backend.open_capture(spec, sink)?);
+
+        // Clone a reference to consume for the shared capture
+        let shared_device = Arc::clone(&device);
+
+        // Place it in the slab and get a device_id
+        let device_id = self.current_devices.insert(device);
+
+        let shared_capture = SharedSdl2Capture::new(device_id, shared_device);
+        Ok(shared_capture)
+    }
+
+    // Until it's absolutely certain that this implementation works as intended,
+    // this function is going to panic to ensure the device is always cleaned up on the main
+    // thread.
+    fn close_audio_device(&mut self, device_id: usize) {
+        // This will panic if the device is not in the slab
+        let shared_device = self.current_devices.remove(device_id);
+        // This is mainly for debugging purposes
+        let strong_count = Arc::strong_count(&shared_device);
+
+        // This will consume the inner from the Arc and leave the pointer empty.
+        // It only returns Some(..) when the refcount is exactly 1
+        let device = Arc::into_inner(shared_device);
+
+        assert!(
+            device.is_some(),
+            "Strong count > 1 when trying to close audio device. Count: {strong_count}",
+        );
+        // The device will automatically be dropped by the end of this function.
     }
 
     fn get_system_theme(ctx: &egui::Context) -> egui::Visuals {
@@ -119,7 +162,12 @@ impl Ribble {
         self.check_join_last_save();
 
         let controller = self.controller.clone();
-        let tree = &self.tree;
+        // NOTE: This clone is probably relatively expensive, but egui calls this on a background
+        // thread anyway.
+        //
+        // It shouldn't really matter -> both items serialize on drop, so the app state will be
+        // preserved when it's closed.
+        let tree = self.tree.clone();
 
         let worker = std::thread::spawn(move || {
             // TODO: expect there to be a borrow issue; self cannot be shared across threads safely (technically) due to SDL,
@@ -145,7 +193,17 @@ impl eframe::App for Ribble {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Check requests for an audio handle and produce an AudioDevice for capture.
         while let Ok(request) = self.capture_requests.try_recv() {
-            request(&self.backend);
+            match request {
+                AudioCaptureRequest::Open(spec, sink, sender) => {
+                    let shared_capture = self.open_audio_device(spec, sink);
+                    if sender.send(shared_capture).is_err() {
+                        // TODO: logging
+                    }
+                }
+                AudioCaptureRequest::Close(device_id) => {
+                    self.close_audio_device(device_id);
+                }
+            }
         }
 
         // Set the system theme.
