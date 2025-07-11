@@ -762,7 +762,7 @@ impl TranscriberEngine {
     // If that's the case, look into cloning the backend.
     pub(super) fn start_realtime_transcription<M, A>(
         &self,
-        audio_backend: &'static A,
+        audio_backend: Arc<A>,
         shared_model_retriever: Arc<M>,
     ) where
         M: ModelRetriever + Send + Sync + 'static,
@@ -772,7 +772,7 @@ impl TranscriberEngine {
         self.inner.realtime_running.store(true, Ordering::Release);
         let thread_inner = Arc::clone(&self.inner);
         let worker = std::thread::spawn(move || {
-            thread_inner.run_realtime_transcription(audio_backend, shared_model_retriever)
+            thread_inner.run_realtime_transcription(audio_backend.as_ref(), shared_model_retriever)
         });
 
         let work_request = WorkRequest::Long(worker);

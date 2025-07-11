@@ -13,7 +13,7 @@ use strum::{AsRefStr, Display, EnumIter, IntoStaticStr};
 // NOTE: this should probably be kept/modified separately for Offline/Real-time configurations.
 // Use a toggle in the UI to swap between Real-time VAD and Offline-Vad
 // Offline can turn this off.
-#[derive(Copy, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct VadConfigs {
     vad_type: VadType,
     frame_size: VadFrameSize,
@@ -127,8 +127,7 @@ impl VadConfigs {
                     .with_sample_rate(WHISPER_SAMPLE_RATE as i64)
                     .with_chunk_size(frame_size)
                     .with_detection_probability_threshold(probability)
-                    .build()
-                    .into()?;
+                    .build()?;
                 Ok(RibbleVAD::Silero(vad))
             }
             VadType::WebRtc => {
@@ -138,8 +137,7 @@ impl VadConfigs {
                     .with_frame_length_millis(frame_size)
                     .with_filter_aggressiveness(aggressiveness)
                     .with_detection_probability_threshold(probability)
-                    .build_webrtc()
-                    .into()?;
+                    .build_webrtc()?;
                 Ok(RibbleVAD::WebRtc(vad))
             }
             VadType::Earshot => {
@@ -149,8 +147,7 @@ impl VadConfigs {
                     .with_frame_length_millis(frame_size)
                     .with_filter_aggressiveness(aggressiveness)
                     .with_detection_probability_threshold(probability)
-                    .build_earshot()
-                    .into()?;
+                    .build_earshot()?;
 
                 Ok(RibbleVAD::Earshot(vad))
             }
@@ -197,7 +194,16 @@ impl VadType {
 }
 
 #[derive(
-    Clone, Copy, serde::Serialize, serde::Deserialize, EnumIter, IntoStaticStr, AsRefStr, Display,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    EnumIter,
+    IntoStaticStr,
+    AsRefStr,
+    Display,
 )]
 pub(crate) enum VadFrameSize {
     Auto,
@@ -207,7 +213,16 @@ pub(crate) enum VadFrameSize {
 }
 
 #[derive(
-    Clone, Copy, serde::Serialize, serde::Deserialize, EnumIter, IntoStaticStr, AsRefStr, Display,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    EnumIter,
+    IntoStaticStr,
+    AsRefStr,
+    Display,
 )]
 pub(crate) enum VadStrictness {
     Auto,

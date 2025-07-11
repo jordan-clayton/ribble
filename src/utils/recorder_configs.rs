@@ -51,6 +51,15 @@ impl From<hound::SampleFormat> for RibbleRecordingExportFormat {
     }
 }
 
+impl From<RibbleRecordingExportFormat> for hound::SampleFormat {
+    fn from(data: RibbleRecordingExportFormat) -> Self {
+        match data {
+            RibbleRecordingExportFormat::F32 => hound::SampleFormat::Float,
+            RibbleRecordingExportFormat::I16 => hound::SampleFormat::Int,
+        }
+    }
+}
+
 #[derive(
     Default,
     Copy,
@@ -257,10 +266,14 @@ impl RibbleRecordingConfigs {
     ) -> Result<hound::WavSpec, RibbleError> {
         let bits_per_sample = format.bits_per_sample();
         let sample_format = format.into();
-        let channels = self.channel_configs.into().ok_or(RibbleError::Core(
+
+        let channels: Option<u8> = self.channel_configs.into();
+        let channels = channels.ok_or(RibbleError::Core(
             "Invalid channel options passed to file writer.".to_string(),
         ))? as u16;
-        let sample_rate = self.channel_configs.into().ok_or(RibbleError::Core(
+
+        let sample_rate: Option<usize> = self.sample_rate.into();
+        let sample_rate = sample_rate.ok_or(RibbleError::Core(
             "Invalid sample rate options passed to file writer.".to_string(),
         ))? as u32;
 

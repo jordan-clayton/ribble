@@ -1,10 +1,8 @@
-pub(crate) mod audio_backend_proxy;
 pub(crate) mod constants;
 pub(crate) mod dc_block;
 pub(crate) mod errors;
 pub(crate) mod include;
 pub(crate) mod migration;
-pub(crate) mod model_bank;
 pub(crate) mod pcm_f32;
 pub(crate) mod preferences;
 pub(crate) mod recorder_configs;

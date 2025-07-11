@@ -1,11 +1,11 @@
 use crate::controller::ConsoleMessage;
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::new_tabs::TabView;
-use crate::ui::new_tabs::ribble_tab::RibbleTabId;
+use crate::ui::new_tabs::PaneView;
+use crate::ui::new_tabs::ribble_pane::RibblePaneId;
 use std::sync::Arc;
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ConsoleTab {
+#[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ConsolePane {
     // NOTE: These are shared ConsoleMessages (held in the ConsoleEngine).
     // It's cheaper to clone an Arc, versus String clones.
     #[serde(skip)]
@@ -13,20 +13,12 @@ pub(crate) struct ConsoleTab {
     message_buffer: Vec<Arc<ConsoleMessage>>,
 }
 
-impl Default for ConsoleTab {
-    fn default() -> Self {
-        Self {
-            message_buffer: vec![],
-        }
-    }
-}
-
-impl TabView for ConsoleTab {
-    fn tile_id(&self) -> RibbleTabId {
-        RibbleTabId::Console
+impl PaneView for ConsolePane {
+    fn pane_id(&self) -> RibblePaneId {
+        RibblePaneId::Console
     }
 
-    fn tab_title(&self) -> egui::WidgetText {
+    fn pane_title(&self) -> egui::WidgetText {
         "Console".into()
     }
 
@@ -80,7 +72,7 @@ impl TabView for ConsoleTab {
         resp
     }
 
-    fn is_tab_closable(&self) -> bool {
+    fn is_pane_closable(&self) -> bool {
         true
     }
 }

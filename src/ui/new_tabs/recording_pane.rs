@@ -1,16 +1,16 @@
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::new_tabs::TabView;
-use crate::ui::new_tabs::ribble_tab::RibbleTabId;
+use crate::ui::new_tabs::PaneView;
+use crate::ui::new_tabs::ribble_pane::RibblePaneId;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) struct RecordingTab {}
+pub(crate) struct RecordingPane {}
 
-impl TabView for RecordingTab {
-    fn tile_id(&self) -> RibbleTabId {
-        RibbleTabId::Recording
+impl PaneView for RecordingPane {
+    fn pane_id(&self) -> RibblePaneId {
+        RibblePaneId::Recording
     }
 
-    fn tab_title(&self) -> egui::WidgetText {
+    fn pane_title(&self) -> egui::WidgetText {
         todo!()
     }
 
@@ -23,7 +23,7 @@ impl TabView for RecordingTab {
         todo!()
     }
 
-    fn is_tab_closable(&self) -> bool {
+    fn is_pane_closable(&self) -> bool {
         todo!()
     }
 }

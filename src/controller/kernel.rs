@@ -1,6 +1,7 @@
 use crate::controller::AnalysisType;
 use crate::controller::console::ConsoleEngine;
 use crate::controller::downloader::DownloadEngine;
+use crate::controller::model_bank::RibbleModelBank;
 use crate::controller::progress::ProgressEngine;
 use crate::controller::recorder::RecorderEngine;
 use crate::controller::transcriber::TranscriberEngine;
@@ -13,17 +14,16 @@ use crate::controller::{
     SMALL_UTILITY_QUEUE_SIZE, UTILITY_QUEUE_SIZE,
 };
 use crate::utils::errors::RibbleError;
-use crate::utils::model_bank::RibbleModelBank;
 use crate::utils::preferences::UserPreferences;
 use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExportFormat};
 use crate::utils::vad_configs::VadConfigs;
 
-use crate::utils::audio_backend_proxy::AudioBackendProxy;
+use crate::controller::audio_backend_proxy::AudioBackendProxy;
 use arc_swap::ArcSwap;
 use ribble_whisper::transcriber::{TranscriptionSnapshot, WhisperControlPhrase};
 use ribble_whisper::utils::get_channel;
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
-use ribble_whisper::whisper::model::{ConcurrentModelBank, ModelId};
+use ribble_whisper::whisper::model::{ConcurrentModelBank, Model, ModelId};
 use ron::ser::PrettyConfig;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
@@ -36,7 +36,7 @@ pub(super) struct Kernel {
     data_directory: PathBuf,
     user_preferences: ArcSwap<UserPreferences>,
     // NOTE: pass this -in- to the RecorderEngine/TranscriberEngine as arguments
-    audio_backend: AudioBackendProxy,
+    audio_backend: Arc<AudioBackendProxy>,
     transcriber_engine: TranscriberEngine,
     recorder_engine: RecorderEngine,
     console_engine: ConsoleEngine,
@@ -61,6 +61,13 @@ impl Kernel {
         data_directory: &Path,
         audio_backend: AudioBackendProxy,
     ) -> Result<Self, RibbleError> {
+        if !data_directory.is_absolute() {
+            return Err(RibbleError::Core(format!(
+                "Data directory not canonicalized: {:#?}",
+                data_directory
+            )));
+        }
+
         let KernelState {
             transcriber_configs,
             offline_transcriber_feedback,
@@ -108,12 +115,12 @@ impl Kernel {
         let model_directory = data_directory.join(Self::MODEL_BANK_DIR_SLUG);
         // TODO: this needs to be brought into the module here.
         // TODO TWICE: this also needs the bus for worker/downloader jobs.
-        let model_bank = Arc::new(RibbleModelBank::new(model_directory.as_path())?);
+        let model_bank = Arc::new(RibbleModelBank::new(model_directory.as_path(), &bus)?);
 
         Ok(Self {
             data_directory: data_directory.to_path_buf(),
             user_preferences: ArcSwap::from(Arc::new(user_preferences)),
-            audio_backend,
+            audio_backend: Arc::new(audio_backend),
             transcriber_engine,
             recorder_engine,
             console_engine,
@@ -135,11 +142,15 @@ impl Kernel {
 
     // TODO: perhaps these methods should be trait methods if the controller needs to be testable.
     // MODEL MANAGEMENT
-    pub(super) fn download_model(&self, url: String) {
-        todo!("Add download method to RibbleModelBank")
+    pub(super) fn download_model(&self, url: &str) {
+        self.model_bank.download_new_model(url);
     }
-    pub(super) fn copy_new_model(&self, file_path: &Path) {
-        todo!("Refactor new Model method in RibbleModelBank")
+    pub(super) fn copy_new_model_to_bank(&self, file_path: &Path) {
+        self.model_bank.copy_model_to_bank(file_path);
+    }
+
+    pub(super) fn models_for_each_mut_capture<F: FnMut((&ModelId, &Model))>(&self, f: F) {
+        self.model_bank.for_each_mut_capture(f);
     }
 
     pub(super) fn rename_model(
@@ -224,8 +235,9 @@ impl Kernel {
     // Or, implement clone on the backend; it's very cheap to do.
     pub(super) fn start_realtime_transcription(&self) {
         let bank = Arc::clone(&self.model_bank);
+        let backend = Arc::clone(&self.audio_backend);
         self.transcriber_engine
-            .start_realtime_transcription(&self.audio_backend, bank);
+            .start_realtime_transcription(backend, bank);
     }
 
     pub(super) fn set_audio_file_path(&self, path: PathBuf) {
@@ -262,7 +274,8 @@ impl Kernel {
     }
 
     pub(super) fn start_recording(&self) {
-        self.recorder_engine.start_recording(&self.audio_backend);
+        let backend = Arc::clone(&self.audio_backend);
+        self.recorder_engine.start_recording(backend);
     }
 
     // WRITER (RECORDINGS + Export)

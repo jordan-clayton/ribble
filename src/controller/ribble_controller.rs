@@ -1,16 +1,16 @@
+use crate::controller::audio_backend_proxy::AudioBackendProxy;
 use crate::controller::kernel::Kernel;
 use crate::controller::{
     AmortizedProgress, AnalysisType, CompletedRecordingJobs, ConsoleMessage,
     NUM_VISUALIZER_BUCKETS, OfflineTranscriberFeedback, Progress, RotationDirection,
 };
-use crate::utils::audio_backend_proxy::AudioBackendProxy;
 use crate::utils::errors::RibbleError;
 use crate::utils::preferences::UserPreferences;
 use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExportFormat};
 use crate::utils::vad_configs::VadConfigs;
 use ribble_whisper::transcriber::{TranscriptionSnapshot, WhisperControlPhrase};
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
-use ribble_whisper::whisper::model::ModelId;
+use ribble_whisper::whisper::model::{Model, ModelId};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -35,6 +35,8 @@ impl Clone for RibbleController {
 impl RibbleController {
     const RECOMMENDED_MAX_WHISPER_THREADS: usize = 8;
     // NOTE: The AudioBackendProxy will need to be constructed higher up in the app and passed in.
+    // NOTE TWICE: The data_directory needs to be absolute -> there's a guard for this in the
+    // kernel and it will return Err() if the path is relative.
     pub(crate) fn new(
         data_directory: &Path,
         audio_backend: AudioBackendProxy,
@@ -67,11 +69,11 @@ impl RibbleController {
     }
 
     // MODEL MANAGEMENT
-    pub(crate) fn download_model(&self, url: String) {
-        todo!("Finish Kernel::download_model")
+    pub(crate) fn download_model(&self, url: &str) {
+        self.kernel.download_model(url);
     }
     pub(crate) fn copy_new_model(&self, file_path: &Path) {
-        todo!("Finish Kernel::copy_new_model")
+        self.kernel.copy_new_model_to_bank(file_path);
     }
 
     pub(crate) fn rename_model(
@@ -97,8 +99,8 @@ impl RibbleController {
     }
 
     // TODO: migrate this to a UI passthrough with the for_each_capture_mut method
-    pub(crate) fn get_model_list(&self) -> RibbleModelBankIter {
-        self.kernel.get_model_list()
+    pub(crate) fn models_for_each_mut_capture<F: FnMut((&ModelId, &Model))>(&self, closure: F) {
+        self.kernel.models_for_each_mut_capture(closure)
     }
     pub(crate) fn get_model_directory(&self) -> &Path {
         self.kernel.get_model_directory()
@@ -133,7 +135,7 @@ impl RibbleController {
         self.kernel.offline_running()
     }
     pub(crate) fn transcriber_running(&self) -> bool {
-        self.transcriber_running()
+        self.kernel.transcriber_running()
     }
 
     pub(crate) fn stop_realtime(&self) {
@@ -256,7 +258,7 @@ impl RibbleController {
 
     // VISUALIZER
     pub(crate) fn set_visualizer_visibility(&self, is_visible: bool) {
-        self.set_visualizer_visibility(is_visible);
+        self.kernel.set_visualizer_visibility(is_visible);
     }
     pub(crate) fn try_read_visualization_buffer(
         &self,

@@ -13,9 +13,11 @@ use strum::{AsRefStr, Display, EnumIter, EnumString};
 pub(crate) mod utils;
 pub(crate) mod whisper_app_controller;
 
+pub(crate) mod audio_backend_proxy;
 mod console;
 mod downloader;
 mod kernel;
+mod model_bank;
 mod progress;
 mod recorder;
 pub(crate) mod ribble_controller;
@@ -142,11 +144,11 @@ struct DownloadRequest {
     // HANDLE THIS LOGIC HIGHER UP IN THE CONTROLLER.
     // e.g. Url::parse(url)?, url.path_segments_mut()?.pop() => returns the last bit of the URL.
     // OTHERWISE, take it in as an argument from the user.
+    //
+    // TODO TWICE: remove the file_name from this request.
     file_name: String,
     directory: PathBuf,
-    // This is a pipe for sending back the file_name when
-    // the download is completed so the caller can respond.
-    // (e.g. Place the new entry in a ModelBank, refresh the bank, etc.)
+    // TODO: remove this -> there's a watcher in the ModelBank to update based on a chaaaaange.
     return_sender: Option<Sender<String>>,
 }
 
@@ -274,6 +276,32 @@ pub(crate) enum AmortizedProgress {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct ProgressView {
+    inner: Arc<AtomicProgress>,
+}
+
+impl ProgressView {
+    pub(crate) fn new(progress: Arc<AtomicProgress>) -> Self {
+        Self { inner: progress }
+    }
+
+    // Returns the progress, normalized between 0 and 1
+    pub(crate) fn current_progress(&self) -> f32 {
+        self.inner.normalized()
+    }
+
+    pub(crate) fn current_position(&self) -> u64 {
+        self.inner.current_position()
+    }
+    pub(crate) fn total_size(&self) -> u64 {
+        self.inner.total_size()
+    }
+    pub(crate) fn is_finished(&self) -> bool {
+        self.inner.is_finished()
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(crate) enum Progress {
     Determinate {
         job_name: &'static str,
@@ -364,6 +392,16 @@ impl Progress {
             Progress::Indeterminate { .. } => false,
         }
     }
+
+    pub(crate) fn progress_view(&self) -> Option<ProgressView> {
+        match self {
+            Progress::Determinate {
+                job_name: _,
+                progress,
+            } => Some(ProgressView::new(Arc::clone(progress))),
+            Progress::Indeterminate { .. } => None,
+        }
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -450,4 +488,3 @@ impl AnalysisType {
         }
     }
 }
-

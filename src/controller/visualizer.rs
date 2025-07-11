@@ -1,14 +1,16 @@
+use crate::controller::{
+    AnalysisType, AtomicAnalysisType, NUM_VISUALIZER_BUCKETS, RotationDirection,
+};
 use crate::utils::errors::RibbleError;
 use crossbeam::channel::Receiver;
 use parking_lot::RwLock;
 use realfft::RealFftPlanner;
 use std::f32::consts::PI;
 use std::ops::Deref;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::thread::JoinHandle;
-use crate::controller::{AnalysisType, AtomicAnalysisType, RotationDirection, NUM_VISUALIZER_BUCKETS};
 
 pub(super) struct VisualizerSample {
     sample: Arc<[f32]>,
@@ -159,11 +161,16 @@ impl VisualizerEngineState {
             .windows(frame_size)
             .step_by(step_size)
             .map(|window| {
-                (window.iter().copied().map(|n| n.powi(2)).sum::<f32>() / (window.len() as f32)).sqrt()
+                (window.iter().copied().map(|n| n.powi(2)).sum::<f32>() / (window.len() as f32))
+                    .sqrt()
             })
             .collect::<Vec<_>>();
 
-        let max_rms = amp_envelope.iter().fold(1f32, f32::max);
+        // Assert no nan/infinite
+        debug_assert!(amp_envelope.iter().all(|f| f.is_normal()));
+
+        // Grab the maximum rms
+        let max_rms = amp_envelope.iter().copied().fold(1f32, f32::max);
 
         // Normalize between [-1, 1]
         for rms in amp_envelope.iter_mut() {
@@ -220,7 +227,9 @@ impl VisualizerEngineState {
         // Compute edges -> map frequency bins to log-spaced buckets
         // (human perception; low frequencies = tighter resolution).
         let bucket_edges: Vec<f64> = (0..=NUM_VISUALIZER_BUCKETS)
-            .map(|k| 10.0f64.powf(log_min + log_range * (k as f64) / (NUM_VISUALIZER_BUCKETS as f64)))
+            .map(|k| {
+                10.0f64.powf(log_min + log_range * (k as f64) / (NUM_VISUALIZER_BUCKETS as f64))
+            })
             .collect();
 
         for frame in frames {
@@ -296,7 +305,8 @@ fn apply_gain(samples: &mut [f32], gain: f32) {
 // TODO: This should probably be pre-computed whenever the visualizer is changed.
 // -> handle this in the controller and cache
 fn compute_welch_frames(sample_len: f32, overlap_ratio: f32) -> (usize, usize) {
-    let frame_size = sample_len / (1f32 + (NUM_VISUALIZER_BUCKETS as f32 - 1f32) * (1f32 - overlap_ratio));
+    let frame_size =
+        sample_len / (1f32 + (NUM_VISUALIZER_BUCKETS as f32 - 1f32) * (1f32 - overlap_ratio));
     let step_size = frame_size * (1f32 - overlap_ratio);
     (frame_size.round() as usize, step_size.round() as usize)
 }
@@ -353,7 +363,10 @@ impl VisualizerEngine {
         self.inner.visualizer_running.load(Ordering::Acquire)
     }
 
-    pub(super) fn try_read_visualization_buffer(&self, copy_buffer: &mut [f32; NUM_VISUALIZER_BUCKETS]) {
+    pub(super) fn try_read_visualization_buffer(
+        &self,
+        copy_buffer: &mut [f32; NUM_VISUALIZER_BUCKETS],
+    ) {
         if let Some(buffer) = self.inner.buffer.try_read() {
             copy_buffer.copy_from_slice(buffer.deref())
         }

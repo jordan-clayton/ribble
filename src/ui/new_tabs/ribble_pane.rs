@@ -2,22 +2,23 @@ use enum_dispatch::enum_dispatch;
 use strum::{AsRefStr, EnumIter, EnumString, IntoStaticStr};
 // NOTE: these need to be brought into scope so that enum_dispatch can run its macros
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::new_tabs::tabs::*;
+use crate::ui::new_tabs::panes::*;
 
 // TODO: rename the trait methods, and the trait.
 // This should be "TileView"
 
-#[enum_dispatch(RibbleTab)]
-pub(in crate::ui) trait TabView {
-    fn tile_id(&self) -> RibbleTabId;
+#[enum_dispatch(RibblePane)]
+pub(in crate::ui) trait PaneView {
+    fn pane_id(&self) -> RibblePaneId;
 
-    fn tab_title(&self) -> egui::WidgetText;
+    fn pane_title(&self) -> egui::WidgetText;
     /// # Arguments:
     /// * ui: egui::Ui, for drawing,
     /// * tile_id: egui_tiles::TileId, this Pane's id
     /// * controller: RibbleController, for accessing internal data.
     /// TODO: add an argument so that a pane can request to be closed.
     /// OR: use an enumeration: PaneResponse::UiResponse(..), PaneResponse::Close,
+    /// ACTUALLY: there's a mechanism in the egui upgrade that makes this a lot easier.
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -28,13 +29,13 @@ pub(in crate::ui) trait TabView {
     ) -> egui::Response;
 
     /// Should this tab be closable?
-    fn is_tab_closable(&self) -> bool;
+    fn is_pane_closable(&self) -> bool;
 
     /// Fires whenever a tab is closed
     /// * return true if the tab should still be closed.
     /// * return false if the tab should remain open
-    fn on_tab_close(&mut self, _controller: RibbleController) -> bool {
-        self.is_tab_closable()
+    fn on_pane_close(&mut self, _controller: RibbleController) -> bool {
+        self.is_pane_closable()
     }
 }
 
@@ -44,38 +45,43 @@ pub(in crate::ui) trait TabView {
 // NOTE: downloads should get a full view tab + cancel mechanism.
 #[derive(serde::Serialize, serde::Deserialize, strum::EnumCount, Clone)]
 #[enum_dispatch]
-pub(in crate::ui) enum RibbleTab {
-    TranscriberTab(TranscriberTab),
-    RecordingTab(RecordingTab),
-    TranscriptionTab(TranscriptionTab),
-    VisualizerTab(VisualizerTab),
-    ProgressTab(ProgressTab),
-    ConsoleTab(ConsoleTab),
-    UserPreferencesTab(UserPreferencesTab),
+pub(in crate::ui) enum RibblePane {
+    TranscriberPane(TranscriberPane),
+    RecordingPane(RecordingPane),
+    TranscriptionPane(TranscriptionPane),
+    VisualizerPane(VisualizerPane),
+    ProgressPane(ProgressPane),
+    ConsolePane(ConsolePane),
+    DownloadsPane(DownloadsPane),
+    UserPreferencesPane(UserPreferencesPane),
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
-pub(in crate::ui) enum RibbleTabId {
+pub(in crate::ui) enum RibblePaneId {
     Transcriber,
     Recording,
     Transcription,
     Visualizer,
     Console,
     Progress,
+    Downloads,
     UserPreferences,
 }
 
-impl From<RibbleTabId> for RibbleTab {
-    fn from(value: RibbleTabId) -> Self {
+impl From<RibblePaneId> for RibblePane {
+    fn from(value: RibblePaneId) -> Self {
         match value {
             // TODO: implement default methods for tabs to make this easier.
-            RibbleTabId::Transcriber => RibbleTab::TranscriberTab(TranscriberTab::default()),
-            RibbleTabId::Recording => RibbleTab::RecordingTab(RecordingTab {}),
-            RibbleTabId::Transcription => RibbleTab::TranscriptionTab(TranscriptionTab {}),
-            RibbleTabId::Visualizer => RibbleTab::VisualizerTab(VisualizerTab::default()),
-            RibbleTabId::Console => RibbleTab::ConsoleTab(ConsoleTab::default()),
-            RibbleTabId::Progress => RibbleTab::ProgressTab(ProgressTab::default()),
-            RibbleTabId::UserPreferences => RibbleTab::UserPreferencesTab(UserPreferencesTab {}),
+            RibblePaneId::Transcriber => RibblePane::TranscriberPane(TranscriberPane::default()),
+            RibblePaneId::Recording => RibblePane::RecordingPane(RecordingPane {}),
+            RibblePaneId::Transcription => RibblePane::TranscriptionPane(TranscriptionPane {}),
+            RibblePaneId::Visualizer => RibblePane::VisualizerPane(VisualizerPane::default()),
+            RibblePaneId::Console => RibblePane::ConsolePane(ConsolePane::default()),
+            RibblePaneId::Downloads => RibblePane::DownloadsPane(DownloadsPane::default()),
+            RibblePaneId::Progress => RibblePane::ProgressPane(ProgressPane::default()),
+            RibblePaneId::UserPreferences => {
+                RibblePane::UserPreferencesPane(UserPreferencesPane {})
+            }
         }
     }
 }
@@ -92,14 +98,14 @@ pub(in crate::ui) enum ClosableRibbleTab {
 }
 
 // TODO: this might be cleaned up if default is implemented on each tab -> should be doable, espec. if stateless/ZST
-impl From<ClosableRibbleTab> for RibbleTab {
+impl From<ClosableRibbleTab> for RibblePane {
     fn from(value: ClosableRibbleTab) -> Self {
         match value {
-            ClosableRibbleTab::Visualizer => RibbleTab::VisualizerTab(VisualizerTab::default()),
-            ClosableRibbleTab::Progress => RibbleTab::ProgressTab(ProgressTab::default()),
-            ClosableRibbleTab::Console => RibbleTab::ConsoleTab(ConsoleTab::default()),
+            ClosableRibbleTab::Visualizer => RibblePane::VisualizerPane(VisualizerPane::default()),
+            ClosableRibbleTab::Progress => RibblePane::ProgressPane(ProgressPane::default()),
+            ClosableRibbleTab::Console => RibblePane::ConsolePane(ConsolePane::default()),
             ClosableRibbleTab::UserPreferences => {
-                RibbleTab::UserPreferencesTab(UserPreferencesTab::default())
+                RibblePane::UserPreferencesPane(UserPreferencesPane::default())
             }
         }
     }

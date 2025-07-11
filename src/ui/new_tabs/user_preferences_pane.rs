@@ -1,18 +1,18 @@
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::new_tabs::TabView;
-use crate::ui::new_tabs::ribble_tab::RibbleTabId;
+use crate::ui::new_tabs::PaneView;
+use crate::ui::new_tabs::ribble_pane::RibblePaneId;
 
 // NOTE: I'm not sure that any state is actually going to be stored in this tab.
 // It might just be loaded from the controller.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) struct UserPreferencesTab {}
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct UserPreferencesPane {}
 
-impl TabView for UserPreferencesTab {
-    fn tile_id(&self) -> RibbleTabId {
-        RibbleTabId::UserPreferences
+impl PaneView for UserPreferencesPane {
+    fn pane_id(&self) -> RibblePaneId {
+        RibblePaneId::UserPreferences
     }
 
-    fn tab_title(&self) -> egui::WidgetText {
+    fn pane_title(&self) -> egui::WidgetText {
         "Settings".into()
     }
 
@@ -32,13 +32,7 @@ impl TabView for UserPreferencesTab {
         todo!()
     }
 
-    fn is_tab_closable(&self) -> bool {
+    fn is_pane_closable(&self) -> bool {
         todo!()
-    }
-}
-
-impl Default for UserPreferencesTab {
-    fn default() -> Self {
-        Self {}
     }
 }

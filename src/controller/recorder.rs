@@ -147,7 +147,7 @@ impl RecorderEngine {
 
     // TODO: figure out the cheapest way to solve this issue;
     // Either by taking an Arc<A>, or by consuming A (and imposing Clone restrictions)
-    pub(super) fn start_recording<A>(&self, audio_backend: &'static A)
+    pub(super) fn start_recording<A>(&self, audio_backend: Arc<A>)
     where
         A: AudioBackend<ArcChannelSink<f32>> + Send + Sync + 'static,
     {
@@ -157,10 +157,7 @@ impl RecorderEngine {
         let thread_inner = Arc::clone(&self.inner);
         // Spawn a (long job) thread and send it off to the worker to join it.
         let worker = std::thread::spawn(move || {
-            if let Err(e) = thread_inner.run_recorder_loop(audio_backend) {
-                // TODO: remove into once RibbleAppError is gone.
-                return Err(e);
-            }
+            thread_inner.run_recorder_loop(audio_backend.as_ref());
             let message = String::from("Finished recording!");
             let console_message = ConsoleMessage::Status(message);
             Ok(RibbleMessage::Console(console_message))

@@ -5,10 +5,11 @@ edition = "2024"
 
 [dependencies]
 atomic_enum = "0.3.0"
-# TODO: determine what actual feature flag is required for catppuccin
+# TODO: fork catppuccin-egui and remove the feature-flag friction.
 catppuccin-egui = { version = "5.2.0", default-features = false, features = ["egui31"] }
 crossbeam = "0.8.4"
 directories = "6.0.0"
+# TODO: bump eframe/egui once catppuccin has been forked.
 eframe = { version = "0.31.1", features = ["persistence", "wgpu"] }
 egui = { version = "0.31.1", features = ["persistence", "serde"] }
 # TODO: get rid of this -> using egui_tiles
@@ -57,7 +58,7 @@ url = "2.5.4"
 egui_tiles = { version = "0.12.0", features = ["serde"] }
 opener = { version = "0.8.2", features = ["reveal"] }
 egui-theme-lerp = "0.2.0"
-notify = "8.1.0"
+notify-debouncer-full = { version = "0.5.0", features = ["crossbeam-channel"] }
 
 # TODO: this can likely be removed - it's not up to Ribble to make decisions based on system requirements.
 [target.x86_64-apple-darwin.dependencies]

@@ -1,7 +1,7 @@
 use crate::controller::{Bus, ConsoleMessage, RibbleMessage, RibbleWorkerHandle, WorkRequest};
 use crate::utils::errors::RibbleError;
 use crossbeam::scope;
-use ribble_whisper::utils::{get_channel, Receiver, Sender};
+use ribble_whisper::utils::{Receiver, Sender, get_channel};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -90,7 +90,7 @@ impl WorkerEngine {
                 // NOTE: at the moment, it's -probably- okay for this thread to block.
                 // If this starts to become an issue once bounds are sorted out, look
                 // at implementing a priority system + bounded joining.
-                let _forwarder = s.spawn(move || {
+                let _forwarder = s.spawn(move |_| {
                     while let Ok(request) = forwarder_inner.incoming_requests.recv() {
                         match request {
                             WorkRequest::Long(work) => {
@@ -107,45 +107,43 @@ impl WorkerEngine {
                     }
                 });
 
-                let _short_worker = s.spawn(move || {
+                let _short_worker = s.spawn(move |_| {
                     while let Ok(work) = short_job_inner.short_incoming.recv() {
                         // TODO: get rid of the ? operator => these don't need to return an error.
                         match work.join() {
-                            Ok(res) => thread_inner.handle_result(res),
+                            Ok(res) => short_job_inner.handle_result(res),
                             // TODO: it might actually better to just panic the app until the new implementation
                             // is sorted out -> In no places are the work threads expected to actually panic.
                             // All errors from ribble_whisper are handled with results -> so it might be
                             // better to treat as fatal and crash the app.
                             Err(err) => {
                                 let ribble_error = RibbleError::ThreadPanic(format!("{:?}", err));
-                                thread_inner.handle_error(ribble_error)
+                                short_job_inner.handle_error(ribble_error)
                             } // Since handle_result/handle_error only return Err when the kernel's
-                            // not set, unwrapping here will panic the worker thread and information
-                            // should bubble up accordingly.
-                        }?;
+                              // not set, unwrapping here will panic the worker thread and information
+                              // should bubble up accordingly.
+                        };
                     }
                 });
 
-                let _long_worker = s.spawn(move || {
-                    while let Ok(work) = short_job_inner.long_incoming.recv() {
+                let _long_worker = s.spawn(move |_| {
+                    while let Ok(work) = long_job_inner.long_incoming.recv() {
                         // TODO: get rid of the ? operator => these don't need to return an error.
                         match work.join() {
-                            Ok(res) => thread_inner.handle_result(res),
+                            Ok(res) => long_job_inner.handle_result(res),
                             Err(err) => {
                                 let ribble_error = RibbleError::ThreadPanic(format!("{:?}", err));
-                                thread_inner.handle_error(ribble_error)
+                                long_job_inner.handle_error(ribble_error)
                             } // Since handle_result/handle_error only return Err when the kernel's
-                            // not set, unwrapping here will panic the worker thread and information
-                            // should bubble up accordingly.
-                        }?;
+                              // not set, unwrapping here will panic the worker thread and information
+                              // should bubble up accordingly.
+                        };
                     }
                 });
 
                 Ok(())
-                    .join()
-                    .map_err(|e| RibbleError::ThreadPanic(format!("{}", e)))
             })
-                .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e)))??;
+            .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e)))?;
             res
         }));
 

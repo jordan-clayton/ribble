@@ -4,7 +4,7 @@ use std::thread::JoinHandle;
 
 use slab::Slab;
 
-use crate::utils::audio_backend_proxy::{
+use crate::controller::audio_backend_proxy::{
     AudioBackendProxy, AudioCaptureRequest, SharedSdl2Capture,
 };
 use crate::utils::errors::RibbleError;
@@ -145,7 +145,7 @@ impl Ribble {
             None => egui::Theme::Dark,
             Some(theme) => theme,
         }
-        .default_visuals()
+            .default_visuals()
     }
 
     fn check_join_last_save(&mut self) {

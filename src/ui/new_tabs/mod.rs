@@ -1,18 +1,17 @@
-mod recording_tab;
-pub(in crate::ui) mod ribble_tab;
-mod transcriber_tab;
+mod recording_pane;
+pub(in crate::ui) mod ribble_pane;
+mod transcriber_pane;
 
-mod console_tab;
-mod model_tab;
-mod progress_tab;
-pub(in crate::ui) mod tabs;
-mod transcription_tab;
-mod user_preferences;
-mod vad_configs;
-mod visualizer_tab;
+mod console_pane;
+mod downloads_pane;
+pub(in crate::ui) mod panes;
+mod progress_pane;
+mod transcription_pane;
+mod user_preferences_pane;
+mod visualizer_pane;
 
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::new_tabs::ribble_tab::{RibbleTab, RibbleTabId, TabView};
+use crate::ui::new_tabs::ribble_pane::{PaneView, RibblePane, RibblePaneId};
 use crate::utils::errors::RibbleError;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -21,7 +20,7 @@ use strum::EnumCount;
 #[derive(Clone)]
 pub(in crate::ui) struct RibbleTree {
     data_directory: PathBuf,
-    tree: egui_tiles::Tree<RibbleTab>,
+    tree: egui_tiles::Tree<RibblePane>,
     behavior: RibbleTreeBehavior,
 }
 
@@ -175,7 +174,7 @@ impl RibbleTree {
     // just let it be static and take in the parts as arguments.
     // This finds the root node (if
     fn handle_missing_node(
-        tree: &mut egui_tiles::Tree<RibbleTab>,
+        tree: &mut egui_tiles::Tree<RibblePane>,
         new_child: egui_tiles::TileId,
         behavior: &mut RibbleTreeBehavior,
     ) {
@@ -221,11 +220,11 @@ impl RibbleTree {
         todo!("IMPLEMENT SERIALIZER.");
     }
 
-    fn deserialize_tree(path: &Path) -> egui_tiles::Tree<RibbleTab> {
+    fn deserialize_tree(path: &Path) -> egui_tiles::Tree<RibblePane> {
         todo!("IMPLEMENT DESERIALIZER.");
         // Try to read the tree from disk: if it's not there, log it and either return an error or construct the default layout.
     }
-    fn default_tree() -> egui_tiles::Tree<RibbleTab> {
+    fn default_tree() -> egui_tiles::Tree<RibblePane> {
         todo!("")
     }
 }
@@ -239,13 +238,13 @@ impl Drop for RibbleTree {
 #[derive(Clone)]
 pub(in crate::ui) struct RibbleTreeBehavior {
     controller: RibbleController,
-    opened_tabs: HashMap<RibbleTabId, egui_tiles::TileId>,
+    opened_tabs: HashMap<RibblePaneId, egui_tiles::TileId>,
     simplification_options: egui_tiles::SimplificationOptions,
     tab_bar_height: f32,
     gap_width: f32,
     // TODO: expose this parameter to tabs -> in the ui loop, get the parent if it's being inserted.
     // Basicially, match on whether it's a Pane ID or a Container ID.
-    add_child_to: Option<(egui_tiles::TileId, RibbleTabId)>,
+    add_child_to: Option<(egui_tiles::TileId, RibblePaneId)>,
     focus_non_tab_pane: Option<egui_tiles::TileId>,
 }
 
@@ -260,7 +259,7 @@ impl RibbleTreeBehavior {
             controller,
             // Allocate for at least 1 of each tab.
             // It's not yet determined whether to allow duplicates or not.
-            opened_tabs: HashMap::with_capacity(RibbleTab::COUNT),
+            opened_tabs: HashMap::with_capacity(RibblePane::COUNT),
             simplification_options: Default::default(),
             tab_bar_height: Self::TAB_BAR_HEIGHT,
             gap_width: Self::GAP_WIDTH,
@@ -271,19 +270,19 @@ impl RibbleTreeBehavior {
 
     pub(in crate::ui) fn from_tree(
         controller: RibbleController,
-        tree: &egui_tiles::Tree<RibbleTab>,
+        tree: &egui_tiles::Tree<RibblePane>,
     ) -> Self {
         // Preallocate for at least RibbleTab::COUNT, such that there exists a bucket for each tab.
         // At any given time, all tabs may be in the tree, so this might save on an allocation.
-        let mut opened_tabs = HashMap::with_capacity(RibbleTab::COUNT);
+        let mut opened_tabs = HashMap::with_capacity(RibblePane::COUNT);
 
         // Travel the tree and grab all RibbleTabs to store their TileId
         // These are used when adding a new tab; if one already exists in the tree,
         // it'll be brought into focus, rather than adding a duplicate.
         for (tile_id, tile) in tree.tiles.iter() {
             match tile {
-                egui_tiles::Tile::Pane(ribble_tab) => {
-                    let ribble_id = ribble_tab.tile_id();
+                egui_tiles::Tile::Pane(ribble_pane) => {
+                    let ribble_id = ribble_pane.pane_id();
                     // TileId implements Copy, so this can just be dereferenced.
                     opened_tabs.insert(ribble_id, *tile_id);
                 }
@@ -303,13 +302,13 @@ impl RibbleTreeBehavior {
     }
 }
 
-impl egui_tiles::Behavior<RibbleTab> for RibbleTreeBehavior {
+impl egui_tiles::Behavior<RibblePane> for RibbleTreeBehavior {
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
         // NOTE: this is the TileId of the pane and not its parent
         tile_id: egui_tiles::TileId,
-        pane: &mut RibbleTab,
+        pane: &mut RibblePane,
     ) -> egui_tiles::UiResponse {
         let pane_id = egui::Id::new(tile_id);
 
@@ -331,18 +330,18 @@ impl egui_tiles::Behavior<RibbleTab> for RibbleTreeBehavior {
         }
     }
 
-    fn tab_title_for_pane(&mut self, pane: &RibbleTab) -> egui::WidgetText {
-        pane.tab_title()
+    fn tab_title_for_pane(&mut self, pane: &RibblePane) -> egui::WidgetText {
+        pane.pane_title()
     }
 
     fn is_tab_closable(
         &self,
-        tiles: &egui_tiles::Tiles<RibbleTab>,
+        tiles: &egui_tiles::Tiles<RibblePane>,
         tile_id: egui_tiles::TileId,
     ) -> bool {
         if let Some(tile) = tiles.get(tile_id) {
             match tile {
-                egui_tiles::Tile::Pane(ribble_tab) => ribble_tab.is_tab_closable(),
+                egui_tiles::Tile::Pane(ribble_pane) => ribble_pane.is_pane_closable(),
                 // NOTE: I don't believe it's possible for this to ever be reached, but in case it
                 // does, the container itself should always be closable; it's only panes that
                 // should control whether they close.
@@ -355,16 +354,16 @@ impl egui_tiles::Behavior<RibbleTab> for RibbleTreeBehavior {
 
     fn on_tab_close(
         &mut self,
-        tiles: &mut egui_tiles::Tiles<RibbleTab>,
+        tiles: &mut egui_tiles::Tiles<RibblePane>,
         tile_id: egui_tiles::TileId,
     ) -> bool {
         if let Some(tile) = tiles.get_mut(tile_id) {
             match tile {
                 egui_tiles::Tile::Pane(ribble_tab) => {
-                    let close_tab = ribble_tab.on_tab_close(self.controller.clone());
+                    let close_tab = ribble_tab.on_pane_close(self.controller.clone());
                     // If it's a close-able tab, remove it from the mapping.
                     if close_tab {
-                        let id = ribble_tab.tile_id();
+                        let id = ribble_tab.pane_id();
                         self.opened_tabs.remove(&id);
                     }
                     close_tab
@@ -378,7 +377,7 @@ impl egui_tiles::Behavior<RibbleTab> for RibbleTreeBehavior {
 
     fn top_bar_right_ui(
         &mut self,
-        _tiles: &egui_tiles::Tiles<RibbleTab>,
+        _tiles: &egui_tiles::Tiles<RibblePane>,
         ui: &mut egui::Ui,
         tile_id: egui_tiles::TileId,
         _tabs: &egui_tiles::Tabs,

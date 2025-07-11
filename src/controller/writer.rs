@@ -11,8 +11,8 @@ use parking_lot::RwLock;
 use ribble_whisper::audio::pcm::IntoPcmS16;
 use ribble_whisper::utils::{Receiver, Sender};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -73,7 +73,8 @@ impl WriterEngineState {
 
     fn try_get_latest(&self) -> Option<PathBuf> {
         // Try and get the last inserted key
-        let latest = self.completed_jobs
+        let latest = self
+            .completed_jobs
             .read()
             .last()
             .and_then(|(file_name, _)| Some(self.data_directory.join(file_name)));
@@ -109,6 +110,8 @@ impl WriterEngineState {
         }
     }
 
+    // TODO: copy the work sender in the outer struct for clearing and just use the inner logic
+    // here.
     fn clear_cache(&self) {
         self.clearing.store(true, Ordering::Release);
         let work_handle = std::thread::spawn(move || {
@@ -150,12 +153,7 @@ impl WriterEngineState {
         }
     }
 
-    fn export_file(
-        &self,
-        outfile_path: &Path,
-        key: &str,
-        format: RibbleRecordingExportFormat,
-    ) {
+    fn export_file(&self, outfile_path: &Path, key: &str, format: RibbleRecordingExportFormat) {
         let work_handle = std::thread::spawn(move || {
             let tmp_file_path = self.data_directory.join(key);
             let check_tmp_file = std::fs::exists(tmp_file_path.as_path());
@@ -168,7 +166,7 @@ impl WriterEngineState {
                 std::fs::copy(tmp_file_path.as_path(), outfile_path)?;
 
                 let console_message =
-                    ConsoleMessage::Status(format!("Saved recording to {outfile_path}!"));
+                    ConsoleMessage::Status(format!("Saved recording to {:#?}!", outfile_path));
                 let ribble_message = RibbleMessage::Console(console_message);
                 Ok(ribble_message)
             } else {
@@ -184,8 +182,8 @@ impl WriterEngineState {
                 let sample_rate = job.sample_rate();
                 let channels = job.channels();
                 let spec = WavSpec {
-                    channels: channels.into(),
-                    sample_rate: sample_rate.into(),
+                    channels: channels as u16,
+                    sample_rate: sample_rate as u32,
                     bits_per_sample: 16,
                     sample_format: format.into(),
                 };
@@ -195,8 +193,8 @@ impl WriterEngineState {
 
                 let int_audio = reader
                     .samples::<f32>()
-                    .map(|sample| sample.map(|sample| sample?.into_pcm_s16()))
-                    .collect::<Result<Vec<i16>, RibbleError>>()?;
+                    .map(|sample| sample.map(|f| f.into_pcm_s16()))
+                    .collect::<Result<Vec<i16>, _>>()?;
 
                 // Open a writer to read the new file out.
                 let mut writer = WavWriter::create(outfile_path, spec)?;
@@ -206,7 +204,7 @@ impl WriterEngineState {
 
                 writer.finalize()?;
                 let console_message =
-                    ConsoleMessage::Status(format!("Saved recording to {outfile_path}!"));
+                    ConsoleMessage::Status(format!("Saved recording to {:#?}!", outfile_path));
                 let ribble_message = RibbleMessage::Console(console_message);
                 Ok(ribble_message)
             }
@@ -217,10 +215,7 @@ impl WriterEngineState {
         }
     }
 
-    // NOTE: this might need some more tlc.  Since there's no way to return
-    // feedback to the caller about the status of this job until it's joined,
-    // start the thread early before doing anything that could return an error.
-    // The WorkerEngine has tools to provide information about the execution.
+    // TODO: THE THREAD SPAWNING HAS TO EXIST OUTSIDE OF THIS METHOD.
     fn handle_new_request(&self, request: WriteRequest) -> RibbleWorkerHandle {
         std::thread::spawn(move || {
             // Unpack the request
@@ -291,12 +286,16 @@ pub(super) struct WriterEngine {
 }
 
 impl WriterEngine {
-    pub(super) fn new(data_directory: PathBuf, incoming_jobs: Receiver<WriteRequest>, bus: &Bus) -> Self {
+    pub(super) fn new(
+        data_directory: PathBuf,
+        incoming_jobs: Receiver<WriteRequest>,
+        bus: &Bus,
+    ) -> Self {
         let inner = Arc::new(WriterEngineState::new(data_directory, incoming_jobs, bus));
         let thread_inner = Arc::clone(&inner);
         let polling_thread = std::thread::spawn(move || {
             while let Ok(request) = thread_inner.incoming_jobs.recv() {
-                // TODO: the thread spawning could probably just be in the method itself.
+                // TODO: this doesn't work -> The thread needs to be spawned here.
                 let work_request = WorkRequest::Short(thread_inner.handle_new_request(request));
 
                 if thread_inner.work_request_sender.send(work_request).is_err() {
@@ -314,6 +313,8 @@ impl WriterEngine {
         }
     }
 
+    // TODO: take a copy of the work_request sender and send from here.
+    //
     // NOTE: Send the key in if the user wants to export a recording.
     // NOTE TWICE: remove .into() once RibbleAppError has been removed.
     pub(super) fn export(
@@ -322,15 +323,24 @@ impl WriterEngine {
         job_file_name: &str,
         output_format: RibbleRecordingExportFormat,
     ) {
-        self.inner.export_file(out_path, job_file_name, output_format);
+        self.inner
+            .export_file(out_path, job_file_name, output_format);
     }
 
     // NOTE: since the IndexMap preserves ordering based on insertion order, this
     // Needs to be reversed so that the information is presented most-recent to least-recent
-    pub(super) fn try_get_completed_jobs(&self, copy_buffer: &mut Vec<(String, CompletedRecordingJobs)>) {
+    // NOTE: If cloning somehow becomes super expensive (it should only be very small strings),
+    // Look at a better solution/shared pointers.
+    pub(super) fn try_get_completed_jobs(
+        &self,
+        copy_buffer: &mut Vec<(String, CompletedRecordingJobs)>,
+    ) {
         if let Some(jobs) = self.inner.completed_jobs.try_read() {
             copy_buffer.clear();
-            copy_buffer.extend(jobs.iter().copied());
+            copy_buffer.extend(
+                jobs.iter()
+                    .map(|(file_name, metadata)| (file_name.clone(), metadata.clone())),
+            );
             copy_buffer.reverse();
         }
     }

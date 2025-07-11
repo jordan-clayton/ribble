@@ -1,14 +1,14 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{CompletedRecordingJobs, OfflineTranscriberFeedback};
-use crate::ui::new_tabs::TabView;
-use crate::ui::new_tabs::ribble_tab::RibbleTabId;
+use crate::ui::new_tabs::PaneView;
+use crate::ui::new_tabs::ribble_pane::RibblePaneId;
 use crate::ui::widgets::toggle_switch::toggle;
 use crate::utils::vad_configs::{VadFrameSize, VadStrictness, VadType};
 use ribble_whisper::whisper::configs::Language;
 use strum::IntoEnumIterator;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub(in crate::ui) struct TranscriberTab {
+pub(in crate::ui) struct TranscriberPane {
     #[serde(default = "set_realtime")]
     pub realtime: bool,
     #[serde(skip)]
@@ -31,7 +31,7 @@ fn set_realtime() -> bool {
     true
 }
 
-impl Default for TranscriberTab {
+impl Default for TranscriberPane {
     fn default() -> Self {
         Self {
             realtime: true,
@@ -43,12 +43,12 @@ impl Default for TranscriberTab {
     }
 }
 
-impl TabView for TranscriberTab {
-    fn tile_id(&self) -> RibbleTabId {
-        RibbleTabId::Transcriber
+impl PaneView for TranscriberPane {
+    fn pane_id(&self) -> RibblePaneId {
+        RibblePaneId::Transcriber
     }
 
-    fn tab_title(&self) -> egui::WidgetText {
+    fn pane_title(&self) -> egui::WidgetText {
         if self.realtime {
             "Real-time Transcription".into()
         } else {
@@ -535,7 +535,7 @@ impl TabView for TranscriberTab {
             .on_hover_cursor(egui::CursorIcon::Grab)
     }
 
-    fn is_tab_closable(&self) -> bool {
-        true
+    fn is_pane_closable(&self) -> bool {
+        false
     }
 }

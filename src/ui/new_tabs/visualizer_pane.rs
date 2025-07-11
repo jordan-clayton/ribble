@@ -1,31 +1,22 @@
 use crate::controller::NUM_VISUALIZER_BUCKETS;
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::new_tabs::TabView;
-use crate::ui::new_tabs::ribble_tab::RibbleTabId;
+use crate::ui::new_tabs::PaneView;
+use crate::ui::new_tabs::ribble_pane::RibblePaneId;
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct VisualizerTab {
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct VisualizerPane {
     #[serde(skip)]
     #[serde(default)]
     visualizer_buckets: [f32; NUM_VISUALIZER_BUCKETS],
     presentation_buckets: [f32; NUM_VISUALIZER_BUCKETS],
 }
 
-impl Default for VisualizerTab {
-    fn default() -> Self {
-        Self {
-            visualizer_buckets: Default::default(),
-            presentation_buckets: Default::default(),
-        }
-    }
-}
-
-impl TabView for VisualizerTab {
-    fn tile_id(&self) -> RibbleTabId {
-        RibbleTabId::Visualizer
+impl PaneView for VisualizerPane {
+    fn pane_id(&self) -> RibblePaneId {
+        RibblePaneId::Visualizer
     }
 
-    fn tab_title(&self) -> egui::WidgetText {
+    fn pane_title(&self) -> egui::WidgetText {
         "Visualizer".into()
     }
 
@@ -93,10 +84,10 @@ impl TabView for VisualizerTab {
         resp
     }
 
-    fn is_tab_closable(&self) -> bool {
+    fn is_pane_closable(&self) -> bool {
         true
     }
-    fn on_tab_close(&mut self, controller: RibbleController) -> bool {
+    fn on_pane_close(&mut self, controller: RibbleController) -> bool {
         controller.set_visualizer_visibility(false);
         true
     }

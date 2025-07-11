@@ -1,15 +1,27 @@
+use crate::controller::{
+    Bus, ConsoleMessage, DownloadRequest, RibbleMessage, SMALL_UTILITY_QUEUE_SIZE, WorkRequest,
+};
 use crate::utils::errors::RibbleError;
 use case_style::CaseStyle;
 use indexmap::IndexMap;
 use parking_lot::RwLock;
 use ribble_whisper::utils::errors::RibbleWhisperError;
+use ribble_whisper::utils::{Receiver, Sender, get_channel};
 use ribble_whisper::whisper::model::{ConcurrentModelBank, Model, ModelId, ModelRetriever};
 use std::ffi::OsStr;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::thread::JoinHandle;
 use twox_hash::XxHash3_64;
+// TODO: remove this dependency -> handle this all in ribble_whisper
+use url::Url;
+
+use notify_debouncer_full::notify::EventKind;
+use notify_debouncer_full::{
+    DebounceEventResult, DebouncedEvent, new_debouncer, notify::RecursiveMode,
+};
 
 // TODO: methods for downloading models (take in a bus to send download jobs).
 // NOTE: this should also spawn jobs in the worker engine for COPY OPERATIONS ONLY.
@@ -25,16 +37,24 @@ use twox_hash::XxHash3_64;
 
 const MODEL_ID_SEED: u64 = 0;
 const MODEL_FILE_EXTENSION: &'static str = "bin";
+// NOTE: THIS IS IN MILLISECONDS
+// NOTE TWICE: if this is burning cycles, increase the timeout or add an explicit tick-rate that's
+// close to the actual timeout.
+const MAX_DEBOUNCE_TIME: u64 = 2000;
 
 struct RibbleModelBankState {
     model_directory: PathBuf,
     model_map: RwLock<IndexMap<ModelId, Model>>,
+    model_directory_watcher: Receiver<DebounceEventResult>,
 }
 
 impl RibbleModelBankState {
     const DEFAULT_MODEL_MAP_SIZE: usize = 8;
 
-    pub fn new(model_directory: &Path) -> Result<Self, RibbleError> {
+    pub fn new(
+        model_directory: &Path,
+        watcher: Receiver<DebounceEventResult>,
+    ) -> Result<Self, RibbleError> {
         let model_map = RwLock::new(IndexMap::with_capacity(Self::DEFAULT_MODEL_MAP_SIZE));
         let model_directory = model_directory.to_path_buf();
 
@@ -48,6 +68,7 @@ impl RibbleModelBankState {
             Self {
                 model_directory,
                 model_map,
+                model_directory_watcher: watcher,
             }
             .init()
         }
@@ -60,6 +81,28 @@ impl RibbleModelBankState {
 
     fn model_directory(&self) -> &Path {
         self.model_directory.as_path()
+    }
+
+    // This just checks to see if there was any major modification to the models directory.
+    // On a change, it refreshes the model bank.
+    fn handle_debounced_events(&self, events: &[DebouncedEvent]) {
+        let changed = events.iter().any(|deb_event| match deb_event.event.kind {
+            // NOTE: If it becomes imperative to limit Create() and Remove() to files and only
+            // files, (right now, it's any: files/folders/any/other), then bring in notify_types.
+            // For whatever reason, the types aren't publicly exposed in notify_debouncer_full.
+            EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => true,
+            // NOTE: if missing events due to OS weirdness, accept EventKind::Any (is the
+            // catch-all event)
+            _ => false,
+        });
+
+        if !changed {
+            return;
+        }
+
+        if self.refresh_model_bank().is_err() {
+            todo!("LOGGING");
+        }
     }
 
     fn fill_model_bank(&self) -> Result<(), std::io::Error> {
@@ -261,16 +304,66 @@ pub(crate) struct RibbleModelBank {
     inner: Arc<RibbleModelBankState>,
     // TODO: thread handle + watcher.
     work_sender: Sender<WorkRequest>,
-    // I'm not sure whether this should be here, or whether this should be handled by the kernel.
     download_sender: Sender<DownloadRequest>,
+    worker_thread: Option<JoinHandle<Result<(), RibbleError>>>,
 }
 
 impl RibbleModelBank {
+    // NOTE: this filename should be canonicalized before it's passed in here
+    // CHECK THIS IN THE CONTROLLER CONSTRUCTOR AND ESCAPE EARLY.
     pub(crate) fn new(model_directory: &Path, bus: &Bus) -> Result<Self, RibbleError> {
-        let inner = Arc::new(RibbleModelBankState::new(model_directory)?);
-        // TODO: watcher thread.
-        todo!("Move module, fix imports, and write the watcher thread.");
-        Ok(Self { inner })
+        let (event_sender, event_receiver) = get_channel(SMALL_UTILITY_QUEUE_SIZE);
+        let inner = Arc::new(RibbleModelBankState::new(model_directory, event_receiver)?);
+        // TODO: watcher thread -> watch the directory for create/modify/delete and just run the update routine.
+
+        // TODO: this will need a hooooook for errors in RibbleError
+        // Args: timeout, tick-rate (None => 1/4 * timeout), event_handler (queue)
+        let mut debouncer = new_debouncer(
+            std::time::Duration::from_millis(MAX_DEBOUNCE_TIME),
+            None,
+            event_sender,
+        )?;
+
+        let thread_inner = Arc::clone(&inner);
+        let file_directory = model_directory.to_path_buf();
+        let work_thread = std::thread::spawn(move || {
+            debouncer.watch(file_directory.as_path(), RecursiveMode::NonRecursive)?;
+
+            while let Ok(result) = thread_inner.model_directory_watcher.recv() {
+                match result {
+                    Ok(events) => {
+                        thread_inner.handle_debounced_events(&events);
+                    }
+                    Err(mut e) => {
+                        // TODO: LOGGING
+                        // TODO TWICE: determine whether or not this should return the result.
+                        // TODO THRICE: determine whether this is considered "panic" territory, or
+                        // whether the app should continue running/optional re-spawn the thread.
+                        // Most errors seem pretty dire (can't watch/io/OS specific), but a
+                        // "refresh" button for manual directory crawling mightn't be so bad--
+                        // though this is most likely to encounter fs issues if that's true anyway.
+                        let mut last_err = None;
+                        while let Some(err) = e.pop() {
+                            // TODO: LOGGING
+                            last_err = Some(err);
+                        }
+
+                        if let Some(err) = last_err.take() {
+                            return Err(err.into());
+                        }
+                    }
+                }
+            }
+
+            Ok(())
+        });
+
+        Ok(Self {
+            inner,
+            work_sender: bus.work_request_sender(),
+            download_sender: bus.download_request_sender(),
+            worker_thread: Some(work_thread),
+        })
     }
 
     // NOTE: since for_each in the ConcurrentModelBank only takes Fn(..), it's not possible to draw UI code with the egui
@@ -284,41 +377,46 @@ impl RibbleModelBank {
         }
     }
 
+    pub(crate) fn download_new_model(&self, url: &str) {
+        todo!("Finish download routine.");
+        // Extract the file-name from the back of the ... sluuug?
+        // Not sure how to resolve a shortlink.
+    }
+
     // This will make a work request to copy the file over.
-    pub(super) fn copy_model_path(&self, model_file_path: &Path) {
-        let model_directory = self.model_directory();
+    pub(crate) fn copy_model_to_bank(&self, model_file_path: &Path) {
+        let model_directory = self.model_directory().to_path_buf();
+        let file_path = model_file_path.to_path_buf();
         let worker = std::thread::spawn(move || {
-            if !model_file_path.is_file() {
-                let err = RibbleError::Core(format!("{:?} is not a file.", model_file_path));
+            if !file_path.is_file() {
+                let err = RibbleError::Core(format!("{:?} is not a file.", file_path));
                 return Err(err);
             }
 
-            let extension = model_file_path
+            let extension = file_path
                 .extension()
-                .ok_or(RibbleError::Core(format!(
-                    "Invalid file: {:?}",
-                    model_file_path
-                )))?;
+                .ok_or(RibbleError::Core(format!("Invalid file: {:?}", file_path)))?;
 
             if extension != MODEL_FILE_EXTENSION {
                 let err = RibbleError::Core(format!("Invalid file_type: {:?}", extension));
                 return Err(err);
             }
 
-            let file_name = model_file_path
-                .file_name()
-                .ok_or(RibbleError::Core(format!(
-                    "Invalid file path: {:?}",
-                    model_file_path
-                )))?;
+            let file_name = file_path.file_name().ok_or(RibbleError::Core(format!(
+                "Invalid file path: {:?}",
+                file_path
+            )))?;
 
             let dest = model_directory.join(file_name);
 
-            std::fs::copy(model_file_path, dest.as_path())?;
+            fs::copy(file_path.as_path(), dest.as_path())?;
+            let console_message = ConsoleMessage::Status(format!(
+                "Saved model: {:#?} to models directory.",
+                file_name
+            ));
+            let ribble_message = RibbleMessage::Console(console_message);
 
-            let ribble_message = RibbleMessage::Console();
-
-            todo!()
+            Ok(ribble_message)
         });
 
         let work_request = WorkRequest::Short(worker);
@@ -356,16 +454,13 @@ impl ConcurrentModelBank for RibbleModelBank {
         self.inner.get_model(model_id)
     }
 
-    // This tries to fetch a model and update its  (user-facing) name.
-    // # Returns:
-    // * Ok(Some(ModelId)) -> the ModelId for the updated model, on success.
-    // * Ok(None) -> the old Model was not in the bank, if the id wasn't present
-    fn rename_model(
-        &self,
-        model_id: ModelId,
-        new_name: String,
-    ) -> Result<Option<ModelId>, RibbleWhisperError> {
-        self.inner.rename_model(model_id, new_name)
+    fn for_each<F>(&self, f: F)
+    where
+        F: Fn((&ModelId, &Model)),
+    {
+        for (model_id, model) in self.inner.model_map.read().iter() {
+            f((model_id, model));
+        }
     }
 
     // This changes out the file name if an old entry exists in the bank.
@@ -379,6 +474,18 @@ impl ConcurrentModelBank for RibbleModelBank {
     // If it is the case that a user manages to delete an entry from the hashmap without removing
     // the physical file, the entry will appear when the folder is refreshed/the app launches.
     // It's not possible with this implementation to locate a model if the key-value pair is missing.
+
+    // This tries to fetch a model and update its  (user-facing) name.
+    // # Returns:
+    // * Ok(Some(ModelId)) -> the ModelId for the updated model, on success.
+    // * Ok(None) -> the old Model was not in the bank, if the id wasn't present
+    fn rename_model(
+        &self,
+        model_id: ModelId,
+        new_name: String,
+    ) -> Result<Option<ModelId>, RibbleWhisperError> {
+        self.inner.rename_model(model_id, new_name)
+    }
 
     fn change_model_file_name(
         &self,
@@ -402,15 +509,6 @@ impl ConcurrentModelBank for RibbleModelBank {
     // This probably shouldn't be exposed in the GUI.
     fn refresh_model_bank(&self) -> Result<(), RibbleWhisperError> {
         self.inner.refresh_model_bank()
-    }
-
-    fn for_each<F>(&self, f: F)
-    where
-        F: Fn((&ModelId, &Model)),
-    {
-        for (model_id, model) in self.inner.model_map.read().iter() {
-            f((model_id, model));
-        }
     }
 }
 

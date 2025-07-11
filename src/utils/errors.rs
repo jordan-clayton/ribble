@@ -17,4 +17,6 @@ pub(crate) enum RibbleError {
     IOError(#[from] std::io::Error),
     #[error("WavError: {0}")]
     WavError(#[from] hound::Error),
+    #[error("DirectoryWatcher: {0}")]
+    DirectoryWatcher(#[from] notify_debouncer_full::notify::Error),
 }

@@ -1,29 +1,21 @@
 use crate::controller::Progress;
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::new_tabs::TabView;
-use crate::ui::new_tabs::ribble_tab::RibbleTabId;
+use crate::ui::new_tabs::PaneView;
+use crate::ui::new_tabs::ribble_pane::RibblePaneId;
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ProgressTab {
+#[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ProgressPane {
     #[serde(default)]
     #[serde(skip)]
     current_jobs: Vec<Progress>,
 }
 
-impl Default for ProgressTab {
-    fn default() -> Self {
-        Self {
-            current_jobs: vec![],
-        }
-    }
-}
-
-impl TabView for ProgressTab {
-    fn tile_id(&self) -> RibbleTabId {
-        RibbleTabId::Progress
+impl PaneView for ProgressPane {
+    fn pane_id(&self) -> RibblePaneId {
+        RibblePaneId::Progress
     }
 
-    fn tab_title(&self) -> egui::WidgetText {
+    fn pane_title(&self) -> egui::WidgetText {
         "Progress".into()
     }
 
@@ -84,7 +76,7 @@ impl TabView for ProgressTab {
         resp
     }
 
-    fn is_tab_closable(&self) -> bool {
+    fn is_pane_closable(&self) -> bool {
         true
     }
 }
