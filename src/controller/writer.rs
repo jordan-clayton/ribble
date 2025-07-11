@@ -1,7 +1,7 @@
 use crate::controller::ConsoleMessage;
+use crate::controller::RibbleMessage;
 use crate::controller::WorkRequest;
 use crate::controller::{Bus, CompletedRecordingJobs};
-use crate::controller::{RibbleMessage, RibbleWorkerHandle};
 use crate::utils::errors::RibbleError;
 use crate::utils::recorder_configs::RibbleRecordingConfigs;
 use crate::utils::recorder_configs::RibbleRecordingExportFormat;
@@ -44,6 +44,8 @@ struct WriterEngineState {
     data_directory: PathBuf,
     completed_jobs: RwLock<IndexMap<String, CompletedRecordingJobs>>,
     incoming_jobs: Receiver<WriteRequest>,
+    // This is just for spawning a write loop - the outer WriterEngine has to handle sending clear
+    // jobs.
     work_request_sender: Sender<WorkRequest>,
 }
 
@@ -110,179 +112,171 @@ impl WriterEngineState {
         }
     }
 
-    // TODO: copy the work sender in the outer struct for clearing and just use the inner logic
-    // here.
-    fn clear_cache(&self) {
+    // NOTE: the comments below might be untrue -> if this does have to end up returning an error,
+    // reset the clearing flag in an or_else clause.
+    fn clear_cache(&self) -> Result<RibbleMessage, RibbleError> {
         self.clearing.store(true, Ordering::Release);
-        let work_handle = std::thread::spawn(move || {
-            let mut completed_jobs = self.completed_jobs.write();
+        let mut completed_jobs = self.completed_jobs.write();
 
-            for file in completed_jobs.keys() {
-                let file_path = self.data_directory.join(file);
-                if let Ok(exists) = std::fs::exists(file_path.as_path()) {
-                    // Don't care if the path is a directory (it should never, ever be one)
-                    // Don't care if the file is already gone (the entry will get deleted from the map)
-                    //
-                    // If a user lacks permission to remove the file, then they're going to have a lot
-                    // of trouble running this application - but it's not an error.
-                    // When the app re-launches, this will just clobber any existing temporary files
-                    // for recordings - i.e. let whomever can clear the cache files, clear the cache
-                    // files.
-                    if exists {
-                        let _ = std::fs::remove_file(file_path.as_path());
-                    }
+        for file in completed_jobs.keys() {
+            let file_path = self.data_directory.join(file);
+            if let Ok(exists) = std::fs::exists(file_path.as_path()) {
+                // Don't care if the path is a directory (it should never, ever be one)
+                // Don't care if the file is already gone (the entry will get deleted from the map)
+                //
+                // If a user lacks permission to remove the file, then they're going to have a lot
+                // of trouble running this application - but it's not an error.
+                // When the app re-launches, this will just clobber any existing temporary files
+                // for recordings - i.e. let whomever can clear the cache files, clear the cache
+                // files.
+                if exists {
+                    let _ = std::fs::remove_file(file_path.as_path());
                 }
             }
+        }
 
-            self.latest_exists.store(false, Ordering::Release);
-            // Then empty the hashmap and reset the accumulator.
-            completed_jobs.clear();
-            self.ticket.store(0, Ordering::Release);
+        self.latest_exists.store(false, Ordering::Release);
+        // Then empty the hashmap and reset the accumulator.
+        completed_jobs.clear();
+        self.ticket.store(0, Ordering::Release);
 
-            let console_message = ConsoleMessage::Status("Recording cache cleared.".to_string());
+        let console_message = ConsoleMessage::Status("Recording cache cleared.".to_string());
+        let ribble_message = RibbleMessage::Console(console_message);
+
+        self.clearing.store(false, Ordering::Release);
+        Ok(ribble_message)
+    }
+
+    fn export_file(
+        &self,
+        // Since the outer API has to CoW, just take the path.
+        outfile_path: PathBuf,
+        // ibid.
+        key: String,
+        format: RibbleRecordingExportFormat,
+    ) -> Result<RibbleMessage, RibbleError> {
+        let tmp_file_path = self.data_directory.join(key.as_str());
+        let check_tmp_file = std::fs::exists(tmp_file_path.as_path());
+        if check_tmp_file.is_err() || !check_tmp_file? {
+            let error = std::io::Error::from(std::io::ErrorKind::NotFound);
+            return Err(RibbleError::IOError(error));
+        }
+        // If it's already in floating point, then this can be a direct copy.
+        if matches!(format, RibbleRecordingExportFormat::F32) {
+            std::fs::copy(tmp_file_path.as_path(), outfile_path.as_path())?;
+
+            let console_message =
+                ConsoleMessage::Status(format!("Saved recording to {:#?}!", outfile_path));
             let ribble_message = RibbleMessage::Console(console_message);
-
-            self.clearing.store(false, Ordering::Release);
             Ok(ribble_message)
-        });
+        } else {
+            let read_guard = self.completed_jobs.read();
 
-        let work_request = WorkRequest::Short(work_handle);
+            let job = read_guard.get(key.as_str()).ok_or(RibbleError::Core(
+                "Temp recording metadata not found.".to_string(),
+            ))?;
 
-        if self.work_request_sender.send(work_request).is_err() {
-            todo!("LOGGING")
-        }
-    }
+            let sample_rate = job.sample_rate();
+            let channels = job.channels();
+            let spec = WavSpec {
+                channels: channels as u16,
+                sample_rate: sample_rate as u32,
+                bits_per_sample: 16,
+                sample_format: format.into(),
+            };
 
-    fn export_file(&self, outfile_path: &Path, key: &str, format: RibbleRecordingExportFormat) {
-        let work_handle = std::thread::spawn(move || {
-            let tmp_file_path = self.data_directory.join(key);
-            let check_tmp_file = std::fs::exists(tmp_file_path.as_path());
-            if check_tmp_file.is_err() || !check_tmp_file? {
-                let error = std::io::Error::from(std::io::ErrorKind::NotFound);
-                return Err(RibbleError::IOError(error));
-            }
-            // If it's already in floating point, then this can be a direct copy.
-            if matches!(format, RibbleRecordingExportFormat::F32) {
-                std::fs::copy(tmp_file_path.as_path(), outfile_path)?;
+            // Open a reader to read in the file to a buffer
+            let mut reader = WavReader::open(tmp_file_path.as_path())?;
 
-                let console_message =
-                    ConsoleMessage::Status(format!("Saved recording to {:#?}!", outfile_path));
-                let ribble_message = RibbleMessage::Console(console_message);
-                Ok(ribble_message)
-            } else {
-                // Otherwise, convert to S16 PCM audio and write out.
-                let job = self
-                    .completed_jobs
-                    .read()
-                    .get(key)
-                    .ok_or(RibbleError::Core(
-                        "Temp recording metadata not found.".to_string(),
-                    ))?;
+            let int_audio = reader
+                .samples::<f32>()
+                .map(|sample| sample.map(|f| f.into_pcm_s16()))
+                .collect::<Result<Vec<i16>, _>>()?;
 
-                let sample_rate = job.sample_rate();
-                let channels = job.channels();
-                let spec = WavSpec {
-                    channels: channels as u16,
-                    sample_rate: sample_rate as u32,
-                    bits_per_sample: 16,
-                    sample_format: format.into(),
-                };
-
-                // Open a reader to read in the file to a buffer
-                let mut reader = WavReader::open(tmp_file_path.as_path())?;
-
-                let int_audio = reader
-                    .samples::<f32>()
-                    .map(|sample| sample.map(|f| f.into_pcm_s16()))
-                    .collect::<Result<Vec<i16>, _>>()?;
-
-                // Open a writer to read the new file out.
-                let mut writer = WavWriter::create(outfile_path, spec)?;
-                for int_sample in int_audio {
-                    writer.write_sample(int_sample)?
-                }
-
-                writer.finalize()?;
-                let console_message =
-                    ConsoleMessage::Status(format!("Saved recording to {:#?}!", outfile_path));
-                let ribble_message = RibbleMessage::Console(console_message);
-                Ok(ribble_message)
-            }
-        });
-        let work_request = WorkRequest::Long(work_handle);
-        if self.work_request_sender.send(work_request).is_err() {
-            todo!("LOGGING");
-        }
-    }
-
-    // TODO: THE THREAD SPAWNING HAS TO EXIST OUTSIDE OF THIS METHOD.
-    fn handle_new_request(&self, request: WriteRequest) -> RibbleWorkerHandle {
-        std::thread::spawn(move || {
-            // Unpack the request
-            let (receiver, spec) = request.unpack();
-
-            // The files should look like "tmp<ticket_no>.wav"
-            let ticket_no = self.ticket.fetch_add(1, Ordering::AcqRel);
-            let tmp_name = Self::TMP_FILE;
-            let ext = Self::FILE_EXTENSION;
-            let file_name = format!("{tmp_name}{ticket_no}.{ext}");
-            let path = self.data_directory.join(&file_name);
-
-            // Make a new WavWriter
-            let wav_spec = spec.into_wav_spec(RibbleRecordingExportFormat::F32)?;
-            // TODO: write an errors hook for hound errors.
-            let mut writer = WavWriter::create(path, wav_spec)?;
-            // NOTE: SDL (current backend sends interleaved data)
-            // Wav is also interleaved, so this can just automatically write samples
-
-            let mut num_floats = 0usize;
-            while let Ok(samples) = receiver.recv() {
-                for sample in samples.iter().copied() {
-                    writer.write_sample(sample)?;
-                }
-
-                num_floats += samples.len();
+            // Open a writer to read the new file out.
+            let mut writer = WavWriter::create(outfile_path.as_path(), spec)?;
+            for int_sample in int_audio {
+                writer.write_sample(int_sample)?
             }
 
-            let total_duration_in_seconds = writer.duration() / wav_spec.sample_rate;
-            let total_duration = Duration::from_secs(total_duration_in_seconds as u64);
             writer.finalize()?;
-            let file_size_estimate = num_floats * size_of::<f32>();
-
-            // Make a new entry in the completed jobs queue.
-            let mut job_bank = self.completed_jobs.write();
-            job_bank.insert(
-                file_name,
-                CompletedRecordingJobs {
-                    total_duration,
-                    file_size_estimate,
-                    sample_rate: wav_spec.sample_rate as usize,
-                    channels: wav_spec.channels as usize,
-                },
-            );
-
-            // Format HH:MM:SS
-            let secs = total_duration.as_secs();
-            let seconds = secs % 60;
-            let minutes = (secs / 60) % 60;
-            let hours = (secs / 60) / 60;
-
             let console_message = ConsoleMessage::Status(format!(
-                "Finished Recording. Total duration: {hours}:{minutes}:{seconds}"
+                "Saved recording to {:#?}!",
+                outfile_path.as_path()
             ));
-
-            // Update the latest_exists flag --> if the transcription was written, it has to exist
-            // and be accessible.
-            self.latest_exists.fetch_or(true, Ordering::AcqRel);
             let ribble_message = RibbleMessage::Console(console_message);
             Ok(ribble_message)
-        })
+        }
+    }
+
+    fn handle_new_request(&self, request: WriteRequest) -> Result<RibbleMessage, RibbleError> {
+        // Unpack the request
+        let (receiver, spec) = request.unpack();
+
+        // The files should look like "tmp<ticket_no>.wav"
+        let ticket_no = self.ticket.fetch_add(1, Ordering::AcqRel);
+        let tmp_name = Self::TMP_FILE;
+        let ext = Self::FILE_EXTENSION;
+        let file_name = format!("{tmp_name}{ticket_no}.{ext}");
+        let path = self.data_directory.join(&file_name);
+
+        // Make a new WavWriter
+        let wav_spec = spec.into_wav_spec(RibbleRecordingExportFormat::F32)?;
+        // TODO: write an errors hook for hound errors.
+        let mut writer = WavWriter::create(path, wav_spec)?;
+        // NOTE: SDL (current backend sends interleaved data)
+        // Wav is also interleaved, so this can just automatically write samples
+
+        let mut num_floats = 0usize;
+        while let Ok(samples) = receiver.recv() {
+            for sample in samples.iter().copied() {
+                writer.write_sample(sample)?;
+            }
+
+            num_floats += samples.len();
+        }
+
+        let total_duration_in_seconds = writer.duration() / wav_spec.sample_rate;
+        let total_duration = Duration::from_secs(total_duration_in_seconds as u64);
+        writer.finalize()?;
+        let file_size_estimate = num_floats * size_of::<f32>();
+
+        // Make a new entry in the completed jobs queue.
+        let mut job_bank = self.completed_jobs.write();
+        job_bank.insert(
+            file_name,
+            CompletedRecordingJobs {
+                total_duration,
+                file_size_estimate,
+                sample_rate: wav_spec.sample_rate as usize,
+                channels: wav_spec.channels as usize,
+            },
+        );
+
+        // Format HH:MM:SS
+        let secs = total_duration.as_secs();
+        let seconds = secs % 60;
+        let minutes = (secs / 60) % 60;
+        let hours = (secs / 60) / 60;
+
+        let console_message = ConsoleMessage::Status(format!(
+            "Finished Recording. Total duration: {hours}:{minutes}:{seconds}"
+        ));
+
+        // Update the latest_exists flag --> if the transcription was written, it has to exist
+        // and be accessible.
+        self.latest_exists.fetch_or(true, Ordering::AcqRel);
+        let ribble_message = RibbleMessage::Console(console_message);
+        Ok(ribble_message)
     }
 }
 
 pub(super) struct WriterEngine {
     inner: Arc<WriterEngineState>,
     request_polling_thread: Option<JoinHandle<Result<(), RibbleError>>>,
+    // NOTE: this isn't the absolute best architecture decision, but it solves the need for 'static
+    // lifetimes when spawning threads for clearing/exporting.
+    work_sender: Sender<WorkRequest>,
 }
 
 impl WriterEngine {
@@ -293,10 +287,16 @@ impl WriterEngine {
     ) -> Self {
         let inner = Arc::new(WriterEngineState::new(data_directory, incoming_jobs, bus));
         let thread_inner = Arc::clone(&inner);
+        // NOTE: It would probably be an optimization to just pre-clone the pointer; if it's
+        // genuinely an issue, that's low-hanging fruit.
         let polling_thread = std::thread::spawn(move || {
             while let Ok(request) = thread_inner.incoming_jobs.recv() {
-                // TODO: this doesn't work -> The thread needs to be spawned here.
-                let work_request = WorkRequest::Short(thread_inner.handle_new_request(request));
+                let request_handler_inner = Arc::clone(&thread_inner);
+                let handle_request =
+                    std::thread::spawn(move || request_handler_inner.handle_new_request(request));
+
+                // TODO: this doesn't work -> The thread needs to be spawned here
+                let work_request = WorkRequest::Short(handle_request);
 
                 if thread_inner.work_request_sender.send(work_request).is_err() {
                     todo!("LOGGING");
@@ -310,6 +310,7 @@ impl WriterEngine {
         Self {
             inner,
             request_polling_thread: Some(polling_thread),
+            work_sender: bus.work_request_sender(),
         }
     }
 
@@ -323,8 +324,21 @@ impl WriterEngine {
         job_file_name: &str,
         output_format: RibbleRecordingExportFormat,
     ) {
-        self.inner
-            .export_file(out_path, job_file_name, output_format);
+        let thread_inner = Arc::clone(&self.inner);
+        // NOTE: these either need to be static references, or copy-on-write.
+        // Since it's not expected to happen often, CoW is most likely the easiest solution to
+        // avoid atomic shared pointers.
+        let file_path = out_path.to_path_buf();
+        let file_name = job_file_name.to_string();
+        let worker = std::thread::spawn(move || {
+            thread_inner.export_file(file_path, file_name, output_format)
+        });
+
+        let work_request = WorkRequest::Short(worker);
+
+        if self.work_sender.send(work_request).is_err() {
+            todo!("LOGGING");
+        }
     }
 
     // NOTE: since the IndexMap preserves ordering based on insertion order, this
@@ -378,7 +392,15 @@ impl WriterEngine {
             return;
         }
 
-        self.inner.clear_cache();
+        let thread_inner = Arc::clone(&self.inner);
+        let worker = std::thread::spawn(move || thread_inner.clear_cache());
+
+        let work_request = WorkRequest::Short(worker);
+        // TODO: TEST THE BLOCKING -> If this encounters any blocking, the short queue needs to be
+        // increased.
+        if self.work_sender.send(work_request).is_err() {
+            todo!("LOGGING");
+        }
     }
 }
 
