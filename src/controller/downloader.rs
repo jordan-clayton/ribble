@@ -1,24 +1,36 @@
 use crate::controller::Progress;
+use crate::controller::RibbleMessage;
 use crate::controller::WorkRequest;
 use crate::controller::{Bus, DownloadRequest};
 use crate::controller::{ConsoleMessage, ProgressMessage};
-use crate::controller::{RibbleMessage, RibbleWorkerHandle};
 use crate::utils::errors::RibbleError;
 use ribble_whisper::downloader::SyncDownload;
 use ribble_whisper::downloader::downloaders::sync_download_request;
 use ribble_whisper::utils::callback::RibbleWhisperCallback;
+use ribble_whisper::utils::errors::RibbleWhisperError;
 use ribble_whisper::utils::{Receiver, Sender, get_channel};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-// NOTE: when making a downlaod request in the model bank, spawn a wrapper thread that spawns the
-// smaller download thread first and then waits for the file_name to be returned (possibly with
-// timeout).
-// THEN: on receipt of the string (or an err if the thread panics and memory gets deallocated),
-// respond accordingly (e.g. put the new model in the model bank)
 //
 // TODO: Downloads are now cancellable -> expose methods to display this/expose functions in the
 // UI.
+
+// OKAY, so, downloading has been refactored (a lot simpler & more useful):
+// - Temporary files by default -> no clobbering if a download gets cancelled.
+// - File-names are, by and large, solved; this will, however, need a dummy "fallback" filename
+// - These come from either: Content-Disposition, or the end of the URL, (or the fallback).
+//
+// - The ModelBank has a watcher on the dir and will refresh itself accordingly -> all that needs
+//   to happen is the download.
+//
+// - All that needs to be done:
+//      - fallback name
+//      - bank of in-progress downloads + add abort callback tied to atomic boolean
+//      - Methods to expose this bank: Either lock + clone, or take in FnMut for-each.
+//      - Perhaps try both methods: profile and see what's faster.
+
+const FALLBACK_NAME: &'static str = "fallback";
 
 struct DownloadEngineState {
     incoming_jobs: Receiver<DownloadRequest>,
@@ -36,10 +48,18 @@ impl DownloadEngineState {
     }
 
     // TODO: factor in logic to capture metadata -> the inner Progress is atomic an can be shared.
+    // TODO TWICE: maybe rename from "start_download" to just "download_file"
     fn start_download(&self, job: DownloadRequest) -> Result<RibbleMessage, RibbleError> {
         let (url, file_name, dest_dir, return_sender) = job.decompose();
 
-        let sync_downloader = sync_download_request(&url)?;
+        let sync_downloader = sync_download_request(&url, FALLBACK_NAME)?;
+        if sync_downloader.content_name() == FALLBACK_NAME {
+            return Err(RibbleWhisperError::ParameterError(format!(
+                "File not found, likely invalid url.\nURL:{url}"
+            ))
+            .into());
+        }
+
         let progress_job =
             Progress::new_determinate("Downloading model.", sync_downloader.total_size() as u64);
 
@@ -48,6 +68,8 @@ impl DownloadEngineState {
             .expect("This method always returns some with a determinate progress job");
 
         // TODO: construct download metadata
+        // Use the FileDownload struct and use a shared atomic bool.
+        // Expose a method here that takes in an index/key and set visibility via lookup
 
         let (id_sender, id_receiver) = get_channel(1);
         let progress_message = ProgressMessage::Request {
@@ -95,7 +117,9 @@ impl DownloadEngineState {
         //  temporary file_name first, match internally in the API to determine whether or not to
         //  re-name the temporary file to the finished one -> if it's aborted, just delete the
         //  temporary file.
-        sync_downloader.download(dest_dir.as_path(), &file_name)?;
+        let download_path = sync_downloader.download(dest_dir.as_path())?;
+        // TODO: determine whether or not to re-extract the file-name from the download path, or
+        // just use the content_name in the ribble message
 
         // Remove the progress job now that the file's downloaded.
         if let Some(id) = progress_id {

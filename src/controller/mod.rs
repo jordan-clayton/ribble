@@ -4,7 +4,7 @@ use egui::{RichText, Visuals};
 use ribble_whisper::utils::Sender;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumIter, EnumString};
@@ -136,6 +136,34 @@ impl ConsoleMessage {
 enum WorkRequest {
     Short(RibbleWorkerHandle),
     Long(RibbleWorkerHandle),
+}
+
+// TODO: use this for presenting in the UI.
+// It has everything needed for viewing
+// TODO: think about how/where to add the "abort"
+// The UI and the DownloadEngine both interop here.
+#[derive(Clone, Debug)]
+pub(crate) struct FileDownload {
+    name: Arc<str>,
+    progress: ProgressView,
+    should_abort: Arc<AtomicBool>,
+}
+
+impl FileDownload {
+    fn new(name: &str, progress: ProgressView, should_abort: Arc<AtomicBool>) -> Self {
+        Self {
+            name: Arc::from(name),
+            progress,
+            should_abort,
+        }
+    }
+
+    pub(crate) fn name(&self) -> Arc<str> {
+        Arc::clone(&self.name)
+    }
+    pub(crate) fn progress(&self) -> ProgressView {
+        self.progress.clone()
+    }
 }
 
 struct DownloadRequest {

@@ -2,12 +2,11 @@ use crate::controller::{
     Bus, ConsoleMessage, DownloadRequest, RibbleMessage, SMALL_UTILITY_QUEUE_SIZE, WorkRequest,
 };
 use crate::utils::errors::RibbleError;
-use case_style::CaseStyle;
 use indexmap::IndexMap;
 use parking_lot::RwLock;
 use ribble_whisper::utils::errors::RibbleWhisperError;
 use ribble_whisper::utils::{Receiver, Sender, get_channel};
-use ribble_whisper::whisper::model::{ConcurrentModelBank, Model, ModelId, ModelRetriever};
+use ribble_whisper::whisper::model::{ModelId, ModelRetriever};
 use std::ffi::OsStr;
 use std::fs;
 use std::io::ErrorKind;
@@ -15,25 +14,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use twox_hash::XxHash3_64;
-// TODO: remove this dependency -> handle this all in ribble_whisper
-use url::Url;
 
 use notify_debouncer_full::notify::EventKind;
 use notify_debouncer_full::{
     DebounceEventResult, DebouncedEvent, new_debouncer, notify::RecursiveMode,
 };
 
-// TODO: methods for downloading models (take in a bus to send download jobs).
-// NOTE: this should also spawn jobs in the worker engine for COPY OPERATIONS ONLY.
-// There will be a background thread to watch the directory.
-//
-// TODO TWICE: I'm not sure downloading should really happen here, copy yes, download no.
-// Instead, maybe make it a kernel method.
-
-// TODO: explicit methods for copying files over by path to create a model.
-// Methods for to retrieve file_name from url slug/file path.
-//
-// TODO THRICE: Change visibility and move to kernel module; this isn't really a utility anymore.
+// TODO: method for downloading models (take in a bus to send download jobs).
 
 const MODEL_ID_SEED: u64 = 0;
 const MODEL_FILE_EXTENSION: &'static str = "bin";
@@ -44,7 +31,9 @@ const MAX_DEBOUNCE_TIME: u64 = 2000;
 
 struct RibbleModelBankState {
     model_directory: PathBuf,
-    model_map: RwLock<IndexMap<ModelId, Model>>,
+    // NOTE: this isn't using ribble_whisper's model/ConcurrentModelBank abstraction.
+    // It's way, way easier and cheaper to use Arc<str>
+    model_map: RwLock<IndexMap<ModelId, Arc<str>>>,
     model_directory_watcher: Receiver<DebounceEventResult>,
 }
 
@@ -124,17 +113,11 @@ impl RibbleModelBankState {
             .filter(|entry| entry.path().file_name().unwrap().to_str().is_some())
             .map(|entry| {
                 (
-                    entry
-                        .path()
-                        .file_name()
-                        .unwrap()
-                        .to_str()
-                        .unwrap()
-                        .to_string(),
+                    Arc::from(entry.path().file_name().unwrap().to_str().unwrap()),
                     entry.metadata().unwrap().len(),
                 )
             })
-            .collect::<Vec<_>>();
+            .collect::<Vec<(Arc<str>, u64)>>();
 
         // Sort by file size.
         entries.sort_by(|(_, size1), (_, size2)| size1.cmp(size2));
@@ -144,101 +127,35 @@ impl RibbleModelBankState {
 
         for (file_name, _) in entries {
             let model_key = XxHash3_64::oneshot_with_seed(MODEL_ID_SEED, file_name.as_bytes());
-            let stripped_file_name = file_name.replace(".bin", "").replace(".en", "-en");
-            let name = CaseStyle::guess(&stripped_file_name)
-                .unwrap_or(CaseStyle::from_kebabcase(&stripped_file_name))
-                .to_pascalcase();
-            let model = Model::new().with_name(name).with_file_name(file_name);
-
-            map_lock.insert(model_key, model);
+            map_lock.insert(model_key, file_name);
         }
 
         Ok(())
     }
 
-    // NOTE: this assumes that the model's got a fully canonicalized path and probably shouldn't be
-    // called directly.
-    //
-    // The trait method really isn't the best way to handle this; expose a public method on
-    // RibbleModelBank that takes in a model path and handles all file_name/name logic.
-    //
-    fn insert_model(&self, model: Model) -> Result<ModelId, RibbleWhisperError> {
-        let given_file_path = PathBuf::from(model.file_name());
-        if given_file_path.extension().is_none_or(|ext| ext != "bin") {
-            return Err(RibbleWhisperError::ParameterError(format!(
-                "Model: {}, has an invalid path: {}",
-                model.name(),
-                model.file_name()
-            )));
-        }
-
-        let file_name = given_file_path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .and_then(|s| Some(s.to_string()))
-            .ok_or(RibbleWhisperError::ParameterError(format!(
-                "Model: {}, has an invalid path: {}",
-                model.name(),
-                model.file_name()
-            )))?;
-
-        // Make the file copy.
-        fs::copy(given_file_path, self.model_directory.join(&file_name))?;
-        let model_id = XxHash3_64::oneshot_with_seed(MODEL_ID_SEED, file_name.as_bytes());
-        let insert_model = model.with_file_name(file_name);
-        self.model_map.write().insert(model_id, insert_model);
-        Ok(model_id)
-    }
-
-    fn get_model(&self, model_id: ModelId) -> Option<Model> {
+    fn get_model(&self, model_id: ModelId) -> Option<Arc<str>> {
         self.model_map
             .read()
             .get(&model_id)
-            .and_then(|model| Some(model.clone()))
+            .and_then(|model| Some(Arc::clone(model)))
     }
 
-    fn rename_model(
-        &self,
-        model_id: ModelId,
-        new_name: String,
-    ) -> Result<Option<ModelId>, RibbleWhisperError> {
-        if let Some(model) = self.model_map.write().get_mut(&model_id) {
-            model.rename(new_name);
-            Ok(Some(model_id))
-        } else {
-            Ok(None)
-        }
+    fn contains_model(&self, model_id: ModelId) -> bool {
+        self.model_map.read().contains_key(&model_id)
     }
 
-    fn change_model_file_name(
-        &self,
-        model_id: ModelId,
-        new_file_path: String,
-    ) -> Result<Option<ModelId>, RibbleWhisperError> {
-        // Check for an existing model and clone it to set the new file path -> this assumes the
-        // full qualified path is being passed and the file is being copied over into the model directory.
-        let model = self
-            .model_map
+    fn retrieve_model_path(&self, model_id: ModelId) -> Option<PathBuf> {
+        self.model_map
             .read()
             .get(&model_id)
-            .and_then(|model| Some(model.clone().with_file_name(new_file_path)));
-
-        // If there exists an old model to clone over (with the copy path), insert it at the end of the buffer.
-        // Then, swap the old in-memory model out for the new one to keep relative position.
-        if let Some(model) = model {
-            let new_model_id = self.insert_model(model)?;
-            // Do a swap-remove so that it takes the old spot.
-            // If the new file size is larger than the last one, this order will be resolved on a full-refresh/app load.
-            self.handle_removal(model_id, true)?;
-            Ok(Some(new_model_id))
-        } else {
-            Ok(None)
-        }
+            .and_then(|model| Some(self.model_directory().join(model.as_ref())))
     }
 
+    // NOTE: this code can probably stay, though it should be impossible for this to return false based on
+    // the directory crawler.
     fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError> {
         if let Some(model) = self.model_map.read().get(&model_id) {
-            let full_path = self.model_directory.join(model.file_name());
+            let full_path = self.model_directory.join(model.as_ref());
             let metadata = fs::metadata(&full_path);
             match metadata {
                 Ok(m) => Ok(m.is_file()),
@@ -252,6 +169,7 @@ impl RibbleModelBankState {
         }
     }
 
+    // These two methods can stay.
     fn clear(&self) {
         self.model_map.write().clear();
     }
@@ -261,6 +179,8 @@ impl RibbleModelBankState {
         Ok(self.fill_model_bank()?)
     }
 
+    // NOTE: this can probably stay, though I'm not sure I want to deal with delete buttons in the
+    // UI.
     // Returns Ok(Some(ModelId)) if the model was in the bank and there were no file errors
     // Returns Ok(None) if the model was not in the bank and there were no file errors
     // Returns Err when there are issues with file removal, not including missing files:
@@ -275,7 +195,7 @@ impl RibbleModelBankState {
         if let Some(model) = write_guard.get(&model_id) {
             // First check to see that it exists in the file_system before removing.
             // To avoid two lookups, just manually check here.
-            match fs::remove_file(self.model_directory.join(&model.file_name())) {
+            match fs::remove_file(self.model_directory.join(model.as_ref())) {
                 Ok(_) => {}
                 Err(e) => match e.kind() {
                     ErrorKind::NotFound => {}
@@ -366,16 +286,14 @@ impl RibbleModelBank {
         })
     }
 
-    // NOTE: since for_each in the ConcurrentModelBank only takes Fn(..), it's not possible to draw UI code with the egui
-    // cursor.
-    // Until there's a genuine need in ribble_whisper for FnMut((&ModelId, &Model)), just use this
-    // instead for drawing UI.
-    pub(crate) fn for_each_mut_capture<F: FnMut((&ModelId, &Model))>(&self, mut f: F) {
-        // Call this if the user has opened the model's data directory from the app.
-        for (model_id, model) in self.inner.model_map.read().iter() {
-            f((model_id, model));
-        }
+    pub(crate) fn model_directory(&self) -> &Path {
+        self.inner.model_directory()
     }
+
+    // TODO: decide whether or not to allow users to set an alternative directory for models.
+    // If that becomes a necessary feature, move to ArcSwap and set up logic for re-spawning the
+    // watcher thread -> it's best to leave model management up to the user if they're already
+    // swapping directories.
 
     pub(crate) fn download_new_model(&self, url: &str) {
         todo!("Finish download routine.");
@@ -385,7 +303,7 @@ impl RibbleModelBank {
 
     // This will make a work request to copy the file over.
     pub(crate) fn copy_model_to_bank(&self, model_file_path: &Path) {
-        let model_directory = self.model_directory().to_path_buf();
+        let model_directory = self.inner.model_directory().to_path_buf();
         let file_path = model_file_path.to_path_buf();
         let worker = std::thread::spawn(move || {
             if !file_path.is_file() {
@@ -425,99 +343,27 @@ impl RibbleModelBank {
             todo!("LOGGING");
         }
     }
+
+    pub(crate) fn try_read_model_list(&self, copy_buffer: &mut Vec<(ModelId, Arc<str>)>) {
+        if let Some(guard) = self.inner.model_map.try_read() {
+            copy_buffer.clear();
+            copy_buffer.extend(guard.iter().map(|(k, v)| (*k, Arc::clone(v))));
+        }
+    }
 }
 
 impl Drop for RibbleModelBank {
     fn drop(&mut self) {
-        todo!()
-    }
-}
-
-impl ConcurrentModelBank for RibbleModelBank {
-    fn model_directory(&self) -> &Path {
-        self.inner.model_directory()
-    }
-
-    // NOTE: This method really shouldn't be called directly unless the Model has a canonicalized
-    // path.
-    //
-    // Prefer using [todo: public method that takes a file path] instead of this one directly.
-    fn insert_model(&self, model: Model) -> Result<ModelId, RibbleWhisperError> {
-        self.inner.insert_model(model)
-    }
-
-    fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError> {
-        self.inner.model_exists_in_storage(model_id)
-    }
-
-    fn get_model(&self, model_id: ModelId) -> Option<Model> {
-        self.inner.get_model(model_id)
-    }
-
-    fn for_each<F>(&self, f: F)
-    where
-        F: Fn((&ModelId, &Model)),
-    {
-        for (model_id, model) in self.inner.model_map.read().iter() {
-            f((model_id, model));
+        if let Some(handle) = self.worker_thread.take() {
+            if handle.join().is_err() {
+                todo!("LOGGING")
+            }
         }
-    }
-
-    // This changes out the file name if an old entry exists in the bank.
-    // Equivalently, this should be used for restoring a missing file if the key exists in the bank
-    // without also being on disk.
-    // # Returns:
-    // * Ok(ModelId) -> the new ModelId for the updated model
-    // * Ok(None) -> the old Model was not in the bank
-    // * Err(RibbleWhisperError) -> File IO error.
-
-    // If it is the case that a user manages to delete an entry from the hashmap without removing
-    // the physical file, the entry will appear when the folder is refreshed/the app launches.
-    // It's not possible with this implementation to locate a model if the key-value pair is missing.
-
-    // This tries to fetch a model and update its  (user-facing) name.
-    // # Returns:
-    // * Ok(Some(ModelId)) -> the ModelId for the updated model, on success.
-    // * Ok(None) -> the old Model was not in the bank, if the id wasn't present
-    fn rename_model(
-        &self,
-        model_id: ModelId,
-        new_name: String,
-    ) -> Result<Option<ModelId>, RibbleWhisperError> {
-        self.inner.rename_model(model_id, new_name)
-    }
-
-    fn change_model_file_name(
-        &self,
-        model_id: ModelId,
-        new_file_path: String,
-    ) -> Result<Option<ModelId>, RibbleWhisperError> {
-        self.inner.change_model_file_name(model_id, new_file_path)
-    }
-
-    // NOTE: I'm not sure that this is something that is really worth exposing in the GUI.
-    // Instead, expose the directory in the host's file manager and let them handle deletion
-    // The watcher will ensure that the model bank is up-to-date.
-    //
-    // It is not an error to call this method, but it will block so keep that in mind.
-    fn remove_model(&self, model_id: ModelId) -> Result<Option<ModelId>, RibbleWhisperError> {
-        self.inner.handle_removal(model_id, false)
-    }
-
-    // Refreshes the model bank by clearing the internal map and re-running the directory crawler.
-    //
-    // This probably shouldn't be exposed in the GUI.
-    fn refresh_model_bank(&self) -> Result<(), RibbleWhisperError> {
-        self.inner.refresh_model_bank()
     }
 }
 
 impl ModelRetriever for RibbleModelBank {
     fn retrieve_model_path(&self, model_id: ModelId) -> Option<PathBuf> {
-        self.inner
-            .model_map
-            .read()
-            .get(&model_id)
-            .and_then(|model| Some(self.model_directory().join(model.file_name())))
+        self.inner.retrieve_model_path(model_id)
     }
 }
