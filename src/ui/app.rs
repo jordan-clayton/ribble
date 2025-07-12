@@ -111,7 +111,7 @@ impl Ribble {
     // this function is going to panic to ensure the device is always cleaned up on the main
     // thread.
     fn close_audio_device(&mut self, device_id: usize) {
-        // This will panic if the device is not in the slab
+        // This will panic if the device is not in the slab.
         let shared_device = self.current_devices.remove(device_id);
         // This is mainly for debugging purposes
         let strong_count = Arc::strong_count(&shared_device);

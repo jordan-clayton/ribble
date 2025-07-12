@@ -1,38 +1,26 @@
-use crate::controller::Progress;
-use crate::controller::RibbleMessage;
-use crate::controller::WorkRequest;
-use crate::controller::{Bus, DownloadRequest};
-use crate::controller::{ConsoleMessage, ProgressMessage};
+use crate::controller::{
+    Bus, ConsoleMessage, DownloadRequest, FileDownload, Progress, ProgressMessage, RibbleMessage,
+    WorkRequest,
+};
 use crate::utils::errors::RibbleError;
+use parking_lot::RwLock;
 use ribble_whisper::downloader::SyncDownload;
 use ribble_whisper::downloader::downloaders::sync_download_request;
-use ribble_whisper::utils::callback::RibbleWhisperCallback;
+use ribble_whisper::utils::callback::{RibbleAbortCallback, RibbleWhisperCallback};
 use ribble_whisper::utils::errors::RibbleWhisperError;
 use ribble_whisper::utils::{Receiver, Sender, get_channel};
+use slab::Slab;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 
-//
-// TODO: Downloads are now cancellable -> expose methods to display this/expose functions in the
-// UI.
-
-// OKAY, so, downloading has been refactored (a lot simpler & more useful):
-// - Temporary files by default -> no clobbering if a download gets cancelled.
-// - File-names are, by and large, solved; this will, however, need a dummy "fallback" filename
-// - These come from either: Content-Disposition, or the end of the URL, (or the fallback).
-//
-// - The ModelBank has a watcher on the dir and will refresh itself accordingly -> all that needs
-//   to happen is the download.
-//
-// - All that needs to be done:
-//      - fallback name
-//      - bank of in-progress downloads + add abort callback tied to atomic boolean
-//      - Methods to expose this bank: Either lock + clone, or take in FnMut for-each.
-//      - Perhaps try both methods: profile and see what's faster.
-
-const FALLBACK_NAME: &'static str = "fallback";
+const FALLBACK_NAME: &'static str = "invalid_download";
 
 struct DownloadEngineState {
+    // NOTE: if hashing is required, implment hash on FileDownload and use an IndexSet/ pre-hash
+    // the content_name and use it as key in IndexMap.
+    // Vectors might be a little fragile and Slab insert/remove is going to be way faster.
+    file_downloads: RwLock<Slab<FileDownload>>,
     incoming_jobs: Receiver<DownloadRequest>,
     worker_sender: Sender<WorkRequest>,
     progress_sender: Sender<ProgressMessage>,
@@ -40,20 +28,21 @@ struct DownloadEngineState {
 
 impl DownloadEngineState {
     fn new(incoming_jobs: Receiver<DownloadRequest>, bus: &Bus) -> Self {
+        let file_downloads = RwLock::new(Slab::new());
         Self {
+            file_downloads,
             incoming_jobs,
             worker_sender: bus.work_request_sender(),
             progress_sender: bus.progress_message_sender(),
         }
     }
 
-    // TODO: factor in logic to capture metadata -> the inner Progress is atomic an can be shared.
-    // TODO TWICE: maybe rename from "start_download" to just "download_file"
-    fn start_download(&self, job: DownloadRequest) -> Result<RibbleMessage, RibbleError> {
-        let (url, file_name, dest_dir, return_sender) = job.decompose();
+    fn run_download(&self, job: DownloadRequest) -> Result<RibbleMessage, RibbleError> {
+        let (url, dest_dir) = job.decompose();
 
         let sync_downloader = sync_download_request(&url, FALLBACK_NAME)?;
-        if sync_downloader.content_name() == FALLBACK_NAME {
+        let content_name = sync_downloader.content_name();
+        if content_name == FALLBACK_NAME {
             return Err(RibbleWhisperError::ParameterError(format!(
                 "File not found, likely invalid url.\nURL:{url}"
             ))
@@ -66,16 +55,22 @@ impl DownloadEngineState {
         let progress_view = progress_job
             .progress_view()
             .expect("This method always returns some with a determinate progress job");
+        let abort_download = Arc::new(AtomicBool::new(false));
 
-        // TODO: construct download metadata
-        // Use the FileDownload struct and use a shared atomic bool.
-        // Expose a method here that takes in an index/key and set visibility via lookup
+        // Make a FileDownload to store in the slab -> for exposing in the UI.
+        let file_download =
+            FileDownload::new(content_name, progress_view, Arc::clone(&abort_download));
+
+        // Place it in the bank of downloads -> the progress updated by the progress_callback is
+        // shared, so the state will be accessible from the UI (outside of progress-bars).
+        let download_id = self.file_downloads.write().insert(file_download);
 
         let (id_sender, id_receiver) = get_channel(1);
         let progress_message = ProgressMessage::Request {
             job: progress_job,
             id_return_sender: id_sender,
         };
+
         if self.progress_sender.send(progress_message).is_err() {
             todo!("LOGGING");
         }
@@ -104,22 +99,37 @@ impl DownloadEngineState {
         };
 
         let progress_callback = RibbleWhisperCallback::new(progress_closure);
+        let abort_closure = move || abort_download.load(Ordering::Acquire);
+        let abort_callback = RibbleAbortCallback::new(abort_closure);
 
-        // TODO: add an abort callback -> share an atomic boolean that can be cancelled from the
-        // UI.
-        // REMEMBER: The abort callback returns true if it -should- abort.
-        let mut sync_downloader = sync_downloader.with_progress_callback(progress_callback);
+        let mut sync_downloader = sync_downloader
+            .with_progress_callback(progress_callback)
+            .with_abort_callback(abort_callback);
 
-        // NOTE: This is a blocking call.
-        // NOTE TWICE: match on this and extract the DownloadAborted error if it was aborted
-        //  -> clean up the (temporary) file ->>>> CHANGE THE DOWNLOAD API: extract the file-name
-        //  from reqwest and store internally, expose a "temporary file_name" -> download to the
-        //  temporary file_name first, match internally in the API to determine whether or not to
-        //  re-name the temporary file to the finished one -> if it's aborted, just delete the
-        //  temporary file.
-        let download_path = sync_downloader.download(dest_dir.as_path())?;
-        // TODO: determine whether or not to re-extract the file-name from the download path, or
-        // just use the content_name in the ribble message
+        // NOTE: This is a blocking call; download the file.
+        let download_path = sync_downloader.download(dest_dir.as_path());
+        // Regardless of whether or not it ends because of an error, the download needs to get
+        // removed--there's no "resume"/"pause" because it's a blocking download, so there's no way
+        // to expose that feature right now.
+        // This may change at a later date, but for now it's good enough.
+
+        // Try to remove the FileDownload struct -> since the download is done, this thread
+        // shouldn't panic.
+        // It -should- be impossible for this to panic, because the DownloadEngineState owns its
+        // file_downloads; if it is gone, log the error to diagnose issues.
+        if self
+            .file_downloads
+            .write()
+            .try_remove(download_id)
+            .is_none()
+        {
+            todo!("LOGGING");
+        };
+
+        let download_path = download_path?;
+
+        // Re-bind the content_name to avoid borrowing issues.
+        let content_name = sync_downloader.content_name();
 
         // Remove the progress job now that the file's downloaded.
         if let Some(id) = progress_id {
@@ -129,21 +139,24 @@ impl DownloadEngineState {
             }
         }
 
-        let console_message =
-            ConsoleMessage::Status(format!("Successfully downloaded {}", &file_name));
+        // Print both the content name and the fully returned path in the Console message.
+        let console_message = ConsoleMessage::Status(format!(
+            "Successfully downloaded {content_name} to {:#?}",
+            download_path.as_path()
+        ));
         let ribble_message = RibbleMessage::Console(console_message);
 
-        // Send back the file-name to signal "this has been downloaded properly"
-        // i.e. so that the caller can decide what to do (put the new model in the model bank).
-        // TODO: remove this logique; the model bank has a directory-watcher that updates
-        // accordingly.
-        if let Some(sender) = return_sender {
-            if sender.send(file_name).is_err() {
-                todo!("LOGGING");
-            }
-        }
-
         Ok(ribble_message)
+    }
+
+    fn abort_download(&self, download_id: usize) {
+        if let Some(download) = self.file_downloads.read().get(download_id) {
+            download.abort_download();
+        } else {
+            // I would suppose that the only case where this is true would be
+            // TOC-TOU.
+            todo!("LOGGING: key is missing");
+        }
     }
 }
 
@@ -162,7 +175,7 @@ impl DownloadEngine {
             while let Ok(download_job) = thread_inner.incoming_jobs.recv() {
                 let download_inner = Arc::clone(&thread_inner);
                 let start_download =
-                    std::thread::spawn(move || download_inner.start_download(download_job));
+                    std::thread::spawn(move || download_inner.run_download(download_job));
 
                 let work_request = WorkRequest::Short(start_download);
                 if thread_inner.worker_sender.send(work_request).is_err() {
@@ -176,6 +189,18 @@ impl DownloadEngine {
 
         let work_thread = Some(worker);
         Self { inner, work_thread }
+    }
+
+    // FileDownload is a cheap clone (mostly copy); this should be harmlesss to call in the UI.
+    pub(super) fn try_get_current_downloads(&self, copy_buffer: &mut Vec<(usize, FileDownload)>) {
+        if let Some(guard) = self.inner.file_downloads.try_read() {
+            copy_buffer.clear();
+            copy_buffer.extend(guard.iter().map(|(key, val)| (key, val.clone())));
+        }
+    }
+
+    pub(super) fn abort_download(&self, download_id: usize) {
+        self.inner.abort_download(download_id);
     }
 }
 

@@ -46,7 +46,9 @@ impl ProgressEngineState {
         }
     }
     fn remove_progress_job(&self, id: usize) {
-        self.current_jobs.write().remove(id);
+        if self.current_jobs.write().try_remove(id).is_none() {
+            todo!("LOGGING: This should never, ever be none unless there's a stale ID.");
+        }
     }
 }
 
@@ -150,4 +152,3 @@ impl Drop for ProgressEngine {
         }
     }
 }
-

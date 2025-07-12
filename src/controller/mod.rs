@@ -47,9 +47,6 @@ pub(crate) enum RibbleMessage {
 
 struct Bus {
     console_message_sender: Sender<ConsoleMessage>,
-    // TODO: this is not correct yet -> this will need a ProgressMessage or similar.
-    // It will also most likely require a hashmap instead of a slab because IDs are lost across the
-    // channel.
     progress_message_sender: Sender<ProgressMessage>,
     work_request_sender: Sender<WorkRequest>,
     write_request_sender: Sender<writer::WriteRequest>,
@@ -164,58 +161,49 @@ impl FileDownload {
     pub(crate) fn progress(&self) -> ProgressView {
         self.progress.clone()
     }
+
+    fn abort_download(&self) {
+        self.should_abort.store(true, Ordering::Release);
+    }
 }
 
+// NOTE: if it somehow becomes necessary to send information (e.g. the returned PathBuf) back from the DownloadRequest to the
+// requester, then use a queue.
 struct DownloadRequest {
     url: String,
-    // NOTE: this should probably just take the file_name from the slug
-    // HANDLE THIS LOGIC HIGHER UP IN THE CONTROLLER.
-    // e.g. Url::parse(url)?, url.path_segments_mut()?.pop() => returns the last bit of the URL.
-    // OTHERWISE, take it in as an argument from the user.
-    //
-    // TODO TWICE: remove the file_name from this request.
-    file_name: String,
     directory: PathBuf,
-    // TODO: remove this -> there's a watcher in the ModelBank to update based on a chaaaaange.
-    return_sender: Option<Sender<String>>,
 }
 
 impl DownloadRequest {
     fn new() -> Self {
         Self {
             url: Default::default(),
-            file_name: Default::default(),
             directory: Default::default(),
-            return_sender: None,
         }
     }
 
-    fn decompose(self) -> (String, String, PathBuf, Option<Sender<String>>) {
-        (self.url, self.file_name, self.directory, self.return_sender)
+    fn new_with_params(url: &str, directory: &Path) -> Self {
+        Self {
+            url: url.to_string(),
+            directory: directory.to_path_buf(),
+        }
     }
 
-    fn with_url(mut self, url: String) -> Self {
-        self.url = url;
-        self
+    fn decompose(self) -> (String, PathBuf) {
+        (self.url, self.directory)
     }
-    fn with_file_name(mut self, file_name: String) -> Self {
-        self.file_name = file_name;
+
+    fn with_url(mut self, url: &str) -> Self {
+        self.url = url.to_string();
         self
     }
     fn with_directory(mut self, directory: &Path) -> Self {
         self.directory = directory.to_path_buf();
         self
     }
-    fn with_return_sender(mut self, sender: Sender<String>) -> Self {
-        self.return_sender = Some(sender);
-        self
-    }
 
     pub(crate) fn url(&self) -> &String {
         &self.url
-    }
-    pub(crate) fn file_name(&self) -> &String {
-        &self.file_name
     }
     pub(crate) fn directory(&self) -> &Path {
         self.directory.as_path()

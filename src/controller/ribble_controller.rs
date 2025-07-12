@@ -10,7 +10,7 @@ use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExpo
 use crate::utils::vad_configs::VadConfigs;
 use ribble_whisper::transcriber::{TranscriptionSnapshot, WhisperControlPhrase};
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
-use ribble_whisper::whisper::model::{Model, ModelId};
+use ribble_whisper::whisper::model::ModelId;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -76,32 +76,11 @@ impl RibbleController {
         self.kernel.copy_new_model_to_bank(file_path);
     }
 
-    pub(crate) fn rename_model(
-        &self,
-        model_id: ModelId,
-        new_name: String,
-    ) -> Result<Option<ModelId>, RibbleError> {
-        Ok(self.kernel.rename_model(model_id, new_name)?)
+    // (Id, File name)
+    pub(crate) fn try_read_model_list(&self, copy_buffer: &mut Vec<(ModelId, Arc<str>)>) {
+        self.kernel.try_read_model_list(copy_buffer);
     }
 
-    pub(crate) fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleError> {
-        Ok(self.kernel.model_exists_in_storage(model_id)?)
-    }
-
-    pub(crate) fn delete_model(&self, model_id: ModelId) -> Result<Option<ModelId>, RibbleError> {
-        self.kernel.delete_model(model_id)
-    }
-
-    // TODO: expect this to be a void method after refactoring ->
-    // The ModelBank needs handles for downloading/work threads.
-    pub(crate) fn refresh_model_bank(&self) -> Result<(), RibbleError> {
-        Ok(self.kernel.refresh_model_bank()?)
-    }
-
-    // TODO: migrate this to a UI passthrough with the for_each_capture_mut method
-    pub(crate) fn models_for_each_mut_capture<F: FnMut((&ModelId, &Model))>(&self, closure: F) {
-        self.kernel.models_for_each_mut_capture(closure)
-    }
     pub(crate) fn get_model_directory(&self) -> &Path {
         self.kernel.get_model_directory()
     }
@@ -243,8 +222,14 @@ impl RibbleController {
     pub(crate) fn try_get_current_messages(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
         self.kernel.try_get_current_messages(copy_buffer);
     }
+
+    // Resizing happens on a background thread, so it's okay to call this with some level of
+    // frequency. -> If using a slider in UI, consider caching the value, mutating that, and then
+    // writing on a drag-finished event.
+    // There is a tiny, tiny chance that the short-queue gets slammed -> if so, increase the size,
+    // or handle priority better/classify jobs better.
     pub(crate) fn resize_console_message_buffer(&self, new_size: usize) {
-        self.kernel.resize_console_message_buffer(new_size)
+        self.kernel.resize_console_message_buffer(new_size);
     }
 
     // PROGRESS

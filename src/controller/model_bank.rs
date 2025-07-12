@@ -20,8 +20,6 @@ use notify_debouncer_full::{
     DebounceEventResult, DebouncedEvent, new_debouncer, notify::RecursiveMode,
 };
 
-// TODO: method for downloading models (take in a bus to send download jobs).
-
 const MODEL_ID_SEED: u64 = 0;
 const MODEL_FILE_EXTENSION: &'static str = "bin";
 // NOTE: THIS IS IN MILLISECONDS
@@ -290,15 +288,21 @@ impl RibbleModelBank {
         self.inner.model_directory()
     }
 
+    pub(crate) fn contains_model(&self, model_id: ModelId) -> bool {
+        self.inner.contains_model(model_id)
+    }
+
     // TODO: decide whether or not to allow users to set an alternative directory for models.
     // If that becomes a necessary feature, move to ArcSwap and set up logic for re-spawning the
     // watcher thread -> it's best to leave model management up to the user if they're already
     // swapping directories.
 
     pub(crate) fn download_new_model(&self, url: &str) {
-        todo!("Finish download routine.");
-        // Extract the file-name from the back of the ... sluuug?
-        // Not sure how to resolve a shortlink.
+        let model_directory = self.inner.model_directory();
+        let download_request = DownloadRequest::new_with_params(url, model_directory);
+        if self.download_sender.send(download_request).is_err() {
+            todo!("LOGGING: download issue.");
+        }
     }
 
     // This will make a work request to copy the file over.

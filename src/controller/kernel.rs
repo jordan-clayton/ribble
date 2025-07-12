@@ -23,7 +23,7 @@ use arc_swap::ArcSwap;
 use ribble_whisper::transcriber::{TranscriptionSnapshot, WhisperControlPhrase};
 use ribble_whisper::utils::get_channel;
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
-use ribble_whisper::whisper::model::{ConcurrentModelBank, Model, ModelId};
+use ribble_whisper::whisper::model::ModelId;
 use ron::ser::PrettyConfig;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
@@ -90,13 +90,6 @@ impl Kernel {
             download_sender,
         );
 
-        let transcriber_engine = TranscriberEngine::new(
-            transcriber_configs,
-            vad_configs,
-            offline_transcriber_feedback,
-            &bus,
-        );
-
         let recorder_engine = RecorderEngine::new(recording_configs, &bus);
         let console_engine = ConsoleEngine::new(
             console_receiver,
@@ -113,9 +106,32 @@ impl Kernel {
         let download_engine = DownloadEngine::new(download_receiver, &bus);
 
         let model_directory = data_directory.join(Self::MODEL_BANK_DIR_SLUG);
-        // TODO: this needs to be brought into the module here.
-        // TODO TWICE: this also needs the bus for worker/downloader jobs.
         let model_bank = Arc::new(RibbleModelBank::new(model_directory.as_path(), &bus)?);
+
+        // In case the user has mucked around with the model directory and the previous ID is
+        // invalid in the configs, catch it before constructing the TranscriberEngine and set the
+        // configs ID to None.
+        let model_id = transcriber_configs
+            .model_id()
+            .as_ref()
+            .and_then(|model_id| {
+                if !model_bank.contains_model(*model_id) {
+                    None
+                } else {
+                    Some(*model_id)
+                }
+            });
+
+        let transcriber_configs = transcriber_configs.with_model_id(model_id);
+
+        // NOTE: to avoid already modifying the transcriber engine, just construct it last after
+        // the ID check has been run.
+        let transcriber_engine = TranscriberEngine::new(
+            transcriber_configs,
+            vad_configs,
+            offline_transcriber_feedback,
+            &bus,
+        );
 
         Ok(Self {
             data_directory: data_directory.to_path_buf(),
@@ -149,34 +165,13 @@ impl Kernel {
         self.model_bank.copy_model_to_bank(file_path);
     }
 
-    pub(super) fn models_for_each_mut_capture<F: FnMut((&ModelId, &Model))>(&self, f: F) {
-        self.model_bank.for_each_mut_capture(f);
-    }
-
-    pub(super) fn rename_model(
-        &self,
-        model_id: ModelId,
-        new_name: String,
-    ) -> Result<Option<ModelId>, RibbleError> {
-        Ok(self.model_bank.rename_model(model_id, new_name)?)
-    }
-
-    pub(super) fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleError> {
-        Ok(self.model_bank.model_exists_in_storage(model_id)?)
-    }
-
-    pub(super) fn delete_model(&self, model_id: ModelId) -> Result<Option<ModelId>, RibbleError> {
-        Ok(self.model_bank.remove_model(model_id)?)
-    }
-
-    // TODO: expect this to be a void method after refactoring ->
-    // The ModelBank needs handles for downloading/work threads.
-    pub(super) fn refresh_model_bank(&self) -> Result<(), RibbleError> {
-        Ok(self.model_bank.refresh_model_bank()?)
-    }
-
     pub(super) fn get_model_directory(&self) -> &Path {
         self.model_bank.model_directory()
+    }
+
+    // (ID, File name)
+    pub(super) fn try_read_model_list(&self, copy_buffer: &mut Vec<(ModelId, Arc<str>)>) {
+        self.model_bank.try_read_model_list(copy_buffer);
     }
 
     // TRANSCRIBER
@@ -336,7 +331,7 @@ impl Kernel {
 
     // VISUALIZER
     pub(super) fn set_visualizer_visibility(&self, is_visible: bool) {
-        self.set_visualizer_visibility(is_visible);
+        self.visualizer_engine.set_visualizer_visibility(is_visible);
     }
     pub(super) fn try_read_visualization_buffer(
         &self,

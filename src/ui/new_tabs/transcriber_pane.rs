@@ -265,21 +265,22 @@ impl PaneView for TranscriberPane {
                                         // NOTE: this might be too many buttons, lol, test and see.
                                         ui.horizontal_wrapped(|ui| {
                                             // TODO: combobox of selectable values
+                                            // Get the model list from the controller.
+                                            // For each (ModelId, Model), Selectable Value.
+                                            //
                                             if ui.button("Open Model").clicked() {
+                                                // TODO: change this to just use RFD.
                                                 self.copy_modal = true;
                                             }
                                             if ui.button("Download Model").clicked() {
                                                 self.download_modal = true;
                                             }
 
+                                            // TODO: make this its own row.
                                             if ui.button("Open Models Folder").clicked() {
                                                 let model_directory = controller.get_model_directory();
                                                 // Try and open it in the default file explorer.
                                                 let _ = opener::reveal(model_directory);
-                                            }
-                                            if ui.button("Refresh Models").clicked() {
-                                                // TODO: refactor this once model bank finished.
-                                                let _ = controller.refresh_model_bank();
                                             }
                                         });
                                         ui.end_row();
@@ -439,7 +440,7 @@ impl PaneView for TranscriberPane {
                             egui::ComboBox::from_id_salt(frame_size_salt)
                                 .selected_text(frame_size.as_ref()).show_ui(ui, |ui| {
                                 for size in VadFrameSize::iter() {
-                                    if ui.selectable_value(&mut frame_size, size, frame_size.as_ref()).clicked() {
+                                    if ui.selectable_value(&mut frame_size, size, size.as_ref()).clicked() {
                                         let new_vad_configs = vad_configs.with_frame_size(frame_size);
                                         controller.write_vad_configs(new_vad_configs);
                                     }
@@ -519,6 +520,8 @@ impl PaneView for TranscriberPane {
             }
         }
 
+        // TODO: copy modal should be removed -> it should just be a native OS dialog to copy-paste
+        // the file over.
         if self.copy_modal {
             let modal = egui::Modal::new(egui::Id::from("copy_modal"))
                 .show(ui.ctx(), |ui| todo!("Copy Modal."));
