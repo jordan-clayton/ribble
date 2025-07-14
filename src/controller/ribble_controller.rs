@@ -72,7 +72,12 @@ impl RibbleController {
     pub(crate) fn download_model(&self, url: &str) {
         self.kernel.download_model(url);
     }
-    pub(crate) fn copy_new_model(&self, file_path: &Path) {
+    // Consume the PathBuf instead of taking a path by reference
+    // Since the copy-operation has to happen on a thread, there
+    // needs to be at least one allocation.
+    // Since obtaining a dynamic path involves an allocation, might as well just take it instead of
+    // re-allocating.
+    pub(crate) fn copy_new_model(&self, file_path: PathBuf) {
         self.kernel.copy_new_model_to_bank(file_path);
     }
 
@@ -198,16 +203,16 @@ impl RibbleController {
     }
     pub(crate) fn try_get_completed_recordings(
         &self,
-        copy_buffer: &mut Vec<(String, CompletedRecordingJobs)>,
+        copy_buffer: &mut Vec<(Arc<str>, CompletedRecordingJobs)>,
     ) {
         self.kernel.try_get_completed_recordings(copy_buffer)
     }
 
-    pub(crate) fn try_get_recording_path(&self, file_name: &str) -> Option<PathBuf> {
+    pub(crate) fn try_get_recording_path(&self, file_name: Arc<str>) -> Option<PathBuf> {
         self.kernel.try_get_recording_path(file_name)
     }
 
-    // NOTE: recording_file_name is internal -- It's the left-half of the (String, CompletedRecordingJobs) tuple.
+    // NOTE: recording_file_name is internal -- It's the left-half of the (Arc<str>, CompletedRecordingJobs) tuple.
     pub(crate) fn export_recording(
         &self,
         out_path: &Path,

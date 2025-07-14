@@ -58,7 +58,7 @@ impl PaneView for VisualizerPane {
         // - also, do it from the closest rect corner, not the center.
 
         todo!("FINISH DRAWING.");
-        let pane_id = egui::Id::from("visualizer_pane");
+        let pane_id = egui::Id::new("visualizer_pane");
         let resp = ui
             .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::Grab);

@@ -161,7 +161,7 @@ impl Kernel {
     pub(super) fn download_model(&self, url: &str) {
         self.model_bank.download_new_model(url);
     }
-    pub(super) fn copy_new_model_to_bank(&self, file_path: &Path) {
+    pub(super) fn copy_new_model_to_bank(&self, file_path: PathBuf) {
         self.model_bank.copy_model_to_bank(file_path);
     }
 
@@ -292,12 +292,13 @@ impl Kernel {
     }
     pub(super) fn try_get_completed_recordings(
         &self,
-        copy_buffer: &mut Vec<(String, CompletedRecordingJobs)>,
+        copy_buffer: &mut Vec<(Arc<str>, CompletedRecordingJobs)>,
     ) {
         self.writer_engine.try_get_completed_jobs(copy_buffer)
     }
 
-    pub(super) fn try_get_recording_path(&self, file_name: &str) -> Option<PathBuf> {
+    // NOTE: this consumes a shared string -> clone higher up and consume it
+    pub(super) fn try_get_recording_path(&self, file_name: Arc<str>) -> Option<PathBuf> {
         self.writer_engine.get_recording_path(file_name)
     }
 

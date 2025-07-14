@@ -21,6 +21,20 @@ pub(super) struct WriteRequest {
     spec: RibbleRecordingConfigs,
 }
 
+// TODO: this might need to spawn a debouncer thread;
+// Since the model folder is accessible via the UI,
+// it is possible for a user to navigate to the recordings folder
+// and delete a file.
+//
+// If they try and load said file after it's deleted, they will get
+// annoying UI, but the missing file will be removed by the next repaint.
+//
+// Possible solutions:
+// - Debouncer -> guaranteed coherent, runs on a bg thread, not super expensive but
+//   extra thread overhead.
+// - Filtering (check for file) -> likely coherent, incurs memory allocation each read.
+// - Toast + repaint -> informs, very cheap, more UI friction than debouncer
+
 impl WriteRequest {
     // NOTE: instead of just copying over the passed configs, this should take a RecordingConfigs
     // that's been constructed by using RibbleRecordingConfigs::from_mic_capture(...);
@@ -42,7 +56,7 @@ struct WriterEngineState {
     clearing: AtomicBool,
     latest_exists: AtomicBool,
     data_directory: PathBuf,
-    completed_jobs: RwLock<IndexMap<String, CompletedRecordingJobs>>,
+    completed_jobs: RwLock<IndexMap<Arc<str>, CompletedRecordingJobs>>,
     incoming_jobs: Receiver<WriteRequest>,
     // This is just for spawning a write loop - the outer WriterEngine has to handle sending clear
     // jobs.
@@ -79,7 +93,7 @@ impl WriterEngineState {
             .completed_jobs
             .read()
             .last()
-            .and_then(|(file_name, _)| Some(self.data_directory.join(file_name)));
+            .and_then(|(file_name, _)| Some(self.data_directory.join(file_name.as_ref())));
 
         // If it doesn't exist, internally update the status and return the Option.
         if latest.is_none() {
@@ -96,16 +110,19 @@ impl WriterEngineState {
         self.completed_jobs.read().len()
     }
 
-    fn get_recording_path(&self, file_name: &str) -> Option<PathBuf> {
+    fn get_recording_path(&self, file_name: Arc<str>) -> Option<PathBuf> {
         let mut map = self.completed_jobs.write();
-        if !map.contains_key(file_name) {
+        if !map.contains_key(&file_name) {
             return None;
         }
 
-        let expected_path = self.data_directory.join(file_name);
+        let expected_path = self.data_directory.join(file_name.as_ref());
         if !expected_path.is_file() {
             // Remove the broken link from the map if it no longer exists.
-            map.shift_remove(file_name);
+            map.shift_remove(&file_name);
+            if map.is_empty() {
+                self.latest_exists.store(false, Ordering::Release);
+            }
             None
         } else {
             Some(expected_path)
@@ -119,7 +136,7 @@ impl WriterEngineState {
         let mut completed_jobs = self.completed_jobs.write();
 
         for file in completed_jobs.keys() {
-            let file_path = self.data_directory.join(file);
+            let file_path = self.data_directory.join(file.as_ref());
             if let Ok(exists) = std::fs::exists(file_path.as_path()) {
                 // Don't care if the path is a directory (it should never, ever be one)
                 // Don't care if the file is already gone (the entry will get deleted from the map)
@@ -151,8 +168,8 @@ impl WriterEngineState {
         &self,
         // Since the outer API has to CoW, just take the path.
         outfile_path: PathBuf,
-        // ibid.
-        key: String,
+        // ibid -> take a clone of the shared string.
+        key: Arc<str>,
         format: RibbleRecordingExportFormat,
     ) -> Result<RibbleMessage, RibbleError> {
         let tmp_file_path = self.data_directory.join(key.as_str());
@@ -244,7 +261,7 @@ impl WriterEngineState {
         // Make a new entry in the completed jobs queue.
         let mut job_bank = self.completed_jobs.write();
         job_bank.insert(
-            file_name,
+            Arc::from(file_name),
             CompletedRecordingJobs {
                 total_duration,
                 file_size_estimate,
@@ -321,7 +338,8 @@ impl WriterEngine {
     pub(super) fn export(
         &self,
         out_path: &Path,
-        job_file_name: &str,
+        // This is the key -> clone it in the UI and take ownership of the pointer
+        job_file_name: Arc<str>,
         output_format: RibbleRecordingExportFormat,
     ) {
         let thread_inner = Arc::clone(&self.inner);
@@ -329,9 +347,8 @@ impl WriterEngine {
         // Since it's not expected to happen often, CoW is most likely the easiest solution to
         // avoid atomic shared pointers.
         let file_path = out_path.to_path_buf();
-        let file_name = job_file_name.to_string();
         let worker = std::thread::spawn(move || {
-            thread_inner.export_file(file_path, file_name, output_format)
+            thread_inner.export_file(file_path, job_file_name, output_format)
         });
 
         let work_request = WorkRequest::Short(worker);
@@ -347,13 +364,13 @@ impl WriterEngine {
     // Look at a better solution/shared pointers.
     pub(super) fn try_get_completed_jobs(
         &self,
-        copy_buffer: &mut Vec<(String, CompletedRecordingJobs)>,
+        copy_buffer: &mut Vec<(Arc<str>, CompletedRecordingJobs)>,
     ) {
         if let Some(jobs) = self.inner.completed_jobs.try_read() {
             copy_buffer.clear();
             copy_buffer.extend(
                 jobs.iter()
-                    .map(|(file_name, metadata)| (file_name.clone(), metadata.clone())),
+                    .map(|(file_name, metadata)| (Arc::clone(file_name), metadata.clone())),
             );
             copy_buffer.reverse();
         }
@@ -377,7 +394,7 @@ impl WriterEngine {
         self.inner.get_num_completed()
     }
 
-    pub(super) fn get_recording_path(&self, file_name: &str) -> Option<PathBuf> {
+    pub(super) fn get_recording_path(&self, file_name: Arc<str>) -> Option<PathBuf> {
         self.inner.get_recording_path(file_name)
     }
 

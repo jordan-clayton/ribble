@@ -3,6 +3,11 @@ use ribble_whisper::audio::audio_backend::CaptureSpec;
 use ribble_whisper::audio::microphone::MicCapture;
 use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
 
+// NOTE: the From<_> implementations may not be the most logically sound.
+// However, to limit the granularity of settings and to reduce the amount of
+// typing (& excessive Traits that achieve the same thing), these members
+// implement From to map user-facing selections to internal settings.
+
 #[derive(
     Default,
     Copy,

@@ -50,7 +50,7 @@ impl PaneView for ConsolePane {
                 });
         });
 
-        let pane_id = egui::Id::from("console_pane");
+        let pane_id = egui::Id::new("console_pane");
         let resp = ui
             .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::Grab);

@@ -306,32 +306,37 @@ impl RibbleModelBank {
     }
 
     // This will make a work request to copy the file over.
-    pub(crate) fn copy_model_to_bank(&self, model_file_path: &Path) {
+    pub(crate) fn copy_model_to_bank(&self, model_file_path: PathBuf) {
         let model_directory = self.inner.model_directory().to_path_buf();
-        let file_path = model_file_path.to_path_buf();
         let worker = std::thread::spawn(move || {
-            if !file_path.is_file() {
-                let err = RibbleError::Core(format!("{:?} is not a file.", file_path));
+            if !model_file_path.is_file() {
+                let err =
+                    RibbleError::Core(format!("{:?} is not a file.", model_file_path.display()));
                 return Err(err);
             }
 
-            let extension = file_path
+            let extension = model_file_path
                 .extension()
-                .ok_or(RibbleError::Core(format!("Invalid file: {:?}", file_path)))?;
+                .ok_or(RibbleError::Core(format!(
+                    "Invalid file: {:?}",
+                    model_file_path.display()
+                )))?;
 
             if extension != MODEL_FILE_EXTENSION {
                 let err = RibbleError::Core(format!("Invalid file_type: {:?}", extension));
                 return Err(err);
             }
 
-            let file_name = file_path.file_name().ok_or(RibbleError::Core(format!(
-                "Invalid file path: {:?}",
-                file_path
-            )))?;
+            let file_name = model_file_path
+                .file_name()
+                .ok_or(RibbleError::Core(format!(
+                    "Invalid file path: {:?}",
+                    model_file_path.display()
+                )))?;
 
             let dest = model_directory.join(file_name);
 
-            fs::copy(file_path.as_path(), dest.as_path())?;
+            fs::copy(model_file_path.as_path(), dest.as_path())?;
             let console_message = ConsoleMessage::Status(format!(
                 "Saved model: {:#?} to models directory.",
                 file_name
