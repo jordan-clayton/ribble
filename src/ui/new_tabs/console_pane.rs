@@ -31,11 +31,9 @@ impl PaneView for ConsolePane {
         // Try to read the current messages (non-blocking).
         controller.try_get_current_messages(&mut self.message_buffer);
 
-        // Set the background color
-        let visuals = ui.visuals().clone();
-
-        let bg_col = visuals.extreme_bg_color;
-        egui::Frame::new().fill(bg_col).show(ui, |ui| {
+        let bg_col = ui.visuals().extreme_bg_color;
+        egui::Frame::default().fill(bg_col).show(ui, |ui| {
+            ui.heading("Console:");
             egui::ScrollArea::both()
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
@@ -43,7 +41,7 @@ impl PaneView for ConsolePane {
                         egui::Layout::top_down(egui::Align::LEFT).with_cross_justify(true),
                         |ui| {
                             for msg in self.message_buffer.iter() {
-                                ui.label(msg.to_console_text(&visuals));
+                                ui.label(msg.to_console_text(ui.visuals()));
                             }
                         },
                     );

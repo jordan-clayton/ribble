@@ -4,9 +4,6 @@ use strum::{AsRefStr, EnumIter, EnumString, IntoStaticStr};
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::new_tabs::panes::*;
 
-// TODO: rename the trait methods, and the trait.
-// This should be "TileView"
-
 #[enum_dispatch(RibblePane)]
 pub(in crate::ui) trait PaneView {
     fn pane_id(&self) -> RibblePaneId;
@@ -86,11 +83,17 @@ impl From<RibblePaneId> for RibblePane {
     }
 }
 
+// TODO: rename this to ClosableRibblePane
+// Use in an actual menu-bar with a "window/panes menu"
+// Rethink the "opened-pane" implementation; it can probably be way simpler.
+// Also, perhaps split at the root, or split a leaf.
 #[derive(EnumIter, EnumString, AsRefStr, IntoStaticStr, Debug)]
 pub(in crate::ui) enum ClosableRibbleTab {
     Visualizer,
     Progress,
     Console,
+    Downloads,
+    Recording,
     // POSSIBLY add this as a horizontal instead of a tab at a focused area.
     // If doing that, implement some sort of cog-widget at the top of the tab bar and remove from this list.
     #[strum(serialize = "User Preferences")]
@@ -104,6 +107,8 @@ impl From<ClosableRibbleTab> for RibblePane {
             ClosableRibbleTab::Visualizer => RibblePane::VisualizerPane(VisualizerPane::default()),
             ClosableRibbleTab::Progress => RibblePane::ProgressPane(ProgressPane::default()),
             ClosableRibbleTab::Console => RibblePane::ConsolePane(ConsolePane::default()),
+            ClosableRibbleTab::Downloads => RibblePane::DownloadsPane(DownloadsPane::default()),
+            ClosableRibbleTab::Recording => RibblePane::RecordingPane(RecordingPane::default()),
             ClosableRibbleTab::UserPreferences => {
                 RibblePane::UserPreferencesPane(UserPreferencesPane::default())
             }

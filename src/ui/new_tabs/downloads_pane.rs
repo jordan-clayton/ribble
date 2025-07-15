@@ -1,11 +1,17 @@
+use crate::controller::FileDownload;
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::new_tabs::ribble_pane::{PaneView, RibblePaneId};
+use irox_egui_extras::progressbar::ProgressBar;
 
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub(in crate::ui) struct DownloadsPane {
-    // TODO: this will require a redundant buffer of "Downloads" (metadata).
-    // Return to this once the Downloader has been exteeeended.
+    #[serde(skip)]
+    #[serde(default)]
+    current_downloads: Vec<(usize, FileDownload)>,
 }
+
+// https://unicodeplus.com/U+1F5D9
+const CANCELLATION_X: &'static str = "\u{1F5D9}";
 
 impl PaneView for DownloadsPane {
     fn pane_id(&self) -> RibblePaneId {
@@ -19,17 +25,70 @@ impl PaneView for DownloadsPane {
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
-        tile_id: egui_tiles::TileId,
+        _tile_id: egui_tiles::TileId,
         controller: RibbleController,
     ) -> egui::Response {
-        todo!();
-        // Basic idea:
-        // List-tile style view, shows the file_name, progress (can be shared with Progress
-        // Engine-progress is atomic)
-        // Expose a button to cancel the download -> send this information to the controller &
-        // downloadEngine will take care of things.
-        // Show each as a deterministic progress bar
-        // Voila.
+        controller.try_get_current_downloads(&mut self.current_downloads);
+        if !self.current_downloads.is_empty() {
+            ui.ctx().request_repaint();
+        }
+        egui::Frame::default().show(ui, |ui| {
+            ui.heading("Downloads:");
+            egui::ScrollArea::both()
+                .stick_to_bottom(true)
+                .show(ui, |ui| {
+                    egui::Grid::new("Downloads Grid")
+                        .num_columns(2)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for (download_id, download) in self.current_downloads.iter() {
+                                let download_progress = download.progress();
+
+                                // TODO: get the unit_prefix crate and refactor all bytes-to vis
+                                // conversions.
+                                let _current_bytes = download_progress.current_position();
+                                let _total_size = download_progress.total_size();
+                                let bytes_format = format!("TODO: BYTE SIZE");
+
+                                let mut pb = ProgressBar::new(download_progress.current_progress())
+                                    .text_left(download.name().to_string())
+                                    .text_right(bytes_format);
+                                pb.animate = true;
+
+                                ui.add(pb);
+                                if ui.button(CANCELLATION_X).clicked() {
+                                    // NOTE: at the moment, this is a blocking method.
+                                    // Writers should still get priority, but if there's any jank,
+                                    // run the action on a short-lived background thread.
+                                    controller.abort_download(*download_id);
+                                }
+
+                                ui.end_row();
+                            }
+                        });
+                });
+        });
+
+        let pane_id = egui::Id::new("downloads_pane");
+        let resp = ui
+            .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::Grab);
+
+        // Add a context menu to make this closable.
+        resp.context_menu(|ui| {
+            let mut should_close = false;
+            if ui
+                .selectable_value(&mut should_close, true, "Close tab.")
+                .clicked()
+            {
+                if should_close {
+                    todo!("HANDLE CLOSING THE PANE");
+                }
+                ui.close_menu();
+            };
+        });
+
+        resp
     }
 
     fn is_pane_closable(&self) -> bool {

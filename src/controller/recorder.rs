@@ -169,6 +169,10 @@ impl RecorderEngine {
         }
     }
 
+    pub(super) fn stop_recording(&self) {
+        self.inner.recorder_running.store(false, Ordering::Release);
+    }
+
     pub(super) fn recorder_running(&self) -> bool {
         self.inner.recorder_running.load(Ordering::Acquire)
     }

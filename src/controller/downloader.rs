@@ -1,6 +1,6 @@
 use crate::controller::{
-    Bus, ConsoleMessage, DownloadRequest, FileDownload, Progress, ProgressMessage, RibbleMessage,
-    WorkRequest,
+    AmortizedDownloadProgress, Bus, ConsoleMessage, DownloadRequest, FileDownload, Progress,
+    ProgressMessage, RibbleMessage, WorkRequest,
 };
 use crate::utils::errors::RibbleError;
 use parking_lot::RwLock;
@@ -149,13 +149,13 @@ impl DownloadEngineState {
         Ok(ribble_message)
     }
 
+    // NOTE: THIS WILL BLOCK -> it may need to be called on a background thread.
     fn abort_download(&self, download_id: usize) {
-        if let Some(download) = self.file_downloads.read().get(download_id) {
+        let mut write_guard = self.file_downloads.write();
+        if let Some(download) = write_guard.try_remove(download_id) {
             download.abort_download();
         } else {
-            // I would suppose that the only case where this is true would be
-            // TOC-TOU.
-            todo!("LOGGING: key is missing");
+            todo!("LOGGING: key is missing.");
         }
     }
 }
@@ -171,6 +171,8 @@ impl DownloadEngine {
         let inner = Arc::new(DownloadEngineState::new(incoming_jobs, bus));
         let thread_inner = Arc::clone(&inner);
 
+        // TODO: Either split this, or refactor the abort method to spawn a thread to grab the
+        // write lock.
         let worker = std::thread::spawn(move || {
             while let Ok(download_job) = thread_inner.incoming_jobs.recv() {
                 let download_inner = Arc::clone(&thread_inner);
@@ -199,6 +201,27 @@ impl DownloadEngine {
         }
     }
 
+    pub(super) fn try_get_amortized_download_progress(&self) -> Option<AmortizedDownloadProgress> {
+        if let Some(jobs) = self.inner.file_downloads.try_read() {
+            // This will coerce into NoJobs if the accumulator ends up (0, 0) (i.e. no jobs).
+            let download_progress: AmortizedDownloadProgress = jobs
+                .iter()
+                .fold((0usize, 0usize), |(current, total), (_, file_download)| {
+                    let progress = file_download.progress();
+                    (
+                        current + progress.current_position() as usize,
+                        total + progress.total_size() as usize,
+                    )
+                })
+                .into();
+            Some(download_progress)
+        } else {
+            None
+        }
+    }
+
+    // TODO: this needs to either happen on a thread, or there needs to be a gc epoch to remove
+    // expired downloads.
     pub(super) fn abort_download(&self, download_id: usize) {
         self.inner.abort_download(download_id);
     }

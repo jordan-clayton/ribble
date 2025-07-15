@@ -8,7 +8,6 @@ use crate::utils::realtime_settings::{AudioSampleLen, RealtimeTimeout, VadSample
 use ribble_whisper::whisper::configs::Language;
 use ribble_whisper::whisper::model::{DefaultModelType, ModelId};
 use std::sync::Arc;
-use std::path::PathBuf;
 use strum::IntoEnumIterator;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -31,9 +30,7 @@ pub(in crate::ui) struct TranscriberPane {
     #[serde(skip)]
     #[serde(default)]
     download_modal: bool,
-    #[serde(skip)]
-    #[serde(default = "set_base_directory")]
-    base_directory: PathBuf,
+
     #[serde(skip)]
     #[serde(default)]
     model_url: String,
@@ -43,14 +40,6 @@ pub(in crate::ui) struct TranscriberPane {
 // This is for serde until it supports literals.
 fn set_realtime() -> bool {
     true
-}
-
-fn set_base_directory() -> PathBuf {
-   use directories::BaseDirs;
-   match BaseDirs::new(){
-       Some(base_dirs) => {base_dirs.home_dir().to_path_buf()},
-       None => PathBuf::from("/"),
-   }
 }
 
 // TODO: not sure if this is entirely the best way to solve this problem
@@ -69,7 +58,6 @@ impl Default for TranscriberPane {
             model_empty_name: set_model_empty(),
             recording_modal: false,
             download_modal: false,
-            base_directory: set_base_directory(),
             model_url: Default::default(),
         }
     }
@@ -110,14 +98,15 @@ impl PaneView for TranscriberPane {
         };
 
         // MAIN PANEL FRAME
-        egui::Frame::new().show(ui, |ui| {
+        egui::Frame::default().show(ui, |ui| {
             let header_height = egui::TextStyle::Heading.resolve(ui.style()).size;
             let header_width = ui.max_rect().width();
             let desired_size = egui::Vec2::new(header_width, header_height);
+            let layout = egui::Layout::left_to_right(egui::Align::Center).with_main_justify(true).with_main_wrap(true);
 
             ui.allocate_ui_with_layout(
                 desired_size,
-                egui::Layout::left_to_right(egui::Align::Center).with_main_justify(true),
+                layout,
                 |ui| {
                     ui.heading(header_text);
                     ui.horizontal_wrapped(|ui| {
@@ -219,7 +208,7 @@ impl PaneView for TranscriberPane {
                                 .add_filter("mkv", &["mkv"])
                                 .add_filter("alac", &["alac"])
                                 .add_filter("flac", &["flac"])
-                                .set_directory(self.base_directory.as_path());
+                                .set_directory(controller.base_dir());
 
                             if let Some(path) = file_dialog.pick_file() {
                                 controller.set_audio_file_path(path);
@@ -228,7 +217,6 @@ impl PaneView for TranscriberPane {
                         ui.add_space(button_spacing);
                         if ui.add_enabled(!transcription_running, egui::Button::new("Load recording")).clicked() {
                             self.recording_modal = true;
-                            todo!("Define recording modal");
                         }
                     });
                     ui.add_space(button_spacing);
@@ -260,7 +248,7 @@ impl PaneView for TranscriberPane {
                 ui.separator();
 
                 // CONFIGS GRIDS
-                ui.heading("Configs.");
+                ui.heading("Configs:");
                 // Disable the configs interaction if the main runner is running
                 ui.collapsing("Transcription Configs", |ui| {
                     ui.add_enabled_ui(!audio_worker_running, |ui| {
@@ -346,7 +334,7 @@ impl PaneView for TranscriberPane {
                                             if ui.button("Open Model").clicked() {
                                                 let file_dialog = rfd::FileDialog::new()
                                                    .add_filter("ggml-model", &[".bin"])
-                                                   .set_directory(self.base_directory.as_path());
+                                                   .set_directory(controller.base_dir());
                                                
                                                 // If there is path, it is a ".bin".
                                                 // At the moment, there's no integrity checking
@@ -673,7 +661,8 @@ impl PaneView for TranscriberPane {
 
         // MODALS -> this doesn't need to be in the scroll area.
         if self.recording_modal {
-            let modal = egui::Modal::new(egui::Id::new("recording_modal")).show(ui.ctx(), |ui| {
+            let modal_id = egui::Id::new("transcriber recordings modal");
+            let modal = egui::Modal::new(modal_id).show(ui.ctx(), |ui| {
 
                 // Try-get the latest list of recordings.
                 // TODO: maaaaybe this should have a debouncer.
@@ -683,7 +672,7 @@ impl PaneView for TranscriberPane {
                 // TODO: abstract better constants/variables here -> should probably be a percentage of the
                 // window size
                 ui.set_width_range(70f32..=100f32);
-let header_height = egui::TextStyle::Heading.resolve(ui.style()).size;
+                let header_height = egui::TextStyle::Heading.resolve(ui.style()).size;
                 let header_width = ui.max_rect().width();
                 let desired_size = egui::Vec2::new(header_width, header_height);
 
@@ -704,7 +693,7 @@ let header_height = egui::TextStyle::Heading.resolve(ui.style()).size;
                 
                 // If it's possible to know the size in advance, use show-rows.
                 egui::ScrollArea::both().show(ui, |ui|{
-                   egui::Grid::new("recording_list_grid").num_columns(1).striped(true).show(ui, |ui|{
+                   egui::Grid::new("transcriber recording_list_grid").num_columns(1).striped(true).show(ui, |ui|{
                        let len = self.recordings_buffer.len();
                        for (i, (file_name, recording)) in self.recordings_buffer.iter().enumerate(){
                             

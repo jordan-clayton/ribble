@@ -1,4 +1,3 @@
-use crate::controller::AnalysisType;
 use crate::controller::console::ConsoleEngine;
 use crate::controller::downloader::DownloadEngine;
 use crate::controller::model_bank::RibbleModelBank;
@@ -9,10 +8,11 @@ use crate::controller::visualizer::VisualizerEngine;
 use crate::controller::worker::WorkerEngine;
 use crate::controller::writer::WriterEngine;
 use crate::controller::{
-    AmortizedProgress, Bus, CompletedRecordingJobs, ConsoleMessage, DEFAULT_PROGRESS_SLAB_CAPACITY,
-    NUM_VISUALIZER_BUCKETS, OfflineTranscriberFeedback, Progress, RotationDirection,
-    SMALL_UTILITY_QUEUE_SIZE, UTILITY_QUEUE_SIZE,
+    AmortizedDownloadProgress, AmortizedProgress, Bus, CompletedRecordingJobs, ConsoleMessage,
+    DEFAULT_PROGRESS_SLAB_CAPACITY, NUM_VISUALIZER_BUCKETS, OfflineTranscriberFeedback, Progress,
+    RotationDirection, SMALL_UTILITY_QUEUE_SIZE, UTILITY_QUEUE_SIZE,
 };
+use crate::controller::{AnalysisType, FileDownload};
 use crate::utils::errors::RibbleError;
 use crate::utils::preferences::UserPreferences;
 use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExportFormat};
@@ -272,6 +272,9 @@ impl Kernel {
         let backend = Arc::clone(&self.audio_backend);
         self.recorder_engine.start_recording(backend);
     }
+    pub(super) fn stop_recording(&self) {
+        self.recorder_engine.stop_recording();
+    }
 
     // WRITER (RECORDINGS + Export)
     pub(super) fn is_clearing_recordings(&self) -> bool {
@@ -305,12 +308,12 @@ impl Kernel {
     // NOTE: recording_file_name is internal -- It's the left-half of the (String, CompletedRecordingJobs) tuple.
     pub(super) fn export_recording(
         &self,
-        out_path: &Path,
-        recording_file_name: &str,
+        out_path: PathBuf,
+        recording_file_name: Arc<str>,
         output_format: RibbleRecordingExportFormat,
     ) {
         self.writer_engine
-            .export(out_path, recording_file_name, output_format);
+            .export_recording(out_path, recording_file_name, output_format);
     }
 
     // CONSOLE
@@ -328,6 +331,19 @@ impl Kernel {
 
     pub(super) fn try_get_amortized_jobs(&self) -> Option<AmortizedProgress> {
         self.progress_engine.try_get_amortized_progress()
+    }
+
+    // DOWNLOADER
+    pub(super) fn try_get_current_downloads(&self, copy_buffer: &mut Vec<(usize, FileDownload)>) {
+        self.download_engine.try_get_current_downloads(copy_buffer);
+    }
+
+    pub(super) fn try_get_amortized_download_progress(&self) -> Option<AmortizedDownloadProgress> {
+        self.download_engine.try_get_amortized_download_progress()
+    }
+
+    pub(super) fn abort_download(&self, download_id: usize) {
+        self.download_engine.abort_download(download_id);
     }
 
     // VISUALIZER

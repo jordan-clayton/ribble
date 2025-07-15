@@ -254,7 +254,6 @@ impl AtomicProgress {
         self
     }
 
-    // TODO: remove if unused.
     fn set(&self, pos: u64) {
         self.pos.store(pos, Ordering::Release);
     }
@@ -289,6 +288,39 @@ pub(crate) enum AmortizedProgress {
     NoJobs,
     Determinate { current: usize, total_size: usize },
     Indeterminate,
+}
+
+#[derive(Copy, Clone, Default)]
+pub(crate) enum AmortizedDownloadProgress {
+    #[default]
+    NoJobs,
+    Total {
+        current: usize,
+        total_size: usize,
+    },
+}
+impl AmortizedDownloadProgress {
+    pub(crate) fn decompose(self) -> Option<(usize, usize)> {
+        match self {
+            AmortizedDownloadProgress::Total {
+                current,
+                total_size,
+            } => Some((current, total_size)),
+            AmortizedDownloadProgress::NoJobs => None,
+        }
+    }
+}
+
+impl From<(usize, usize)> for AmortizedDownloadProgress {
+    fn from(value: (usize, usize)) -> Self {
+        match value {
+            (0, 0) => AmortizedDownloadProgress::NoJobs,
+            (current, total_size) => AmortizedDownloadProgress::Total {
+                current,
+                total_size,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -336,6 +368,16 @@ impl Progress {
         let progress = AtomicProgress::new().with_capacity(total_size);
         let progress = Arc::new(progress);
         Self::Determinate { job_name, progress }
+    }
+
+    pub(crate) fn job_name(&self) -> &'static str {
+        match self {
+            Progress::Determinate {
+                job_name,
+                progress: _,
+            }
+            | Progress::Indeterminate { job_name } => job_name,
+        }
     }
 
     fn inc(&self, delta: u64) {

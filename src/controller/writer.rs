@@ -164,7 +164,7 @@ impl WriterEngineState {
         Ok(ribble_message)
     }
 
-    fn export_file(
+    fn export_recording(
         &self,
         // Since the outer API has to CoW, just take the path.
         outfile_path: PathBuf,
@@ -172,7 +172,7 @@ impl WriterEngineState {
         key: Arc<str>,
         format: RibbleRecordingExportFormat,
     ) -> Result<RibbleMessage, RibbleError> {
-        let tmp_file_path = self.data_directory.join(key.as_str());
+        let tmp_file_path = self.data_directory.join(key.as_ref());
         let check_tmp_file = std::fs::exists(tmp_file_path.as_path());
         if check_tmp_file.is_err() || !check_tmp_file? {
             let error = std::io::Error::from(std::io::ErrorKind::NotFound);
@@ -189,7 +189,7 @@ impl WriterEngineState {
         } else {
             let read_guard = self.completed_jobs.read();
 
-            let job = read_guard.get(key.as_str()).ok_or(RibbleError::Core(
+            let job = read_guard.get(key.as_ref()).ok_or(RibbleError::Core(
                 "Temp recording metadata not found.".to_string(),
             ))?;
 
@@ -335,9 +335,9 @@ impl WriterEngine {
     //
     // NOTE: Send the key in if the user wants to export a recording.
     // NOTE TWICE: remove .into() once RibbleAppError has been removed.
-    pub(super) fn export(
+    pub(super) fn export_recording(
         &self,
-        out_path: &Path,
+        out_path: PathBuf,
         // This is the key -> clone it in the UI and take ownership of the pointer
         job_file_name: Arc<str>,
         output_format: RibbleRecordingExportFormat,
@@ -346,9 +346,8 @@ impl WriterEngine {
         // NOTE: these either need to be static references, or copy-on-write.
         // Since it's not expected to happen often, CoW is most likely the easiest solution to
         // avoid atomic shared pointers.
-        let file_path = out_path.to_path_buf();
         let worker = std::thread::spawn(move || {
-            thread_inner.export_file(file_path, job_file_name, output_format)
+            thread_inner.export_recording(out_path, job_file_name, output_format)
         });
 
         let work_request = WorkRequest::Short(worker);

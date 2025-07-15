@@ -2,6 +2,7 @@ use crate::controller::Progress;
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::new_tabs::PaneView;
 use crate::ui::new_tabs::ribble_pane::RibblePaneId;
+use irox_egui_extras::progressbar::ProgressBar;
 
 #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ProgressPane {
@@ -9,6 +10,9 @@ pub(crate) struct ProgressPane {
     #[serde(skip)]
     current_jobs: Vec<Progress>,
 }
+
+// NOTE: if the progress bar impl thus far is insufficent (and requires custom painting/gradients),
+// Factor out a widget and just paint it.
 
 impl PaneView for ProgressPane {
     fn pane_id(&self) -> RibblePaneId {
@@ -22,37 +26,46 @@ impl PaneView for ProgressPane {
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
-        tile_id: egui_tiles::TileId,
+        _tile_id: egui_tiles::TileId,
         controller: RibbleController,
     ) -> egui::Response {
         // Get the current list of jobs.
         controller.try_get_current_jobs(&mut self.current_jobs);
-        let spacing = ui.spacing().interact_size.y;
-        let len = self.current_jobs.len();
 
-        // TODO: determine whether this should have a different background.
-        // If so, stick this into a frame.
-        egui::ScrollArea::both()
-            .stick_to_bottom(true)
-            .show(ui, |ui| {
-                for (i, prog_job) in self.current_jobs.iter().enumerate() {
-                    // TODO: test and see if top spacing is also required or not.
-                    // If spacing/separators aren't needed, just iterate the jobs.
-                    match prog_job {
-                        Progress::Determinate { job_name, progress } => {
-                            todo!("DRAW");
-                        }
-                        Progress::Indeterminate { job_name } => {
-                            todo!("DRAW");
-                        }
-                    }
+        // If there are progress bars, request a repaint.
+        if !self.current_jobs.is_empty() {
+            ui.ctx().request_repaint();
+        }
 
-                    ui.add_space(spacing);
-                    if i != len - 1 {
-                        ui.separator();
-                    }
-                }
-            });
+        egui::Frame::default().show(ui, |ui| {
+            ui.heading("Progress:");
+            egui::ScrollArea::both()
+                .stick_to_bottom(true)
+                .show(ui, |ui| {
+                    egui::Grid::new("Progress Grid")
+                        .num_columns(1)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for prog_job in self.current_jobs.iter() {
+                                // Match on the progress job type -> This is technically 2 matches.
+                                // It's not likely to make a difference to just match on the enum
+                                // and expose the "normalized" function, but it's a
+                                // micro-optimization that could be made.
+                                let mut pb = match prog_job.progress() {
+                                    Some(progress) => ProgressBar::new(progress)
+                                        .text_left(prog_job.job_name().to_string())
+                                        .text_right(format!("{}%", progress * 100f32)),
+                                    None => ProgressBar::indeterminate()
+                                        .text_left(prog_job.job_name().to_string()),
+                                };
+
+                                pb.animate = true;
+                                ui.add(pb);
+                                ui.end_row();
+                            }
+                        });
+                });
+        });
 
         let pane_id = egui::Id::new("progress_pane");
         let resp = ui

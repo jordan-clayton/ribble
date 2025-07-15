@@ -56,8 +56,10 @@ impl PaneView for VisualizerPane {
         // - (Change the lerping hitbox --> it's currently weird)
         // - increase the height based on the proximity to the mouse -> use a wider falloff
         // - also, do it from the closest rect corner, not the center.
+        egui::Frame::default().show(ui, |ui| {
+            todo!("FINISH DRAWING.");
+        });
 
-        todo!("FINISH DRAWING.");
         let pane_id = egui::Id::new("visualizer_pane");
         let resp = ui
             .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())

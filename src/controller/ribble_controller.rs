@@ -1,8 +1,9 @@
 use crate::controller::audio_backend_proxy::AudioBackendProxy;
 use crate::controller::kernel::Kernel;
 use crate::controller::{
-    AmortizedProgress, AnalysisType, CompletedRecordingJobs, ConsoleMessage,
-    NUM_VISUALIZER_BUCKETS, OfflineTranscriberFeedback, Progress, RotationDirection,
+    AmortizedDownloadProgress, AmortizedProgress, AnalysisType, CompletedRecordingJobs,
+    ConsoleMessage, FileDownload, NUM_VISUALIZER_BUCKETS, OfflineTranscriberFeedback, Progress,
+    RotationDirection,
 };
 use crate::utils::errors::RibbleError;
 use crate::utils::preferences::UserPreferences;
@@ -14,12 +15,21 @@ use ribble_whisper::whisper::model::ModelId;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+fn set_base_directory() -> PathBuf {
+    use directories::BaseDirs;
+    match BaseDirs::new() {
+        Some(base_dirs) => base_dirs.home_dir().to_path_buf(),
+        None => PathBuf::from("/"),
+    }
+}
+
 // NOTE: if deciding to swap the backend, make the sink generic, S: Sink<f32>
 // NOTE TWICE: Possibly look at making the Kernel generic and implement methods on it.
 // TODO: Heavily consider removing the generics here until it's absolutely necessary.
 // It's a bit of a pain and the app is currently non-generic--it's much easier to deal with concrete types.
 pub(crate) struct RibbleController {
     kernel: Arc<Kernel>,
+    base_dir: Arc<PathBuf>,
     max_whisper_threads: usize,
 }
 
@@ -27,6 +37,7 @@ impl Clone for RibbleController {
     fn clone(&self) -> Self {
         Self {
             kernel: Arc::clone(&self.kernel),
+            base_dir: Arc::clone(&self.base_dir),
             max_whisper_threads: self.max_whisper_threads,
         }
     }
@@ -44,10 +55,18 @@ impl RibbleController {
         let kernel = Arc::new(Kernel::new(data_directory, audio_backend)?);
         let available_threads = std::thread::available_parallelism()?.get();
         let max_whisper_threads = available_threads.min(Self::RECOMMENDED_MAX_WHISPER_THREADS);
+
+        let base_dir = Arc::new(set_base_directory());
+
         Ok(Self {
             kernel,
+            base_dir,
             max_whisper_threads,
         })
+    }
+
+    pub(crate) fn base_dir(&self) -> &Path {
+        self.base_dir.as_path()
     }
 
     pub(crate) fn serialize_user_data(&self) {
@@ -181,6 +200,10 @@ impl RibbleController {
         self.kernel.start_recording();
     }
 
+    pub(crate) fn stop_recording(&self) {
+        self.kernel.stop_recording();
+    }
+
     // WRITER (RECORDINGS + Export)
     pub(crate) fn is_clearing_recordings(&self) -> bool {
         self.kernel.is_clearing_recordings()
@@ -215,8 +238,8 @@ impl RibbleController {
     // NOTE: recording_file_name is internal -- It's the left-half of the (Arc<str>, CompletedRecordingJobs) tuple.
     pub(crate) fn export_recording(
         &self,
-        out_path: &Path,
-        recording_file_name: &str,
+        out_path: PathBuf,
+        recording_file_name: Arc<str>,
         output_format: RibbleRecordingExportFormat,
     ) {
         self.kernel
@@ -244,6 +267,20 @@ impl RibbleController {
 
     pub(crate) fn try_get_amortized_progress(&self) -> Option<AmortizedProgress> {
         self.kernel.try_get_amortized_jobs()
+    }
+
+    // DOWNLOADER
+
+    pub(crate) fn try_get_current_downloads(&self, copy_buffer: &mut Vec<(usize, FileDownload)>) {
+        self.kernel.try_get_current_downloads(copy_buffer);
+    }
+
+    pub(crate) fn try_get_amortized_download_progress(&self) -> Option<AmortizedDownloadProgress> {
+        self.kernel.try_get_amortized_download_progress()
+    }
+
+    pub(crate) fn abort_download(&self, download_id: usize) {
+        self.kernel.abort_download(download_id);
     }
 
     // VISUALIZER
