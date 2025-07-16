@@ -70,14 +70,14 @@ impl From<RibblePaneId> for RibblePane {
         match value {
             // TODO: implement default methods for tabs to make this easier.
             RibblePaneId::Transcriber => RibblePane::TranscriberPane(TranscriberPane::default()),
-            RibblePaneId::Recording => RibblePane::RecordingPane(RecordingPane {}),
+            RibblePaneId::Recording => RibblePane::RecordingPane(RecordingPane::default()),
             RibblePaneId::Transcription => RibblePane::TranscriptionPane(TranscriptionPane {}),
             RibblePaneId::Visualizer => RibblePane::VisualizerPane(VisualizerPane::default()),
             RibblePaneId::Console => RibblePane::ConsolePane(ConsolePane::default()),
             RibblePaneId::Downloads => RibblePane::DownloadsPane(DownloadsPane::default()),
             RibblePaneId::Progress => RibblePane::ProgressPane(ProgressPane::default()),
             RibblePaneId::UserPreferences => {
-                RibblePane::UserPreferencesPane(UserPreferencesPane {})
+                RibblePane::UserPreferencesPane(UserPreferencesPane::default())
             }
         }
     }

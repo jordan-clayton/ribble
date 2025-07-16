@@ -10,7 +10,7 @@ pub(in crate::ui) struct DownloadsPane {
     current_downloads: Vec<(usize, FileDownload)>,
 }
 
-// https://unicodeplus.com/U+1F5D9
+// https://unicodeplus.com/U+1F5D9 -> "X" (Cancellation glyph)
 const CANCELLATION_X: &'static str = "\u{1F5D9}";
 
 impl PaneView for DownloadsPane {
@@ -44,8 +44,6 @@ impl PaneView for DownloadsPane {
                             for (download_id, download) in self.current_downloads.iter() {
                                 let download_progress = download.progress();
 
-                                // TODO: get the unit_prefix crate and refactor all bytes-to vis
-                                // conversions.
                                 let _current_bytes = download_progress.current_position();
                                 let _total_size = download_progress.total_size();
                                 let bytes_format = format!("TODO: BYTE SIZE");
@@ -59,7 +57,10 @@ impl PaneView for DownloadsPane {
                                 if ui.button(CANCELLATION_X).clicked() {
                                     // NOTE: at the moment, this is a blocking method.
                                     // Writers should still get priority, but if there's any jank,
-                                    // run the action on a short-lived background thread.
+                                    // run the action on a short-lived background thread instead.
+                                    //
+                                    // TODO: Actually, yes, This should happen on a background thread
+                                    // with a flag to prevent grandma clicks.
                                     controller.abort_download(*download_id);
                                 }
 
@@ -74,11 +75,12 @@ impl PaneView for DownloadsPane {
             .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::Grab);
 
-        // Add a context menu to make this closable.
+        // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
+        // will just nop.
         resp.context_menu(|ui| {
             let mut should_close = false;
             if ui
-                .selectable_value(&mut should_close, true, "Close tab.")
+                .selectable_value(&mut should_close, self.is_pane_closable(), "Close tab.")
                 .clicked()
             {
                 if should_close {

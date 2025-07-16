@@ -7,11 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
-use strum::{AsRefStr, Display, EnumIter, EnumString};
-
-// TODO: remove these excess utils; most of them are not necessary for the application.
-pub(crate) mod utils;
-pub(crate) mod whisper_app_controller;
+use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
 
 pub(crate) mod audio_backend_proxy;
 mod console;
@@ -508,7 +504,7 @@ pub(crate) enum RotationDirection {
 }
 
 #[atomic_enum]
-#[derive(Default, PartialEq, EnumIter, Display)]
+#[derive(Default, PartialEq, EnumIter, Display, IntoStaticStr, AsRefStr)]
 pub(crate) enum AnalysisType {
     #[strum(to_string = "Amplitude")]
     #[default]

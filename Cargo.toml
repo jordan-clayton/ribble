@@ -59,6 +59,8 @@ egui_tiles = { version = "0.12.0", features = ["serde"] }
 opener = { version = "0.8.2", features = ["reveal"] }
 egui-theme-lerp = "0.2.0"
 notify-debouncer-full = { version = "0.5.0", features = ["crossbeam-channel"] }
+unit-prefix = "0.5.1"
+egui-colorgradient = "0.2.0"
 
 # TODO: this can likely be removed - it's not up to Ribble to make decisions based on system requirements.
 [target.x86_64-apple-darwin.dependencies]

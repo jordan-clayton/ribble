@@ -47,10 +47,6 @@ impl PaneView for ProgressPane {
                         .striped(true)
                         .show(ui, |ui| {
                             for prog_job in self.current_jobs.iter() {
-                                // Match on the progress job type -> This is technically 2 matches.
-                                // It's not likely to make a difference to just match on the enum
-                                // and expose the "normalized" function, but it's a
-                                // micro-optimization that could be made.
                                 let mut pb = match prog_job.progress() {
                                     Some(progress) => ProgressBar::new(progress)
                                         .text_left(prog_job.job_name().to_string())
@@ -72,11 +68,12 @@ impl PaneView for ProgressPane {
             .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::Grab);
 
-        // Add a context menu to make this closable.
+        // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
+        // will just nop.
         resp.context_menu(|ui| {
             let mut should_close = false;
             if ui
-                .selectable_value(&mut should_close, true, "Close tab.")
+                .selectable_value(&mut should_close, self.is_pane_closable(), "Close tab.")
                 .clicked()
             {
                 if should_close {

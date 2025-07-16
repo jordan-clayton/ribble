@@ -209,16 +209,9 @@ impl PaneView for RecordingPane {
 
                                    // This is in bytes.
                                    let file_size_estimate = recording.file_size_estimate();
-                                   let kb = file_size_estimate as f32 / 1000f32;
-                                   let mb = kb / 1000f32;
-                                   let gb = mb / 1000f32;
-
-                                   let size_text = if gb > 0f32 {
-                                        format!("{gb} GB")
-                                   } else if mb > 0f32 {
-                                       format!("{mb} MB")
-                                   } else {
-                                       format!("{kb} KB")    
+                                   let size_text = match unit_prefix::NumberPrefix::binary(file_size_estimate as f32) {
+                                        unit_prefix::NumberPrefix::Standalone(number) => format!("{number:.0} B"),
+                                        unit_prefix::NumberPrefix::Prefixed(prefix, number) => format!("{number:.2} {prefix}B"),
                                    };
 
                                    format!("Total time: {hours}:{minutes}:{seconds} | Approx size: {size_text}")
@@ -285,11 +278,12 @@ impl PaneView for RecordingPane {
         let pane_id = egui::Id::new("recording_pane");
         let resp = ui.interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag());
 
-        // Add a context menu to make this close-able.
+        // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
+        // will just nop.
         resp.context_menu(|ui| {
             let mut should_close = false;
             if ui
-                .selectable_value(&mut should_close, true, "Close tab.")
+                .selectable_value(&mut should_close, self.is_pane_closable(), "Close tab.")
                 .clicked()
             {
                 if should_close {

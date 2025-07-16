@@ -375,6 +375,10 @@ impl VisualizerEngine {
         self.inner.analysis_type.load(Ordering::Acquire)
     }
 
+    pub(super) fn set_visualizer_analysis_type(&self, new_type: AnalysisType) {
+        self.inner.analysis_type.store(new_type, Ordering::Release);
+    }
+
     // There's no real contention here; rotations are rare,
     // and this isn't RMW critical, so this can be load -> rotate -> store.
     pub(super) fn rotate_visualizer_type(&self, direction: RotationDirection) {

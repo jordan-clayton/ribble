@@ -56,6 +56,8 @@ impl RibbleTree {
     }
 
     // This checks for a new child and either focuses/inserts the tab
+    // TODO: simplify the logic here a litte bit more.
+    // JUST insert at the root.
     fn check_add_new_tabs(&mut self) {
         let RibbleTree {
             data_directory: _,
@@ -67,77 +69,29 @@ impl RibbleTree {
             return;
         }
 
-        let (tile_id, ribble_id) = behavior.add_child_to.take().unwrap();
+        // TODO: CHANGING THE BEHAVIOUR -> only inserting new tabs at the root.
+
+        let (_tile_id, ribble_id) = behavior.add_child_to.take().unwrap();
+
+        // TODO: condense this logic into a match.
 
         // Check to see if there's an entry in the map.
         let pane_id = behavior.opened_tabs.get(&ribble_id);
 
         // Not opened yet, add a pane and focus it if it's a tab.
         if pane_id.is_none() {
-            // It should be cheap enough to just copy this.
             let tiles = &mut tree.tiles;
             let new_child = tiles.insert_pane(ribble_id.into());
-            let insert_at_tile = tiles.get_mut(tile_id);
 
-            // If there's no insertion node, insert somewhere at the root.
-            if insert_at_tile.is_none() {
-                Self::handle_missing_node(tree, new_child, behavior);
-                // Add an entry into the opened_tabs map.
-                behavior.opened_tabs.insert(ribble_id, new_child);
-                return;
-            }
-
-            // Otherwise, there is an insertion point.
-            // If it's a container, make it into a Tabs and insert the new tab as a focused tab.
-            // Otherwise, it's a Pane and needs to be contained in a (parent) tab.
-            let insert_at_tile = insert_at_tile.unwrap();
-            match insert_at_tile {
-                egui_tiles::Tile::Pane(_) => {
-                    // Try and get the Pane's parent
-                    if let Some(parent) = tiles.parent_of(tile_id) {
-                        if let Some(egui_tiles::Tile::Container(container)) = tiles.get_mut(parent)
-                        {
-                            //
-                            container.add_child(new_child);
-                            if let egui_tiles::Container::Tabs(tabs) = container {
-                                tabs.set_active(new_child);
-                            } else {
-                                behavior.focus_non_tab_pane = Some(new_child);
-                            }
-                        } else {
-                            unreachable!(
-                                "It's not possible for a Pane to be a child of a pane. This shouldn't be reached"
-                            );
-                        }
-                    } else {
-                        // Otherwise, there's no parent, which means we're at the root node.
-                        let root = tree.root.expect("The tree should never, ever be empty.");
-                        // At least, we should be at the root node.
-                        debug_assert_eq!(
-                            root, tile_id,
-                            "Pane has no parent, but is also not root. Pane id: {}, Root id: {}",
-                            tile_id.0, root.0
-                        );
-                        // Insert at the root and make the parent container into tabs.
-                        Self::handle_missing_node(tree, new_child, behavior);
-                        // Make an entry into the hashmap so that records are maintained.
-                        behavior.opened_tabs.insert(ribble_id, new_child);
-                    }
-                }
-                egui_tiles::Tile::Container(container) => {
-                    container.add_child(new_child);
-                    if let egui_tiles::Container::Tabs(tabs) = container {
-                        tabs.set_active(new_child);
-                    } else {
-                        behavior.focus_non_tab_pane = Some(new_child);
-                    }
-                }
-            }
+            Self::handle_missing_node(tree, new_child, behavior);
+            // Add an entry into the opened_tabs map.
+            behavior.opened_tabs.insert(ribble_id, new_child);
 
             // Otherwise, we do have an active pane in the tree.
             // The parent of this pane must be a container, otherwise there's something seriously wrong.
         } else {
             let pane_id = pane_id.unwrap();
+            // TODO: remove the clone and do this in a match.
             let mut tiles = tree.tiles.clone();
             // First, check that the tile is actually in the tree
             let ribble_tile = tiles.get(*pane_id);
@@ -225,7 +179,7 @@ impl RibbleTree {
         // Try to read the tree from disk: if it's not there, log it and either return an error or construct the default layout.
     }
     fn default_tree() -> egui_tiles::Tree<RibblePane> {
-        todo!("")
+        todo!("BUILD THE DEFAULT TREE")
     }
 }
 
@@ -242,6 +196,10 @@ pub(in crate::ui) struct RibbleTreeBehavior {
     simplification_options: egui_tiles::SimplificationOptions,
     tab_bar_height: f32,
     gap_width: f32,
+    // TODO: instead of opening this at a container tab, ALWAYS insert at the root when the pane is
+    // being inserted; whatever type it is, just push it within a tab container, or maybe just the
+    // parent's container?.
+    //
     // TODO: expose this parameter to tabs -> in the ui loop, get the parent if it's being inserted.
     // Basicially, match on whether it's a Pane ID or a Container ID.
     add_child_to: Option<(egui_tiles::TileId, RibblePaneId)>,
@@ -286,7 +244,7 @@ impl RibbleTreeBehavior {
                     // TileId implements Copy, so this can just be dereferenced.
                     opened_tabs.insert(ribble_id, *tile_id);
                 }
-                egui_tiles::Tile::Container(_) => continue,
+                egui_tiles::Tile::Container(_) => {}
             }
         }
 
@@ -310,8 +268,6 @@ impl egui_tiles::Behavior<RibblePane> for RibbleTreeBehavior {
         tile_id: egui_tiles::TileId,
         pane: &mut RibblePane,
     ) -> egui_tiles::UiResponse {
-        let pane_id = egui::Id::new(tile_id);
-
         // It's cheap to clone the controller; just an atomic increment.
         // If it somehow becomes a bottleneck, take it in by reference.
         let resp = pane.pane_ui(ui, tile_id, self.controller.clone());
@@ -332,6 +288,30 @@ impl egui_tiles::Behavior<RibblePane> for RibbleTreeBehavior {
 
     fn tab_title_for_pane(&mut self, pane: &RibblePane) -> egui::WidgetText {
         pane.pane_title()
+    }
+
+    //
+    fn tab_title_for_tile(
+        &mut self,
+        tiles: &egui_tiles::Tiles<RibblePane>,
+        tile_id: egui_tiles::TileId,
+    ) -> egui::WidgetText {
+        if let Some(tile) = tiles.get(tile_id) {
+            match tile {
+                egui_tiles::Tile::Pane(pane) => self.tab_title_for_pane(pane),
+                // NOTE: this could recursively travel the active child to get the "active-est"
+                // child, but that might blow the call stack.
+                // It's easiest here to just default to: "Ribble: ContainerKind, which should
+                // hopefully be enough to get the point across."
+                // It's expected that this will primarily happen when a new tab is pushed to the
+                // tree.
+                egui_tiles::Tile::Container(container) => {
+                    format!("Ribble: {:?}", container.kind()).into()
+                }
+            }
+        } else {
+            "MISSING TILE".into()
+        }
     }
 
     fn is_tab_closable(
@@ -375,22 +355,6 @@ impl egui_tiles::Behavior<RibblePane> for RibbleTreeBehavior {
         }
     }
 
-    fn top_bar_right_ui(
-        &mut self,
-        _tiles: &egui_tiles::Tiles<RibblePane>,
-        ui: &mut egui::Ui,
-        tile_id: egui_tiles::TileId,
-        _tabs: &egui_tiles::Tabs,
-        _scroll_offset: &mut f32,
-    ) {
-        // TODO: determine whether it's worth it to just travel the tiles here?
-        // It might be faster to use the hashmap.
-        // Alternatively, add an option for focused tabs?
-
-        // TODO: draw a ui.button( + ) that opens a contextual menu containing a list of ClosableTabs
-        // Upon selection, set self.add_child_to
-        todo!("IMPLEMENT THIS BUTTON.");
-    }
     fn tab_bar_height(&self, _style: &egui::Style) -> f32 {
         self.tab_bar_height
     }
@@ -421,7 +385,7 @@ impl egui_tiles::Behavior<RibblePane> for RibbleTreeBehavior {
                         Self::FOCUS_STROKE_WIDTH,
                         style.visuals.selection.stroke.color,
                     ),
-                    egui::StrokeKind::Middle,
+                    egui::StrokeKind::Outside,
                 );
             }
         }

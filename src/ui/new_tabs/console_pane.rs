@@ -53,11 +53,12 @@ impl PaneView for ConsolePane {
             .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::Grab);
 
-        // Add a context menu to make this close-able.
+        // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
+        // will just nop.
         resp.context_menu(|ui| {
             let mut should_close = false;
             if ui
-                .selectable_value(&mut should_close, true, "Close tab.")
+                .selectable_value(&mut should_close, self.is_pane_closable(), "Close tab.")
                 .clicked()
             {
                 if should_close {

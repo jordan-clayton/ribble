@@ -33,6 +33,8 @@ impl PaneView for TranscriptionPane {
             .with_main_justify(true)
             .with_main_wrap(true);
 
+        // TODO: Logic for copying to clipboard + exporting a textfile.
+
         egui::Frame::default().show(ui, |ui| {
             ui.allocate_ui_with_layout(desired_size, layout, |ui| {
                 ui.heading("Transcription:");

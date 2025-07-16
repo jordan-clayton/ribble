@@ -10,6 +10,8 @@ use ribble_whisper::whisper::model::{DefaultModelType, ModelId};
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 
+// TODO: Split long strings
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(in crate::ui) struct TranscriberPane {
     #[serde(default = "set_realtime")]
@@ -709,16 +711,9 @@ impl PaneView for TranscriberPane {
 
                                // This is in bytes.
                                let file_size_estimate = recording.file_size_estimate();
-                               let kb = file_size_estimate as f32 / 1000f32;
-                               let mb = kb / 1000f32;
-                               let gb = mb / 1000f32;
-
-                               let size_text = if gb > 0f32 {
-                                    format!("{gb} GB")
-                               } else if mb > 0f32 {
-                                   format!("{mb} MB")
-                               } else {
-                                   format!("{kb} KB")    
+                               let size_text = match unit_prefix::NumberPrefix::binary(file_size_estimate as f32) {
+                                    unit_prefix::NumberPrefix::Standalone(number) => format!("{number:.0} B"),
+                                    unit_prefix::NumberPrefix::Prefixed(prefix, number) => format!("{number:.2} {prefix}B"),
                                };
 
                                format!("Total time: {hours}:{minutes}:{seconds} | Approx size: {size_text}")

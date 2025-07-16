@@ -23,14 +23,11 @@ fn set_base_directory() -> PathBuf {
     }
 }
 
-// NOTE: if deciding to swap the backend, make the sink generic, S: Sink<f32>
-// NOTE TWICE: Possibly look at making the Kernel generic and implement methods on it.
-// TODO: Heavily consider removing the generics here until it's absolutely necessary.
-// It's a bit of a pain and the app is currently non-generic--it's much easier to deal with concrete types.
 pub(crate) struct RibbleController {
     kernel: Arc<Kernel>,
     base_dir: Arc<PathBuf>,
     max_whisper_threads: usize,
+    // TODO: add a message queue for sending toasts to the UI Update loop
 }
 
 impl Clone for RibbleController {
@@ -45,8 +42,7 @@ impl Clone for RibbleController {
 
 impl RibbleController {
     const RECOMMENDED_MAX_WHISPER_THREADS: usize = 8;
-    // NOTE: The AudioBackendProxy will need to be constructed higher up in the app and passed in.
-    // NOTE TWICE: The data_directory needs to be absolute -> there's a guard for this in the
+    // NOTE: The data_directory needs to be absolute -> there's a guard for this in the
     // kernel and it will return Err() if the path is relative.
     pub(crate) fn new(
         data_directory: &Path,
@@ -73,18 +69,26 @@ impl RibbleController {
         self.kernel.serialize_user_data();
     }
 
-    // TODO: either add to the kernel or create a second state struct for hardware configurations.
-    // As of right now, the number of available threads
     pub(crate) fn max_whisper_threads(&self) -> usize {
         self.max_whisper_threads
     }
 
-    pub(crate) fn get_user_preferences(&self) -> Arc<UserPreferences> {
-        self.kernel.get_user_preferences()
+    pub(crate) fn read_user_preferences(&self) -> Arc<UserPreferences> {
+        self.kernel.read_user_preferences()
+    }
+
+    pub(crate) fn write_user_preferences(&self, new_prefs: UserPreferences) {
+        self.kernel.write_user_preferences(new_prefs);
     }
 
     pub(crate) fn get_system_visuals(&self) -> Option<egui::Visuals> {
         self.kernel.get_system_visuals()
+    }
+
+    // NOTE: this will allocate and should not be called every frame,
+    // Either use an internal setter, or swap on transition.
+    pub(crate) fn get_system_gradient(&self) -> Option<egui_colorgradient::Gradient> {
+        self.kernel.get_system_gradient()
     }
 
     // MODEL MANAGEMENT
@@ -297,6 +301,11 @@ impl RibbleController {
     pub(crate) fn get_visualizer_analysis_type(&self) -> AnalysisType {
         self.kernel.get_visualizer_analysis_type()
     }
+
+    pub(crate) fn set_visualizer_analysis_type(&self, new_type: AnalysisType) {
+        self.kernel.set_visualizer_analysis_type(new_type);
+    }
+
     pub(crate) fn rotate_visualizer_type(&self, direction: RotationDirection) {
         self.kernel.rotate_visualizer_type(direction);
     }

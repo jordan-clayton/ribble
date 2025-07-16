@@ -68,7 +68,7 @@ impl Ribble {
             // None => "System" theme, extract the information from the creation context.
             // The default ThemePreference is ThemePreference::System (macOS, Windows),
             // So this will return Some(theme) for those platforms, None for Linux (default to Dark)
-            None => Self::get_system_theme(&cc.egui_ctx),
+            None => Self::get_system_visuals(&cc.egui_ctx),
         };
 
         let theme_animator = ThemeAnimator::new(system_visuals.clone(), system_visuals.clone())
@@ -127,7 +127,7 @@ impl Ribble {
         // The device will automatically be dropped by the end of this function.
     }
 
-    fn get_system_theme(ctx: &egui::Context) -> egui::Visuals {
+    fn get_system_visuals(ctx: &egui::Context) -> egui::Visuals {
         match ctx.system_theme() {
             None => egui::Theme::Dark,
             Some(theme) => theme,
@@ -196,7 +196,7 @@ impl eframe::App for Ribble {
 
         // Set the system theme.
         let system_theme = match self.controller.get_system_visuals() {
-            None => Self::get_system_theme(ctx),
+            None => Self::get_system_visuals(ctx),
             Some(visuals) => visuals,
         };
 

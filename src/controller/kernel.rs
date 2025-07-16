@@ -149,11 +149,27 @@ impl Kernel {
         })
     }
     // USER PREFERENCES
-    pub(super) fn get_user_preferences(&self) -> Arc<UserPreferences> {
+    pub(super) fn read_user_preferences(&self) -> Arc<UserPreferences> {
         self.user_preferences.load_full()
     }
+
+    pub(super) fn write_user_preferences(&self, new_prefs: UserPreferences) {
+        // Atomic Swap the new in for the old
+        let old_prefs = *self.user_preferences.swap(Arc::new(new_prefs));
+
+        // Check the messages buffer size to see if a resize needs to happen.
+        let new_message_size = new_prefs.console_message_size();
+        if old_prefs.console_message_size() != new_message_size {
+            self.resize_console_message_buffer(new_message_size);
+        }
+    }
+
     pub(super) fn get_system_visuals(&self) -> Option<egui::Visuals> {
         self.user_preferences.load().system_theme().visuals()
+    }
+
+    pub(super) fn get_system_gradient(&self) -> Option<egui_colorgradient::Gradient> {
+        self.user_preferences.load().system_theme().gradient()
     }
 
     // TODO: perhaps these methods should be trait methods if the controller needs to be testable.
@@ -360,6 +376,10 @@ impl Kernel {
 
     pub(super) fn get_visualizer_analysis_type(&self) -> AnalysisType {
         self.visualizer_engine.get_visualizer_analysis_type()
+    }
+    pub(super) fn set_visualizer_analysis_type(&self, new_type: AnalysisType) {
+        self.visualizer_engine
+            .set_visualizer_analysis_type(new_type);
     }
     pub(super) fn rotate_visualizer_type(&self, direction: RotationDirection) {
         self.visualizer_engine.rotate_visualizer_type(direction);

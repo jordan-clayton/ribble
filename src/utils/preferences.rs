@@ -1,16 +1,15 @@
 use crate::controller::DEFAULT_NUM_CONSOLE_MESSAGES;
+use egui::epaint::Hsva;
+use egui_colorgradient::{ColorInterpolator, Gradient};
 use strum::{AsRefStr, Display, EnumIter, EnumString};
-// TODO: determine whether or not to just move this to the controller module.
-// Toggling themes globally:
-// Egui defaults:
-// ctx.set_theme(egui::Theme::...); (Dark, Light, System)
-// Catpuccin:
-// catppuccin_egui::set_theme(ctx, catpuccin_theme);
 
 #[derive(
     Default,
+    Debug,
     Copy,
     Clone,
+    PartialEq,
+    Eq,
     serde::Serialize,
     serde::Deserialize,
     EnumIter,
@@ -43,6 +42,9 @@ impl RibbleAppTheme {
             // through one of the public functions.
             // Since set_style_theme() only extracts the visuals anyway, it's fine to just use
             // egui's default visuals (dark mode) -- these should all be consistent with which style they modify.
+            //
+            // TODO: fork catppuccin_egui and expose the method directly to cut down on
+            // indirection.
             RibbleAppTheme::Latte => {
                 let mut style = egui::Style::default();
                 catppuccin_egui::set_style_theme(&mut style, catppuccin_egui::LATTE);
@@ -60,10 +62,53 @@ impl RibbleAppTheme {
             }
             RibbleAppTheme::Mocha => {
                 let mut style = egui::Style::default();
-                catppuccin_egui::set_style_theme(&mut style, catppuccin_egui::MACCHIATO);
+                catppuccin_egui::set_style_theme(&mut style, catppuccin_egui::MOCHA);
                 Some(style.visuals)
             }
         }
+    }
+
+    pub(crate) fn gradient(&self) -> Option<Gradient> {
+        match self {
+            RibbleAppTheme::System => None,
+            RibbleAppTheme::Light => Some(catppuccin_egui::LATTE),
+            RibbleAppTheme::Dark => Some(catppuccin_egui::MOCHA),
+            RibbleAppTheme::Latte => Some(catppuccin_egui::LATTE),
+            RibbleAppTheme::Frappe => Some(catppuccin_egui::FRAPPE),
+            RibbleAppTheme::Macchiato => Some(catppuccin_egui::MACCHIATO),
+            RibbleAppTheme::Mocha => Some(catppuccin_egui::MOCHA),
+        }
+        .and_then(|theme| {
+            let color_stops = [
+                theme.mauve,
+                theme.pink,
+                theme.flamingo,
+                theme.maroon,
+                theme.peach,
+                theme.yellow,
+                theme.green,
+                theme.teal,
+                theme.sky,
+                theme.sapphire,
+                theme.blue,
+                theme.lavender,
+            ];
+
+            let max_idx = color_stops.len() - 1;
+
+            let iter = color_stops.iter().enumerate().map(|(idx, &color)| {
+                let stop = idx as f32 / max_idx as f32;
+                let color: Hsva = color.into();
+                (stop, color)
+            });
+
+            let gradient = Gradient::new(egui_colorgradient::InterpolationMethod::Linear, iter);
+            Some(gradient)
+        })
+    }
+
+    pub(crate) fn color_interpolator(&self) -> Option<ColorInterpolator> {
+        self.gradient().and_then(|grad| Some(grad.interpolator()))
     }
 }
 

@@ -1,11 +1,9 @@
 use std::f32::consts::PI;
 
-// TODO: handle gradient logic.
-// The gradient should be pre-calculated based on theme change.
-use catppuccin_egui::Theme;
 use egui::emath::easing::{cubic_out, exponential_out};
 use egui::epaint::{Hsva, Rgba};
 use egui::{Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2, Widget, lerp};
+use egui_colorgradient::ColorInterpolator;
 
 use crate::controller::NUM_VISUALIZER_BUCKETS;
 
@@ -21,8 +19,6 @@ const BAR_SATURATION_INCREASE: f32 = 0.2;
 const MIN_SATURATION: f32 = 0.3;
 // TODO: figure out a reasonable speed for the color change.
 const COLOR_CHANGE_SPEED: f32 = 0.8;
-
-// TODO: add gradients to the RibbleAppTheme.
 
 #[inline]
 fn interpolate_buckets(
@@ -50,7 +46,7 @@ fn draw_soundbar(
     rect: Rect,
     buckets: &[f32; NUM_VISUALIZER_BUCKETS],
     // TODO: change this to a gradient.
-    _theme: Theme,
+    color_interpolator: &ColorInterpolator,
 ) -> Response {
     // This might actually be best to do once-padding
     let padding = ui.spacing().button_padding.x;
@@ -92,9 +88,12 @@ fn draw_soundbar(
 
                 let offset = (mouse_pos.x / COLOR_CHANGE_SPEED).round() as usize;
                 let sample_pos = (idx + offset).rem_euclid(num_bars);
-                let _gradient_interp = sample_pos as f32 / num_bars as f32;
+                let gradient_interp = sample_pos as f32 / num_bars as f32;
 
-                let color = Rgba::from_rgba_premultiplied(0.7, 0.3, 0.4, 1.0);
+                let color = color_interpolator
+                    .sample_at(gradient_interp)
+                    .expect("The gradient should never be empty.");
+
                 let height_t = interpolate_buckets(idx, num_bars, buckets);
                 draw_soundbar_rect(ui, bar_width, bar_max_height, height_t, color, mouse_pos);
                 ui.add_space(padding);
@@ -105,6 +104,7 @@ fn draw_soundbar(
     response
 }
 
+// This can probably be HSVA
 fn draw_soundbar_rect(
     ui: &mut Ui,
     bar_width: f32,
@@ -232,10 +232,10 @@ fn closest_point_on_perimeter(rect: Rect, mouse_pos: Pos2) -> Pos2 {
     Pos2::new(closest_x, closest_y)
 }
 
-pub(in crate::ui) fn soundbar(
+pub(in crate::ui) fn soundbar<'a>(
     rect: Rect,
-    buckets: &[f32; NUM_VISUALIZER_BUCKETS],
-    theme: Theme,
-) -> impl Widget + '_ {
-    move |ui: &mut Ui| draw_soundbar(ui, rect, buckets, theme)
+    buckets: &'a [f32; NUM_VISUALIZER_BUCKETS],
+    color_interpolator: &'a ColorInterpolator,
+) -> impl Widget + 'a {
+    move |ui: &mut Ui| draw_soundbar(ui, rect, buckets, color_interpolator)
 }
