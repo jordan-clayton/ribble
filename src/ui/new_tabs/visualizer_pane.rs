@@ -2,12 +2,17 @@ use crate::controller::NUM_VISUALIZER_BUCKETS;
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::new_tabs::PaneView;
 use crate::ui::new_tabs::ribble_pane::RibblePaneId;
+use crate::ui::widgets::soundbar::soundbar;
+
+const SMOOTHING_CONSTANT: f32 = 8.0;
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct VisualizerPane {
     #[serde(skip)]
     #[serde(default)]
     visualizer_buckets: [f32; NUM_VISUALIZER_BUCKETS],
+    #[serde(skip)]
+    #[serde(default)]
     presentation_buckets: [f32; NUM_VISUALIZER_BUCKETS],
 }
 
@@ -23,7 +28,7 @@ impl PaneView for VisualizerPane {
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
-        tile_id: egui_tiles::TileId,
+        _tile_id: egui_tiles::TileId,
         controller: RibbleController,
     ) -> egui::Response {
         // If this is painting, a visualizer is in view, so set the visualizer to true to continue
@@ -39,25 +44,16 @@ impl PaneView for VisualizerPane {
             self.visualizer_buckets.iter_mut().for_each(|v| *v = 0.0);
         }
 
-        // Smooth out the values and write into the presentation buckets.
-        // This is most likely going to be a 1-instruction operation if SIMD
-        // - and checking via memcpmp for a zeroed buffer isn't going to really save much.
-        smoothing(&self.visualizer_buckets, &mut self.presentation_buckets);
+        // Smooth the buffer to prevent the (unintended) jumpiness.
+        let dt = ui.ctx().input(|i| i.stable_dt);
+        smoothing(&self.visualizer_buckets, &mut self.presentation_buckets, dt);
 
-        // Basic idea:
-        // Get a sensing response for the size of the rect (to get mouse delta).
-        // Frame with some sort of background color (maybe default?)
-        // Decide on the number of buckets to actually show based on the width of the window.
-        // - Instead of deciding on the width based on window size, make it a fixed proportion
-        //   and calculate the number of buckets to support that width.
-        // - Also incorporate padding (fixed proportion).
-
-        // - Sample the buckets (linearly interpolate) to get an amplitude
-        // - (Change the lerping hitbox --> it's currently weird)
-        // - increase the height based on the proximity to the mouse -> use a wider falloff
-        // - also, do it from the closest rect corner, not the center.
         egui::Frame::default().show(ui, |ui| {
-            todo!("FINISH DRAWING.");
+            // TODO: this needs to change to a gradient.
+            let theme: catppuccin_egui::Theme = catppuccin_egui::MOCHA;
+            let rect = ui.max_rect();
+            // The new implementation is in the widgets module.
+            ui.add(soundbar(rect, &self.presentation_buckets, theme));
         });
 
         let pane_id = egui::Id::new("visualizer_pane");
@@ -95,9 +91,9 @@ impl PaneView for VisualizerPane {
     }
 }
 
-// TODO: figure out smoothing business.
-// This might actually need double buffering.
-fn smoothing(src: &[f32], dst: &mut [f32]) {
-    assert_eq!(src.len(), dst.len());
-    todo!("Smoothing");
+fn smoothing(target: &[f32], current: &mut [f32], dt: f32) {
+    assert_eq!(target.len(), current.len());
+    for i in 0..target.len() {
+        current[i] = current[i] + (target[i] - current[i]) * SMOOTHING_CONSTANT * dt;
+    }
 }

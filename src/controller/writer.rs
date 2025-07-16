@@ -359,8 +359,7 @@ impl WriterEngine {
 
     // NOTE: since the IndexMap preserves ordering based on insertion order, this
     // Needs to be reversed so that the information is presented most-recent to least-recent
-    // NOTE: If cloning somehow becomes super expensive (it should only be very small strings),
-    // Look at a better solution/shared pointers.
+    // IF this hapeens to be causing any significant lag, reverse the iterator in the ui.
     pub(super) fn try_get_completed_jobs(
         &self,
         copy_buffer: &mut Vec<(Arc<str>, CompletedRecordingJobs)>,
