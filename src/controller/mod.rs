@@ -24,9 +24,9 @@ mod writer;
 
 type RibbleWorkerHandle = JoinHandle<Result<RibbleMessage, RibbleError>>;
 
-const UTILITY_QUEUE_SIZE: usize = 32;
-const SMALL_UTILITY_QUEUE_SIZE: usize = 16;
-const UI_UPDATE_QUEUE_SIZE: usize = 8;
+pub const UTILITY_QUEUE_SIZE: usize = 32;
+pub const SMALL_UTILITY_QUEUE_SIZE: usize = 16;
+pub const UI_UPDATE_QUEUE_SIZE: usize = 8;
 // TODO: determine whether or not this is necessary, whether it should be changed.
 // Right now, there are no hard limits on how large this can get.
 const DEFAULT_PROGRESS_SLAB_CAPACITY: usize = 8;

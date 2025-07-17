@@ -10,6 +10,7 @@ use crate::utils::preferences::UserPreferences;
 use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExportFormat};
 use crate::utils::vad_configs::VadConfigs;
 use ribble_whisper::transcriber::{TranscriptionSnapshot, WhisperControlPhrase};
+use ribble_whisper::utils::Sender;
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model::ModelId;
 use std::path::{Path, PathBuf};
@@ -23,21 +24,14 @@ fn set_base_directory() -> PathBuf {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct RibbleController {
     kernel: Arc<Kernel>,
     base_dir: Arc<PathBuf>,
+    // NOTE: Since the controller has to be used and operated by views in the gui,
+    // This needs to include some GUI-ish code.
+    toasts_sender: Sender<egui_notify::Toast>,
     max_whisper_threads: usize,
-    // TODO: add a message queue for sending toasts to the UI Update loop
-}
-
-impl Clone for RibbleController {
-    fn clone(&self) -> Self {
-        Self {
-            kernel: Arc::clone(&self.kernel),
-            base_dir: Arc::clone(&self.base_dir),
-            max_whisper_threads: self.max_whisper_threads,
-        }
-    }
 }
 
 impl RibbleController {
@@ -47,6 +41,7 @@ impl RibbleController {
     pub(crate) fn new(
         data_directory: &Path,
         audio_backend: AudioBackendProxy,
+        toasts_sender: Sender<egui_notify::Toast>,
     ) -> Result<Self, RibbleError> {
         let kernel = Arc::new(Kernel::new(data_directory, audio_backend)?);
         let available_threads = std::thread::available_parallelism()?.get();
@@ -57,12 +52,22 @@ impl RibbleController {
         Ok(Self {
             kernel,
             base_dir,
+            toasts_sender,
             max_whisper_threads,
         })
     }
 
     pub(crate) fn base_dir(&self) -> &Path {
         self.base_dir.as_path()
+    }
+
+    // Only try_send the toast -> this shouldn't ever really block
+    pub(crate) fn send_toast(&self, toast: egui_notify::Toast) {
+        if self.toasts_sender.try_send(toast).is_err() {
+            todo!(
+                "LOGGING -> this should only error out when the queue is full (wouldblock) or the app has closed."
+            );
+        }
     }
 
     pub(crate) fn serialize_user_data(&self) {

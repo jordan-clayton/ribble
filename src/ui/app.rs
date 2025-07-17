@@ -18,8 +18,10 @@ use ribble_whisper::utils::errors::RibbleWhisperError;
 use ribble_whisper::utils::{Receiver, get_channel};
 use std::sync::Arc;
 
+use crate::controller::UI_UPDATE_QUEUE_SIZE;
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::new_tabs::RibbleTree;
+use egui_notify::{Toast, Toasts};
 
 // NOTE: it might be the case that the local cache dir does need to come back. Not sure yet.
 pub struct Ribble {
@@ -28,6 +30,8 @@ pub struct Ribble {
     backend: Sdl2Backend,
     // This needs to be polled in the UI loop to handle
     capture_requests: Receiver<AudioCaptureRequest>,
+    toasts_handle: Toasts,
+    toasts_receiver: Receiver<Toast>,
     current_devices: Slab<Arc<Sdl2Capture<ArcChannelSink<f32>>>>,
     controller: RibbleController,
 
@@ -55,10 +59,17 @@ impl Ribble {
         // This channel allows the kernel to request a mic capture from SDL.
         let (request_sender, request_receiver) = get_channel(1);
 
+        // This channel is for sending toasts between the GUI pane views and the main ctx via the controller.
+
+        let (toasts_sender, toasts_receiver) = get_channel(UI_UPDATE_QUEUE_SIZE);
+        // Make a new "Toasts" to initialize
+
+        let toasts_handle = Toasts::default();
+
         // Send this to the kernel
         let backend_proxy = AudioBackendProxy::new(request_sender);
         // Deserialize/default construct the controller.
-        let controller = RibbleController::new(data_directory, backend_proxy)?;
+        let controller = RibbleController::new(data_directory, backend_proxy, toasts_sender)?;
         // Deserialize/default construct the app tree -> this has its own default layout.
         let tree = RibbleTree::new(data_directory, controller.clone())?;
 
@@ -81,6 +92,8 @@ impl Ribble {
             sdl: sdl_ctx,
             backend,
             capture_requests: request_receiver,
+            toasts_handle,
+            toasts_receiver,
             current_devices,
             controller,
             theme_animator,
@@ -194,6 +207,11 @@ impl eframe::App for Ribble {
             }
         }
 
+        // Grab any new toasts that haven't been drawn.
+        while let Ok(toast) = self.toasts_receiver.try_recv() {
+            self.toasts_handle.add(toast);
+        }
+
         // Set the system theme.
         let system_theme = match self.controller.get_system_visuals() {
             None => Self::get_system_visuals(ctx),
@@ -238,6 +256,9 @@ impl eframe::App for Ribble {
 
             self.tree.ui(ui);
         });
+
+        // Show any toasts that might be in the buffer.
+        self.toasts_handle.show(ctx);
     }
 
     // TODO: determine whether to actually use this method at all,

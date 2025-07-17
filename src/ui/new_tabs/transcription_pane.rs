@@ -1,6 +1,7 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::new_tabs::PaneView;
 use crate::ui::new_tabs::ribble_pane::RibblePaneId;
+use egui_notify::Toast;
 
 #[derive(Copy, Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct TranscriptionPane {}
@@ -56,7 +57,9 @@ impl PaneView for TranscriptionPane {
                             let full_transcription =
                                 transcription_snapshot.as_ref().clone().into_string();
                             ui.ctx().copy_text(full_transcription);
-                            // TODO: send toast "Copied to clipboard."
+
+                            let toast = Toast::info("Copied to Clipboard");
+                            controller.send_toast(toast);
                         }
 
                         // SAVE BUTTON
@@ -67,7 +70,8 @@ impl PaneView for TranscriptionPane {
 
                             if let Some(out_path) = file_dialog.save_file() {
                                 controller.save_transcription(out_path);
-                                // TODO: send toast "Saving file"
+                                let toast = Toast::info("Saving file");
+                                controller.send_toast(toast);
                             }
                         }
                     });
