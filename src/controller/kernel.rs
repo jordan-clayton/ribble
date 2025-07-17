@@ -272,6 +272,10 @@ impl Kernel {
         self.transcriber_engine.start_offline_transcription(bank);
     }
 
+    pub(super) fn save_transcription(&self, out_path: PathBuf) {
+        self.transcriber_engine.save_transcription(out_path);
+    }
+
     // RECORDER
     pub(super) fn recorder_running(&self) -> bool {
         self.recorder_engine.recorder_running()

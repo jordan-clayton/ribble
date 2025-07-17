@@ -36,6 +36,8 @@ use ribble_whisper::utils::errors::RibbleWhisperError;
 use ribble_whisper::utils::{Sender, get_channel};
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model::ModelRetriever;
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -642,7 +644,7 @@ impl TranscriberEngineState {
         self.finalize_transcription(result);
 
         // Finalize by preparing a status message for the console.
-        let message = format!("Finished transcribing: {:?}!", audio_file_path.as_path());
+        let message = format!("Finished transcribing: {}!", audio_file_path.display());
         let console_message = ConsoleMessage::Status(message);
         Ok(RibbleMessage::Console(console_message))
     }
@@ -662,6 +664,28 @@ impl TranscriberEngineState {
         // TODO: implement default in whisper_rs -> needs an IDLE.
         self.current_control_phrase
             .store(Arc::new(WhisperControlPhrase::default()))
+    }
+
+    fn save_transcription(&self, out_path: PathBuf) -> Result<RibbleMessage, RibbleError> {
+        // Create a file for writing.
+        let file = File::create(out_path.as_path())?;
+        let mut bufwriter = BufWriter::new(file);
+        // Join the transcription
+        let full_transcription = self
+            .current_snapshot
+            .load_full()
+            .as_ref()
+            .clone()
+            .into_string()
+            .into_bytes();
+
+        bufwriter.write_all(&full_transcription)?;
+
+        let console_message =
+            ConsoleMessage::Status(format!("Transcription saved to: {}!", out_path.display()));
+
+        let ribble_message = RibbleMessage::Console(console_message);
+        Ok(ribble_message)
     }
 }
 
@@ -797,6 +821,16 @@ impl TranscriberEngine {
 
         // Send off the request
         let work_request = WorkRequest::Long(worker);
+        if self.work_request_sender.send(work_request).is_err() {
+            todo!("LOGGING");
+        }
+    }
+
+    pub(super) fn save_transcription(&self, out_path: PathBuf) {
+        let thread_inner = Arc::clone(&self.inner);
+        let worker = std::thread::spawn(move || thread_inner.save_transcription(out_path));
+
+        let work_request = WorkRequest::Short(worker);
         if self.work_request_sender.send(work_request).is_err() {
             todo!("LOGGING");
         }

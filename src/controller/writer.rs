@@ -183,7 +183,7 @@ impl WriterEngineState {
             std::fs::copy(tmp_file_path.as_path(), outfile_path.as_path())?;
 
             let console_message =
-                ConsoleMessage::Status(format!("Saved recording to {:#?}!", outfile_path));
+                ConsoleMessage::Status(format!("Saved recording to {}!", outfile_path.display()));
             let ribble_message = RibbleMessage::Console(console_message);
             Ok(ribble_message)
         } else {
@@ -217,10 +217,8 @@ impl WriterEngineState {
             }
 
             writer.finalize()?;
-            let console_message = ConsoleMessage::Status(format!(
-                "Saved recording to {:#?}!",
-                outfile_path.as_path()
-            ));
+            let console_message =
+                ConsoleMessage::Status(format!("Saved recording to {}!", outfile_path.display()));
             let ribble_message = RibbleMessage::Console(console_message);
             Ok(ribble_message)
         }

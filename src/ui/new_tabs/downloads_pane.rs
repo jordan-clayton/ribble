@@ -11,7 +11,7 @@ pub(in crate::ui) struct DownloadsPane {
 }
 
 // https://unicodeplus.com/U+1F5D9 -> "X" (Cancellation glyph)
-const CANCELLATION_X: &'static str = "\u{1F5D9}";
+const CANCELLATION_X: &'static str = "🗙";
 
 impl PaneView for DownloadsPane {
     fn pane_id(&self) -> RibblePaneId {

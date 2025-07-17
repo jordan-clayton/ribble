@@ -141,8 +141,8 @@ impl DownloadEngineState {
 
         // Print both the content name and the fully returned path in the Console message.
         let console_message = ConsoleMessage::Status(format!(
-            "Successfully downloaded {content_name} to {:#?}",
-            download_path.as_path()
+            "Successfully downloaded {content_name} to {}",
+            download_path.display()
         ));
         let ribble_message = RibbleMessage::Console(console_message);
 

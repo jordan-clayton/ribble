@@ -188,6 +188,10 @@ impl RibbleController {
         self.kernel.try_retranscribe_latest();
     }
 
+    pub(crate) fn save_transcription(&self, out_path: PathBuf) {
+        self.kernel.save_transcription(out_path);
+    }
+
     // RECORDER
     pub(crate) fn recorder_running(&self) -> bool {
         self.kernel.recorder_running()
