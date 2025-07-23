@@ -8,8 +8,8 @@ use crate::controller::audio_backend_proxy::{
 };
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{AmortizedDownloadProgress, AmortizedProgress, UI_UPDATE_QUEUE_SIZE};
-use crate::ui::new_tabs::RibbleTree;
-use crate::ui::new_tabs::ribble_pane::{ClosableRibbleViewPane, RibblePaneId};
+use crate::ui::panes::RibbleTree;
+use crate::ui::panes::ribble_pane::{ClosableRibbleViewPane, RibblePaneId};
 use crate::ui::widgets::pie_progress::pie_progress;
 use crate::utils::errors::RibbleError;
 use crate::utils::preferences::RibbleAppTheme;

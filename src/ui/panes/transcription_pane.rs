@@ -1,6 +1,6 @@
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::new_tabs::PaneView;
-use crate::ui::new_tabs::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
+use crate::ui::panes::ribble_pane::RibblePaneId;
 use egui_notify::Toast;
 
 #[derive(Copy, Clone, Default, Debug, serde::Serialize, serde::Deserialize)]

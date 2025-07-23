@@ -2,7 +2,7 @@ use enum_dispatch::enum_dispatch;
 use strum::{AsRefStr, EnumIter, EnumString, IntoStaticStr};
 // NOTE: these need to be brought into scope so that enum_dispatch can run its macros
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::new_tabs::panes::*;
+use crate::ui::panes::panes::*;
 
 #[enum_dispatch(RibblePane)]
 pub(in crate::ui) trait PaneView {

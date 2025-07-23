@@ -1,7 +1,8 @@
 use crate::controller::FileDownload;
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::new_tabs::ribble_pane::{PaneView, RibblePaneId};
+use crate::ui::panes::ribble_pane::{PaneView, RibblePaneId};
 use irox_egui_extras::progressbar::ProgressBar;
+use unit_prefix::NumberPrefix;
 
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub(in crate::ui) struct DownloadsPane {
@@ -37,16 +38,25 @@ impl PaneView for DownloadsPane {
             egui::ScrollArea::both()
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
-                    egui::Grid::new("Downloads Grid")
+                    egui::Grid::new("downloads_grid")
                         .num_columns(2)
                         .striped(true)
                         .show(ui, |ui| {
                             for (download_id, download) in self.current_downloads.iter() {
                                 let download_progress = download.progress();
 
-                                let _current_bytes = download_progress.current_position();
-                                let _total_size = download_progress.total_size();
-                                let bytes_format = format!("TODO: BYTE SIZE");
+                                let current_bytes = download_progress.current_position();
+                                let total_size = download_progress.total_size();
+
+                                let cur_bytes_text = NumberPrefix::binary(current_bytes);
+                                let total_bytes_text = NumberPrefix::binary(total_size);
+                                let bytes_format = match (cur_bytes_text, total_bytes_text) {
+                                    (NumberPrefix::Standalone(cur), NumberPrefix::Standalone(tot)) => format!("{cur}/{tot} B"),
+                                    (NumberPrefix::Standalone(cur), NumberPrefix::Prefixed(prefix, tot)) => format!("{cur} B/{tot} {prefix}B"),
+                                    (NumberPrefix::Prefixed(c_pref, cur), NumberPrefix::Prefixed(t_pref, tot)) => format!("{cur} {c_pref}B/{tot} {t_pref}B"),
+                                    _ => unreachable!("Total size should never be less than current bytes. Cur: {current_bytes}, Tot: {total_size}"),
+                                };
+
 
                                 let mut pb = ProgressBar::new(download_progress.current_progress())
                                     .text_left(download.name().to_string())
@@ -59,7 +69,7 @@ impl PaneView for DownloadsPane {
                                     // Writers should still get priority, but if there's any jank,
                                     // run the action on a short-lived background thread instead.
                                     //
-                                    // TODO: Actually, yes, This should happen on a background thread
+                                    // TODO: Actually, yes, This should probably happen on a background thread
                                     // with a flag to prevent grandma clicks.
                                     controller.abort_download(*download_id);
                                 }

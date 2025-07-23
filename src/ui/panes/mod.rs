@@ -11,7 +11,7 @@ mod user_preferences_pane;
 mod visualizer_pane;
 
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::new_tabs::ribble_pane::{PaneView, RibblePane, RibblePaneId};
+use crate::ui::panes::ribble_pane::{PaneView, RibblePane, RibblePaneId};
 use crate::utils::errors::RibbleError;
 use std::collections::HashMap;
 use std::f32::consts::PI;
@@ -25,7 +25,7 @@ pub(in crate::ui) struct RibbleTree {
     data_directory: PathBuf,
     tree: egui_tiles::Tree<RibblePane>,
     behavior: RibbleTreeBehavior,
-    // For focus tabs -> uses sin(t) to oscillate saturation to create contrast.
+    // For focus panes -> uses sin(t) to oscillate saturation to create contrast.
     period: f32,
     horiz_expansion: f32,
 }
@@ -49,7 +49,7 @@ impl RibbleTree {
         })
     }
     pub(in crate::ui) fn ui(&mut self, ui: &mut egui::Ui) {
-        // Mutably borrow once: add any new tabs to the tree before painting.
+        // Mutably borrow once: add any new panes to the tree before painting.
         self.check_add_new_tabs();
 
         // Update the time for the focused_pane behavior.
@@ -281,7 +281,7 @@ impl RibbleTreeBehavior {
         tree: &egui_tiles::Tree<RibblePane>,
     ) -> Self {
         // Preallocate for at least RibbleTab::COUNT, such that there exists a bucket for each tab.
-        // At any given time, all tabs may be in the tree, so this might save on an allocation.
+        // At any given time, all panes may be in the tree, so this might save on an allocation.
         let mut opened_tabs = HashMap::with_capacity(RibblePane::COUNT);
 
         // Travel the tree and grab all RibbleTabs to store their TileId

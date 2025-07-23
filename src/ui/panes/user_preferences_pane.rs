@@ -1,7 +1,7 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{MAX_NUM_CONSOLE_MESSAGES, MIN_NUM_CONSOLE_MESSAGES};
-use crate::ui::new_tabs::PaneView;
-use crate::ui::new_tabs::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
+use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::utils::preferences::RibbleAppTheme;
 use strum::IntoEnumIterator;
 
@@ -41,13 +41,13 @@ impl PaneView for UserPreferencesPane {
 
         egui::Frame::new().show(ui, |ui| {
             egui::ScrollArea::both().show(ui, |ui| {
-                egui::Grid::new("prefs_grid")
+                egui::Grid::new("user_prefs_grid")
                     .num_columns(2)
                     .striped(true)
                     .show(ui, |ui| {
                         // SET SYSTEM THEME
                         ui.label("System theme:");
-                        egui::ComboBox::from_id_salt("user_theme")
+                        egui::ComboBox::from_id_salt("user_theme_combobox")
                             .selected_text(theme.as_ref())
                             .show_ui(ui, |ui| {
                                 for ribble_theme in RibbleAppTheme::iter() {

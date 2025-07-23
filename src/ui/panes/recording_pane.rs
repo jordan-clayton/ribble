@@ -1,7 +1,7 @@
 use crate::controller::CompletedRecordingJobs;
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::new_tabs::PaneView;
-use crate::ui::new_tabs::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
+use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::utils::recorder_configs::{
     RibbleChannels, RibblePeriod, RibbleRecordingExportFormat, RibbleSampleRate,
 };
@@ -83,7 +83,7 @@ impl PaneView for RecordingPane {
                     .show(ui, |ui| {
                         ui.label("Sample Rate:");
                         let mut sample_rate = configs.sample_rate();
-                        egui::ComboBox::from_id_salt("sample_rate")
+                        egui::ComboBox::from_id_salt("sample_rate_combobox")
                             .selected_text(sample_rate.as_ref())
                             .show_ui(ui, |ui| {
                                 for rate in RibbleSampleRate::iter() {
@@ -101,7 +101,7 @@ impl PaneView for RecordingPane {
 
                         ui.label("Channels:");
                         let mut channels = configs.num_channels();
-                        egui::ComboBox::from_id_salt("ribble_channels")
+                        egui::ComboBox::from_id_salt("ribble_channels_combobox")
                             .selected_text(channels.as_ref())
                             .show_ui(ui, |ui| {
                                 for ch_conf in RibbleChannels::iter() {
@@ -118,7 +118,7 @@ impl PaneView for RecordingPane {
 
                         ui.label("Buffer size:");
                         let mut period = configs.period();
-                        egui::ComboBox::from_id_salt("buffer_size")
+                        egui::ComboBox::from_id_salt("buffer_size_combobox")
                             .selected_text(period.as_ref())
                             .show_ui(ui, |ui| {
                                 for period_conf in RibblePeriod::iter() {
@@ -142,7 +142,7 @@ impl PaneView for RecordingPane {
         });
 
         if self.recording_modal {
-            let recording_id = egui::Id::new("recording recordings modal");
+            let recording_id = egui::Id::new("recording_recordings_modal");
             let modal = egui::Modal::new(recording_id).show(ui.ctx(), |ui| {
                 controller.try_get_completed_recordings(&mut self.recordings_buffer);
                 // TODO: figure out the sizing here a little bit more nicely.
@@ -152,13 +152,16 @@ impl PaneView for RecordingPane {
                 let header_width = ui.max_rect().width();
                 let desired_size = egui::Vec2::new(header_width, header_height);
 
+                // NOTE: this is duplicated from the Transcriber view (similar modal)
+                // If this implementation diverges, then keep it here.
+                // Otherwise, look at making it a common function.
                 ui.allocate_ui_with_layout(
                     desired_size,
                     egui::Layout::left_to_right(egui::Align::Center).with_main_justify(true),
                     |ui| {
                         ui.heading("Previous recordings:");
                         if ui.button("Clear recordings").clicked() {
-                            // This guards against grandma clicks.
+                            // This internally guards against grandma clicks.
                             controller.clear_recording_cache();
                         }
                     },
@@ -198,8 +201,9 @@ impl PaneView for RecordingPane {
                             for (i, (file_name, recording)) in self.recordings_buffer.iter().enumerate() {
                                 let heading_text = format!("Recording: {}", len - i);
 
-                                // TODO: if this is expensive/not all that valuable, just do the
-                                // duration.
+                                // TODO: if this is expensive/not all that valuable, just do the duration.
+                                // NOTE: this is identical to the Transcriber pane impl
+                                // This should probably exist in a common method, but keep it separate if it diverges.
                                 let body_text = {
                                     let secs = recording.total_duration().as_secs();
                                     let seconds = secs % 60;
@@ -224,6 +228,9 @@ impl PaneView for RecordingPane {
 
                                 // TODO: TEST THIS OUT AND MAKE SURE THINGS WORK OUT
                                 // THE GOAL: highlight color + OUTLINE
+
+                                // NOTE: this is identical to the Transcriber pane impl
+                                // This should probably exist in a common method, but keep it separate if it diverges.
                                 egui::Frame::default().fill(visuals.bg_fill).stroke(visuals.fg_stroke).show(ui, |ui| {
                                     ui.vertical(|ui| {
                                         ui.label(heading_text);
@@ -248,8 +255,6 @@ impl PaneView for RecordingPane {
                                             controller.export_recording(out_path, Arc::clone(file_name), self.export_format);
                                         }
                                     } else {
-                                        // TODO: logging + TOAST
-                                        todo!("LOGGING");
                                         // The writer engine will prune out its nonexistent file-paths,
                                         // so perhaps maybe a "toast" is sufficient here to say "sorry
                                         // cannot find recording" -> there's an egui-notify (thread
@@ -257,6 +262,9 @@ impl PaneView for RecordingPane {
                                         //
                                         // Otherwise, a debouncer will be necessary to maintain the state
                                         // of the directory.
+                                        log::warn!("Temporary recording file missing: {file_name}");
+                                        let toast = egui_notify::Toast::warning("Failed to find saved recording.");
+                                        controller.send_toast(toast);
                                     }
                                 }
                                 ui.end_row();
@@ -279,6 +287,7 @@ impl PaneView for RecordingPane {
         resp.context_menu(|ui| {
             ui.selectable_value(&mut should_close, self.is_pane_closable(), "Close tab.");
         });
+
         if should_close {
             ui.close();
         }

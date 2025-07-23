@@ -1,7 +1,7 @@
 use crate::controller::Progress;
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::new_tabs::PaneView;
-use crate::ui::new_tabs::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
+use crate::ui::panes::ribble_pane::RibblePaneId;
 use irox_egui_extras::progressbar::ProgressBar;
 
 #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
@@ -42,7 +42,7 @@ impl PaneView for ProgressPane {
             egui::ScrollArea::both()
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
-                    egui::Grid::new("Progress Grid")
+                    egui::Grid::new("progress_grid")
                         .num_columns(1)
                         .striped(true)
                         .show(ui, |ui| {
