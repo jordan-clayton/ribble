@@ -1,5 +1,4 @@
 use crate::controller::DEFAULT_NUM_CONSOLE_MESSAGES;
-use egui::epaint::Hsva;
 use egui_colorgradient::{ColorInterpolator, Gradient};
 use strum::{AsRefStr, Display, EnumIter, EnumString};
 
@@ -68,7 +67,7 @@ impl RibbleAppTheme {
         }
     }
 
-    pub(crate) fn gradient(&self) -> Option<Gradient> {
+    pub(crate) fn app_theme(&self) -> Option<catppuccin_egui::Theme> {
         match self {
             RibbleAppTheme::System => None,
             RibbleAppTheme::Light => Some(catppuccin_egui::LATTE),
@@ -78,7 +77,10 @@ impl RibbleAppTheme {
             RibbleAppTheme::Macchiato => Some(catppuccin_egui::MACCHIATO),
             RibbleAppTheme::Mocha => Some(catppuccin_egui::MOCHA),
         }
-        .and_then(|theme| {
+    }
+
+    pub(crate) fn gradient(&self) -> Option<Gradient> {
+        self.app_theme().and_then(|theme| {
             let color_stops = [
                 theme.mauve,
                 theme.pink,
@@ -98,7 +100,6 @@ impl RibbleAppTheme {
 
             let iter = color_stops.iter().enumerate().map(|(idx, &color)| {
                 let stop = idx as f32 / max_idx as f32;
-                let color: Hsva = color.into();
                 (stop, color)
             });
 

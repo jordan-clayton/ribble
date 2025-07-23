@@ -13,9 +13,6 @@ pub(in crate::ui) trait PaneView {
     /// * ui: egui::Ui, for drawing,
     /// * tile_id: egui_tiles::TileId, this Pane's id
     /// * controller: RibbleController, for accessing internal data.
-    /// TODO: add an argument so that a pane can request to be closed.
-    /// OR: use an enumeration: PaneResponse::UiResponse(..), PaneResponse::Close,
-    /// ACTUALLY: there's a mechanism in the egui upgrade that makes this a lot easier.
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -38,7 +35,7 @@ pub(in crate::ui) trait PaneView {
 
 // These are "Panes" used for the egui_tiles Tree
 // NOTE: VadConfigs is now in Transcriber (collapsible)
-// NOTE: *Model Tabs are now modals.
+// NOTE: *Model Tabs are now modals/dialogs.
 // NOTE: downloads should get a full view tab + cancel mechanism.
 #[derive(serde::Serialize, serde::Deserialize, strum::EnumCount, Clone)]
 #[enum_dispatch]
@@ -68,7 +65,6 @@ pub(in crate::ui) enum RibblePaneId {
 impl From<RibblePaneId> for RibblePane {
     fn from(value: RibblePaneId) -> Self {
         match value {
-            // TODO: implement default methods for tabs to make this easier.
             RibblePaneId::Transcriber => RibblePane::TranscriberPane(TranscriberPane::default()),
             RibblePaneId::Recording => RibblePane::RecordingPane(RecordingPane::default()),
             RibblePaneId::Transcription => RibblePane::TranscriptionPane(TranscriptionPane {}),
@@ -83,35 +79,35 @@ impl From<RibblePaneId> for RibblePane {
     }
 }
 
-// TODO: rename this to ClosableRibblePane
-// Use in an actual menu-bar with a "window/panes menu"
-// Rethink the "opened-pane" implementation; it can probably be way simpler.
-// Also, perhaps split at the root, or split a leaf.
 #[derive(EnumIter, EnumString, AsRefStr, IntoStaticStr, Debug)]
-pub(in crate::ui) enum ClosableRibbleTab {
-    Visualizer,
-    Progress,
+pub(in crate::ui) enum ClosableRibbleViewPane {
+    Recording,
     Console,
     Downloads,
-    Recording,
-    // POSSIBLY add this as a horizontal instead of a tab at a focused area.
-    // If doing that, implement some sort of cog-widget at the top of the tab bar and remove from this list.
-    #[strum(serialize = "User Preferences")]
-    UserPreferences,
+    Progress,
+    Visualizer,
 }
 
-// TODO: this might be cleaned up if default is implemented on each tab -> should be doable, espec. if stateless/ZST
-impl From<ClosableRibbleTab> for RibblePane {
-    fn from(value: ClosableRibbleTab) -> Self {
+impl From<ClosableRibbleViewPane> for RibblePane {
+    fn from(value: ClosableRibbleViewPane) -> Self {
         match value {
-            ClosableRibbleTab::Visualizer => RibblePane::VisualizerPane(VisualizerPane::default()),
-            ClosableRibbleTab::Progress => RibblePane::ProgressPane(ProgressPane::default()),
-            ClosableRibbleTab::Console => RibblePane::ConsolePane(ConsolePane::default()),
-            ClosableRibbleTab::Downloads => RibblePane::DownloadsPane(DownloadsPane::default()),
-            ClosableRibbleTab::Recording => RibblePane::RecordingPane(RecordingPane::default()),
-            ClosableRibbleTab::UserPreferences => {
-                RibblePane::UserPreferencesPane(UserPreferencesPane::default())
-            }
+            ClosableRibbleViewPane::Recording => RibblePane::RecordingPane(RecordingPane::default()),
+            ClosableRibbleViewPane::Console => RibblePane::ConsolePane(ConsolePane::default()),
+            ClosableRibbleViewPane::Downloads => RibblePane::DownloadsPane(DownloadsPane::default()),
+            ClosableRibbleViewPane::Progress => RibblePane::ProgressPane(ProgressPane::default()),
+            ClosableRibbleViewPane::Visualizer => RibblePane::VisualizerPane(VisualizerPane::default()),
+        }
+    }
+}
+
+impl From<ClosableRibbleViewPane> for RibblePaneId {
+    fn from(value: ClosableRibbleViewPane) -> Self {
+        match value {
+            ClosableRibbleViewPane::Recording => RibblePaneId::Recording,
+            ClosableRibbleViewPane::Console => RibblePaneId::Console,
+            ClosableRibbleViewPane::Downloads => RibblePaneId::Downloads,
+            ClosableRibbleViewPane::Progress => RibblePaneId::Progress,
+            ClosableRibbleViewPane::Visualizer => RibblePaneId::Visualizer
         }
     }
 }

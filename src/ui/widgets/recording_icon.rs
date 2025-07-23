@@ -1,37 +1,49 @@
+use std::f32::consts::PI;
 use egui::{
-    emath::easing::quadratic_out, lerp, vec2, Color32, Response, Rgba, Sense, Stroke, Ui, Widget,
+    lerp, vec2, Response, Rgba, Sense, Stroke, Ui, Widget,
 };
 
-use crate::utils::constants;
+
+const DULL_GREY: Rgba = Rgba::from_black_alpha(0.7);
 
 fn draw_recording_icon(
     ui: &mut Ui,
     color: Rgba,
     animate: bool,
-    time_scale: Option<f64>,
+    // NOTE: this is in seconds.
+    animation_duration: f32,
 ) -> Response {
     let desired_size = ui.spacing().interact_size.y * vec2(1.0, 1.0);
     let (rect, response) = ui.allocate_exact_size(desired_size, Sense::hover());
-    let time_scale = time_scale.unwrap_or(1.0);
 
     if ui.is_rect_visible(rect) {
-        let mut color = color;
-        if animate {
-            ui.ctx().request_repaint();
-            let mut time = ui.input(|i| i.time) * time_scale;
-            time = time.cos().abs();
-            let t = quadratic_out(time as f32);
-            color = lerp(constants::FROM_COLOR..=color, t);
-        }
+        let final_color =
+            if animate {
+                ui.ctx().request_repaint();
+                let mut time = ui.input(|i| i.time as f32) % animation_duration;
+                let expansion = (2.0 * PI) / animation_duration;
+                debug_assert!(expansion.is_normal());
+                // NOTE: this is phase-shifted right by pi/2
+                // so that time = 0 => t = 0
+                let t = 0.5 * (time * expansion - PI * 0.5).sin() + 0.5;
+                debug_assert!(t <= 1.0);
+                debug_assert!(t >= 0.0);
+                lerp(DULL_GREY..=color, t)
+            } else {
+                color
+            };
 
-        let col_32 = Color32::from(color);
         let radius = 0.5 * rect.height();
         ui.painter()
-            .circle(rect.center(), radius, col_32, Stroke::NONE);
+            .circle(rect.center(), radius, final_color, Stroke::NONE);
     }
     response
 }
 
-pub fn recording_icon(color: Rgba, animate: bool, time_scale: Option<f64>) -> impl Widget {
-    move |ui: &mut Ui| draw_recording_icon(ui, color, animate, time_scale)
+/// # Arguments:
+/// * color: Rgba, the recording icon color
+/// * animate: bool, oscillates the color on and off,
+/// * animation_duration: f32, the time of a full period (off-on-off) in seconds
+pub fn recording_icon(color: Rgba, animate: bool, animation_duration: f32) -> impl Widget {
+    move |ui: &mut Ui| draw_recording_icon(ui, color, animate, animation_duration)
 }

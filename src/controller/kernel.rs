@@ -31,7 +31,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 // NOTE: At the moment, it's a lot easier to just work with the concrete proxy.
-// Until generics are absolutely required for testing, avoid using them here.
+// Until generics are absolutely required for testing/swapping different audio backends,
+// avoid using them here.
 pub(super) struct Kernel {
     data_directory: PathBuf,
     user_preferences: ArcSwap<UserPreferences>,
@@ -101,7 +102,7 @@ impl Kernel {
         let visualizer_engine = VisualizerEngine::new(visualizer_receiver);
         let worker_engine = WorkerEngine::new(work_receiver, &bus);
 
-        let recording_directory = data_directory.join(Self::CONFIGS_FILE);
+        let recording_directory = data_directory.join(Self::TEMP_AUDIO_DIR_SLUG);
         let writer_engine = WriterEngine::new(recording_directory, write_receiver, &bus);
         let download_engine = DownloadEngine::new(download_receiver, &bus);
 
@@ -162,6 +163,10 @@ impl Kernel {
         if old_prefs.console_message_size() != new_message_size {
             self.resize_console_message_buffer(new_message_size);
         }
+    }
+
+    pub(super) fn get_app_theme(&self) -> Option<catppuccin_egui::Theme> {
+        self.user_preferences.load().system_theme().app_theme()
     }
 
     pub(super) fn get_system_visuals(&self) -> Option<egui::Visuals> {
@@ -241,9 +246,6 @@ impl Kernel {
         self.transcriber_engine.read_current_audio_file_path()
     }
 
-    // TODO: fix the lifetime issue here -> std::thread needs static bounds
-    // It might be easiest to just send the AudioBackend as an Arc pointer
-    // Or, implement clone on the backend; it's very cheap to do.
     pub(super) fn start_realtime_transcription(&self) {
         let bank = Arc::clone(&self.model_bank);
         let backend = Arc::clone(&self.audio_backend);
@@ -389,7 +391,6 @@ impl Kernel {
         self.visualizer_engine.rotate_visualizer_type(direction);
     }
 
-    // TODO: return a result or log.
     pub(super) fn serialize_user_data(&self) {
         let transcriber_configs = *self.transcriber_engine.read_transcription_configs();
         let offline_transcriber_feedback =
@@ -406,35 +407,37 @@ impl Kernel {
             user_preferences,
         };
 
-        let configs_file = File::open(self.data_directory.as_path());
-        if let Ok(file) = configs_file {
-            let writer = BufWriter::new(file);
-            if ron::Options::default()
-                .to_io_writer_pretty(writer, &state, PrettyConfig::default())
-                .is_err()
-            {
-                todo!("LOGGING");
+        let canonicalized = self.data_directory.to_path_buf().join(Self::CONFIGS_FILE);
+        match File::create(canonicalized.as_path()) {
+            Ok(configs_file) => {
+                let writer = BufWriter::new(configs_file);
+                match ron::Options::default().to_io_writer_pretty(writer, &state, PrettyConfig::default()) {
+                    Ok(_) => {
+                        log::info!("User data serialized to: {}", canonicalized.display());
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to serialize user data: {e}");
+                    }
+                }
             }
-        } else {
-            todo!("LOGGING");
+            Err(e) => {
+                log::warn!("Failed to create user data file: {e}");
+            }
         }
     }
 
     fn deserialize_user_data(data_directory: &Path) -> KernelState {
         let canonicalized = data_directory.to_path_buf().join(Self::CONFIGS_FILE);
         match File::open(&canonicalized) {
-            Ok(file) => {
-                let reader = BufReader::new(file);
-                match ron::de::from_reader(reader) {
-                    Ok(state) => state,
-                    Err(_) => {
-                        todo!("LOGGING");
-                        KernelState::default()
-                    }
-                }
+            Ok(configs_file) => {
+                let reader = BufReader::new(configs_file);
+                ron::de::from_reader(reader).unwrap_or_else(|e| {
+                    log::warn!("Error deserializing user data: {e}");
+                    KernelState::default()
+                })
             }
-            Err(_) => {
-                todo!("LOGGING");
+            Err(e) => {
+                log::warn!("Error deserializing user data: {e}");
                 KernelState::default()
             }
         }

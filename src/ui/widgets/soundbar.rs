@@ -95,7 +95,7 @@ fn draw_soundbar(
                     .expect("The gradient should never be empty.");
 
                 let height_t = interpolate_buckets(idx, num_bars, buckets);
-                draw_soundbar_rect(ui, bar_width, bar_max_height, height_t, color, mouse_pos);
+                draw_soundbar_rect(ui, bar_width, bar_max_height, height_t, color.into(), mouse_pos);
                 ui.add_space(padding);
             }
         });
@@ -112,7 +112,9 @@ fn draw_soundbar_rect(
     // This is the actual amplitude for lerping between
     // 1.0 and bar_max_height.
     height_t: f32,
-    color: Rgba,
+    // NOTE: this is the easiest way to avoid the namespace collisions.
+    // Taking this in as RGBA will just create annoying problems.
+    color: Hsva,
     mouse_position: Pos2,
 ) -> Response {
     let bar_height = lerp(
@@ -129,11 +131,11 @@ fn draw_soundbar_rect(
     // Compute the color based on height_t
     let color_t = cubic_out(height_t);
 
-    let mut color_hsv: Hsva = color.into();
-    color_hsv.s = MIN_SATURATION;
-    let low_color: Rgba = color_hsv.into();
-    let bar_color = lerp(low_color..=color, color_t);
+    let mut low_color = color;
+    low_color.s = MIN_SATURATION;
+    let bar_color: Rgba = lerp(low_color.into()..=color.into(), color_t);
 
+    // This is prooobably a little inefficient -> perhaps instead do a single "soundbar" collider
     if ui.is_rect_visible(rect) {
         let hitbox = rect.expand2(collision_expansion);
 

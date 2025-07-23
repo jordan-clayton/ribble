@@ -31,7 +31,6 @@ pub(crate) struct VisualizerPane {
 
 impl Clone for VisualizerPane {
     fn clone(&self) -> Self {
-        // TODO: fix this
         Self {
             visualizer_buckets: self.visualizer_buckets.clone(),
             presentation_buckets: self.presentation_buckets.clone(),
@@ -89,7 +88,7 @@ impl PaneView for VisualizerPane {
         let dt = ui.ctx().input(|i| i.stable_dt);
         smoothing(&self.visualizer_buckets, &mut self.presentation_buckets, dt);
 
-        // Check the theme to determine whether or not the gradient needs to be swapped.
+        // Check the theme to determine whether the gradient needs to be swapped.
         let theme = controller.read_user_preferences().system_theme();
         if theme != self.current_theme || self.color_interpolator.is_none() {
             self.current_theme = theme;
@@ -153,6 +152,7 @@ impl PaneView for VisualizerPane {
 
         // Add a context menu to make this close-able.
         // If this is no longer close-able, the close button will just nop.
+        let mut should_close = false;
         resp.context_menu(|ui| {
             for analysis_type in AnalysisType::iter() {
                 if ui
@@ -164,17 +164,12 @@ impl PaneView for VisualizerPane {
             }
 
             ui.separator();
-            let mut should_close = false;
-            if ui
-                .selectable_value(&mut should_close, self.is_pane_closable(), "Close tab.")
-                .clicked()
-            {
-                if should_close {
-                    todo!("HANDLE CLOSING THE PANE");
-                }
-                ui.close_menu();
-            };
+            // For closing the pane.
+            ui.selectable_value(&mut should_close, self.is_pane_closable(), "Close tab.");
         });
+        if should_close {
+            ui.close();
+        }
 
         resp
     }

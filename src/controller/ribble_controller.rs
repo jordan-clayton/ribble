@@ -86,6 +86,10 @@ impl RibbleController {
         self.kernel.write_user_preferences(new_prefs);
     }
 
+    pub(crate) fn get_app_theme(&self) -> Option<catppuccin_egui::Theme> {
+        self.kernel.get_app_theme()
+    }
+
     pub(crate) fn get_system_visuals(&self) -> Option<egui::Visuals> {
         self.kernel.get_system_visuals()
     }

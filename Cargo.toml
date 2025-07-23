@@ -5,33 +5,30 @@ edition = "2024"
 
 [dependencies]
 atomic_enum = "0.3.0"
-# TODO: fork catppuccin-egui and remove the feature-flag friction.
-catppuccin-egui = { version = "5.2.0", default-features = false, features = ["egui31"] }
+catppuccin-egui = { version = "5.6.0", default-features = false, features = ["egui32"] }
 crossbeam = "0.8.4"
 directories = "6.0.0"
-# TODO: bump eframe/egui once catppuccin has been forked.
-eframe = { version = "0.31.1", features = ["persistence", "wgpu", "x11", "wayland", "default_fonts"] }
-egui = { version = "0.31.1", features = ["persistence", "serde"] }
+eframe = { version = "0.32.0", features = ["persistence", "wgpu", "x11", "wayland", "default_fonts"] }
+egui = { version = "0.32.0", features = ["persistence", "serde"] }
 # If no longer needing SVG icons, just remove this.
-egui_extras = { version = "0.31.1", features = ["svg"] }
+egui_extras = { version = "0.32.0", features = ["svg"] }
+# This needs to be added to gain access to the default Vulkan/Gles backends in egui.
+wgpu = "26.0.1"
 hound = "3.5.1"
 realfft = "3.3.0"
 rfd = "0.15.3"
-# Due to the way SDL works in ribble_whisper, this needs to be accessed.
-# TODO: consider publicly exporting SDL when using the SDL backend in ribble_whisper.
-sdl2 = { version = "0.37.0", features = ["static-link", "bundled"] }
 serde = { version = "1.0.204", features = ["derive"] }
 strum = "0.27.1"
 # TODO: determine whether or not to include integrity checking utilities; might be out of scope
-ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.1.1", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler", "sdl2-static"] }
+ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.1.2", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler", "sdl2-static", "ribble-logging"] }
 # TODO: Implement genuine logging once the app has been rewritten.
 # TODO: bring in a logging impl crate once the app has been rewritten.
 # TODO: ADD LOGGING TO RIBBLE_WHISPER
 log = "0.4.22"
 ron = "0.10.1"
 # TODO: This is for image/svg loading but might be deprecated; check for alternatives
+# TODO TWICE: actually, just remove this and use the egui emoji font.
 image = "0.25.2"
-# TODO: look at documentation, use for indeterminate progress bars.
 irox-egui-extras = "0.7.0"
 slab = "0.4.9"
 parking_lot = { version = "0.12.4", features = ["deadlock_detection"] }
@@ -52,13 +49,13 @@ enum_dispatch = "0.3.13"
 mimalloc = "0.1.47"
 # TODO: I believe this is going unused -> remove it if so.
 url = "2.5.4"
-egui_tiles = { version = "0.12.0", features = ["serde"] }
+egui_tiles = { version = "0.13.0", features = ["serde"] }
 opener = { version = "0.8.2", features = ["reveal"] }
-egui-theme-lerp = "0.2.0"
+egui-theme-lerp = "0.3.0"
 notify-debouncer-full = { version = "0.5.0", features = ["crossbeam-channel"] }
 unit-prefix = "0.5.1"
-egui-colorgradient = "0.2.0"
-egui-notify = "0.19.0"
+egui-colorgradient = "0.2.2"
+egui-notify = "0.20.0"
 
 # TODO: benches to resolve performance questions re: visualizer
 [dev-dependencies]

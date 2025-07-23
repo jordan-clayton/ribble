@@ -194,83 +194,78 @@ impl PaneView for RecordingPane {
                         .num_columns(1)
                         .striped(true)
                         .show(ui, |ui| {
-                           let len = self.recordings_buffer.len();
-                           for (i, (file_name, recording)) in self.recordings_buffer.iter().enumerate(){
-                                
-                               let heading_text = format!("Recording: {}", len - i);
-                               
-                               // TODO: if this is expensive/not all that valuable, just do the
-                               // duration.
-                               let body_text = {
-                                   let secs = recording.total_duration().as_secs();
-                                   let seconds = secs % 60;
-                                   let minutes = (secs / 60) % 60;
-                                   let hours = (secs / 60) / 60;
+                            let len = self.recordings_buffer.len();
+                            for (i, (file_name, recording)) in self.recordings_buffer.iter().enumerate() {
+                                let heading_text = format!("Recording: {}", len - i);
 
-                                   // This is in bytes.
-                                   let file_size_estimate = recording.file_size_estimate();
-                                   let size_text = match unit_prefix::NumberPrefix::binary(file_size_estimate as f32) {
+                                // TODO: if this is expensive/not all that valuable, just do the
+                                // duration.
+                                let body_text = {
+                                    let secs = recording.total_duration().as_secs();
+                                    let seconds = secs % 60;
+                                    let minutes = (secs / 60) % 60;
+                                    let hours = (secs / 60) / 60;
+
+                                    // This is in bytes.
+                                    let file_size_estimate = recording.file_size_estimate();
+                                    let size_text = match unit_prefix::NumberPrefix::binary(file_size_estimate as f32) {
                                         unit_prefix::NumberPrefix::Standalone(number) => format!("{number:.0} B"),
                                         unit_prefix::NumberPrefix::Prefixed(prefix, number) => format!("{number:.2} {prefix}B"),
-                                   };
+                                    };
 
-                                   format!("Total time: {hours}:{minutes}:{seconds} | Approx size: {size_text}")
-                               };
+                                    format!("Total time: {hours}:{minutes}:{seconds} | Approx size: {size_text}")
+                                };
 
 
-                               let tile_id = egui::Id::new(heading_text.as_str());
+                                let tile_id = egui::Id::new(heading_text.as_str());
 
-                               let resp = ui.interact(ui.max_rect(), tile_id, egui::Sense::click());
-                               let visuals= ui.style().interact(&resp);
+                                let resp = ui.interact(ui.max_rect(), tile_id, egui::Sense::click());
+                                let visuals = ui.style().interact(&resp);
 
-                               // TODO: TEST THIS OUT AND MAKE SURE THINGS WORK OUT
-                               // THE GOAL: highlight color + OUTLINE
-                               egui::Frame::default().fill(visuals.bg_fill).stroke(visuals.fg_stroke).show(ui, |ui|{
-                                   ui.vertical(|ui|{
-                                       ui.label(heading_text);
-                                       ui.small(body_text);
-                                   });
-                               });
-                                
-                               if resp.clicked(){
-                                   // NOTE: There isn't a debouncer in the recording folder right
-                                   // now.
-                                   //
-                                   // Invalid paths should at least pop a toast, but perhaps things
-                                   // need to move to a debouncer.
-                                   if let Some(_) = controller.try_get_recording_path(Arc::clone(file_name)){
+                                // TODO: TEST THIS OUT AND MAKE SURE THINGS WORK OUT
+                                // THE GOAL: highlight color + OUTLINE
+                                egui::Frame::default().fill(visuals.bg_fill).stroke(visuals.fg_stroke).show(ui, |ui| {
+                                    ui.vertical(|ui| {
+                                        ui.label(heading_text);
+                                        ui.small(body_text);
+                                    });
+                                });
+
+                                if resp.clicked() {
+                                    // NOTE: There isn't a debouncer in the recording folder right
+                                    // now.
+                                    //
+                                    // Invalid paths should at least pop a toast, but perhaps things
+                                    // need to move to a debouncer.
+                                    if let Some(_) = controller.try_get_recording_path(Arc::clone(file_name)) {
                                         // File dialog to save
 
-                                       if let Some(out_path) = rfd::FileDialog::new()
-                                           .add_filter("wav", &["wav"])
-                                               .set_directory(controller.base_dir())
-                                               .save_file() {
-                                                   self.recording_modal = false;
+                                        if let Some(out_path) = rfd::FileDialog::new()
+                                            .add_filter("wav", &["wav"])
+                                            .set_directory(controller.base_dir())
+                                            .save_file() {
+                                            self.recording_modal = false;
                                             controller.export_recording(out_path, Arc::clone(file_name), self.export_format);
-                                       }
-                                           
-
-                                   } else {
-                                       // TODO: logging + TOAST
-                                       todo!("LOGGING");
-                                       // The writer engine will prune out its nonexistent file-paths,
-                                       // so perhaps maybe a "toast" is sufficient here to say "sorry
-                                       // cannot find recording" -> there's an egui-notify (thread
-                                       // safe) toasts library that might be a good idea.
-                                       //
-                                       // Otherwise a debouncer will be necessary to maintain the state
-                                       // of the directory.
-                                   }
-                               }
-                               ui.end_row();
-                       } 
-
+                                        }
+                                    } else {
+                                        // TODO: logging + TOAST
+                                        todo!("LOGGING");
+                                        // The writer engine will prune out its nonexistent file-paths,
+                                        // so perhaps maybe a "toast" is sufficient here to say "sorry
+                                        // cannot find recording" -> there's an egui-notify (thread
+                                        // safe) toasts library that might be a good idea.
+                                        //
+                                        // Otherwise, a debouncer will be necessary to maintain the state
+                                        // of the directory.
+                                    }
+                                }
+                                ui.end_row();
+                            }
                         });
-                    
                 })
             });
 
-            if modal.should_close(){
+            if modal.should_close() {
                 self.recording_modal = false;
             }
         }
@@ -280,18 +275,13 @@ impl PaneView for RecordingPane {
 
         // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
         // will just nop.
+        let mut should_close = false;
         resp.context_menu(|ui| {
-            let mut should_close = false;
-            if ui
-                .selectable_value(&mut should_close, self.is_pane_closable(), "Close tab.")
-                .clicked()
-            {
-                if should_close {
-                    todo!("HANDLE CLOSING THE PANE");
-                }
-                ui.close_menu();
-            };
+            ui.selectable_value(&mut should_close, self.is_pane_closable(), "Close tab.");
         });
+        if should_close {
+            ui.close();
+        }
 
         resp
     }

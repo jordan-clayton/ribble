@@ -1,4 +1,4 @@
-use egui::{lerp, pos2, vec2, Response, Sense, Ui, Widget, WidgetInfo, WidgetType};
+use egui::{Response, Sense, Ui, Widget, WidgetInfo, WidgetType, lerp, pos2, vec2};
 
 // This is lifted directly from the egui demo lib: https://github.com/emilk/egui/blob/master/crates/egui_demo_lib/src/demo/toggle_switch.rs.
 fn draw_toggle(ui: &mut Ui, on: &mut bool) -> Response {
@@ -18,8 +18,13 @@ fn draw_toggle(ui: &mut Ui, on: &mut bool) -> Response {
         let rect = rect.expand(visuals.expansion);
         let radius = 0.5 * rect.height();
 
-        ui.painter()
-            .rect(rect, radius, visuals.bg_fill, visuals.bg_stroke, egui::StrokeKind::Outside);
+        ui.painter().rect(
+            rect,
+            radius,
+            visuals.bg_fill,
+            visuals.bg_stroke,
+            egui::StrokeKind::Outside,
+        );
 
         let circle_x = lerp((rect.left() + radius)..=(rect.right() - radius), t);
         let center = pos2(circle_x, rect.center().y);
@@ -30,6 +35,6 @@ fn draw_toggle(ui: &mut Ui, on: &mut bool) -> Response {
     response
 }
 
-pub fn toggle(on: &mut bool) -> impl Widget + '_ {
+pub(in crate::ui) fn toggle(on: &mut bool) -> impl Widget + '_ {
     move |ui: &mut Ui| draw_toggle(ui, on)
 }

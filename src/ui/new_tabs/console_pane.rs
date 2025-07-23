@@ -55,18 +55,14 @@ impl PaneView for ConsolePane {
 
         // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
         // will just nop.
+        let mut should_close = false;
         resp.context_menu(|ui| {
-            let mut should_close = false;
-            if ui
-                .selectable_value(&mut should_close, self.is_pane_closable(), "Close tab.")
-                .clicked()
-            {
-                if should_close {
-                    todo!("HANDLE CLOSING THE PANE");
-                }
-                ui.close_menu();
-            };
+            ui.selectable_value(&mut should_close, self.is_pane_closable(), "Close tab.");
         });
+        if should_close {
+            ui.close();
+        }
+
 
         resp
     }
