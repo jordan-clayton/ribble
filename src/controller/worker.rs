@@ -1,7 +1,8 @@
 use crate::controller::{Bus, ConsoleMessage, RibbleMessage, RibbleWorkerHandle, WorkRequest};
 use crate::utils::errors::RibbleError;
 use crossbeam::scope;
-use ribble_whisper::utils::{Receiver, Sender, get_channel};
+use ribble_whisper::utils::{get_channel, Receiver, Sender};
+use std::error::Error;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -31,62 +32,69 @@ impl WorkerInner {
             long_outgoing,
         }
     }
-    fn handle_result(
-        &self,
-        message: Result<RibbleMessage, RibbleError>,
-    ) -> Result<(), RibbleError> {
+    fn handle_result(&self, message: Result<RibbleMessage, RibbleError>) {
         match message {
             Ok(message) => self.handle_message(message),
             Err(err) => self.handle_error(err),
         }
     }
-    // TODO: determine why this is returning an error...?
-    fn handle_message(&self, message: RibbleMessage) -> Result<(), RibbleError> {
+    fn handle_message(&self, message: RibbleMessage) {
         match message {
-            RibbleMessage::Console(msg) => Ok({
-                if self.console_message_sender.send(msg).is_err() {
-                    todo!("LOG THIS");
+            RibbleMessage::Console(msg) => {
+                if let Err(e) = self.console_message_sender.send(msg) {
+                    log::warn!(
+                        "Console engine closed. Cannot send new messages.\nError source: {}",
+                        e.source()
+                    );
                 }
-            }),
+            }
 
-            RibbleMessage::BackgroundWork(msg) => Ok({
+            RibbleMessage::BackgroundWork(msg) => {
                 if let Err(e) = msg {
                     let err_msg = ConsoleMessage::Error(e);
-                    if self.console_message_sender.send(err_msg).is_err() {
-                        todo!("LOG THIS");
+                    if let Err(e) = self.console_message_sender.send(err_msg) {
+                        log::warn!(
+                            "Console engine closed. Cannot send new error messages.\nError source: {}",
+                            e.source()
+                        );
                     }
                 }
-            }),
+            }
         }
     }
-    // TODO: determine why this is returning an error.
-    fn handle_error(&self, error: RibbleError) -> Result<(), RibbleError> {
+
+    fn handle_error(&self, error: RibbleError) {
+        // Log the error message internally.
+        log::error!("{}", &error);
+        // Propagate to the console.
         let error_msg = ConsoleMessage::Error(error);
-        Ok({
-            if self.console_message_sender.send(error_msg).is_err() {
-                todo!("LOG THIS");
-            }
-        })
+        if let Err(e) = self.console_message_sender.send(error_msg) {
+            log::warn!(
+                "Console engine closed. Cannot send new error messages.\nError source: {}",
+                e.source()
+            );
+        }
     }
 }
 
 pub(super) struct WorkerEngine {
     inner: Arc<WorkerInner>,
-    // TODO: swap the error type here once errors have been reimplemented.
-    work_thread: Option<JoinHandle<Result<(), RibbleError>>>,
+    work_thread: Option<JoinHandle<()>>,
 }
 
 impl WorkerEngine {
-    pub(super) fn new(incoming_request: Receiver<WorkRequest>, bus: &Bus) -> Self {
+    pub(super) fn new(incoming_request: Receiver<WorkRequest>, bus: &Bus) -> Result<Self, RibbleError> {
         let inner = Arc::new(WorkerInner::new(incoming_request, bus));
         let thread_inner = Arc::clone(&inner);
 
-        let work_thread = Some(std::thread::spawn(move || {
+        let mut work_thread = Some(std::thread::spawn(move || {
             let forwarder_inner = Arc::clone(&thread_inner);
             let long_job_inner = Arc::clone(&thread_inner);
             let short_job_inner = Arc::clone(&thread_inner);
 
-            let res = scope(|s| {
+            // This scope block first maps the error and then unwraps it to
+            // propagate the panic up to the full thread.
+            scope(|s| {
                 // NOTE: at the moment, it's -probably- okay for this thread to block.
                 // If this starts to become an issue once bounds are sorted out, look
                 // at implementing a priority system + bounded joining.
@@ -94,13 +102,13 @@ impl WorkerEngine {
                     while let Ok(request) = forwarder_inner.incoming_requests.recv() {
                         match request {
                             WorkRequest::Long(work) => {
-                                if forwarder_inner.long_outgoing.send(work).is_err() {
-                                    todo!("LOGGING.");
+                                if let Err(e) = forwarder_inner.long_outgoing.send(work) {
+                                    log::warn!("Worker long queue somehow closed. Cannot forward in new requests.\nError source: {}", e.source());
                                 }
                             }
                             WorkRequest::Short(work) => {
-                                if forwarder_inner.short_outgoing.send(work).is_err() {
-                                    todo!("LOGGING.");
+                                if let Err(e) = forwarder_inner.short_outgoing.send(work) {
+                                    log::warn!("Worker short queue somehow closed. Cannot forward in new requests.\nError source: {}", e.source());
                                 }
                             }
                         }
@@ -109,45 +117,50 @@ impl WorkerEngine {
 
                 let _short_worker = s.spawn(move |_| {
                     while let Ok(work) = short_job_inner.short_incoming.recv() {
-                        // TODO: get rid of the ? operator => these don't need to return an error.
                         match work.join() {
                             Ok(res) => short_job_inner.handle_result(res),
-                            // TODO: it might actually better to just panic the app until the new implementation
-                            // is sorted out -> In no places are the work threads expected to actually panic.
-                            // All errors from ribble_whisper are handled with results -> so it might be
-                            // better to treat as fatal and crash the app.
                             Err(err) => {
-                                let ribble_error = RibbleError::ThreadPanic(format!("{:?}", err));
-                                short_job_inner.handle_error(ribble_error)
-                            } // Since handle_result/handle_error only return Err when the kernel's
-                              // not set, unwrapping here will panic the worker thread and information
-                              // should bubble up accordingly.
+                                let ribble_error = RibbleError::ThreadPanic(format!("{:#?}", err));
+                                short_job_inner.handle_error(ribble_error);
+                            }
                         };
                     }
                 });
 
                 let _long_worker = s.spawn(move |_| {
                     while let Ok(work) = long_job_inner.long_incoming.recv() {
-                        // TODO: get rid of the ? operator => these don't need to return an error.
                         match work.join() {
                             Ok(res) => long_job_inner.handle_result(res),
                             Err(err) => {
-                                let ribble_error = RibbleError::ThreadPanic(format!("{:?}", err));
+                                let ribble_error = RibbleError::ThreadPanic(format!("{:#?}", err));
                                 long_job_inner.handle_error(ribble_error)
                             } // Since handle_result/handle_error only return Err when the kernel's
-                              // not set, unwrapping here will panic the worker thread and information
-                              // should bubble up accordingly.
+                            // not set, unwrapping here will panic the worker thread and information
+                            // should bubble up accordingly.
                         };
                     }
                 });
-
-                Ok(())
             })
-            .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e)))?;
-            res
+                .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e))).unwrap();
         }));
 
-        Self { inner, work_thread }
+        // If the worker thread fails to spin up, return an error at construction time.
+        if work_thread.as_ref().is_some_and(|thread| thread.is_finished()) {
+            let inner = work_thread.take().unwrap();
+            return match inner.join() {
+                Ok(_) => {
+                    let err = RibbleError::Core("Worker thread returned before construction finished.".to_string());
+                    Err(err)
+                }
+                Err(e) => {
+                    let err = RibbleError::ThreadPanic(format!("Worker thread panicked at construction.\nError: {:#?}", e));
+                    Err(err)
+                }
+            };
+        }
+
+
+        Ok(Self { inner, work_thread })
     }
 }
 
@@ -156,8 +169,7 @@ impl Drop for WorkerEngine {
         if let Some(handle) = self.work_thread.take() {
             handle
                 .join()
-                .expect("The worker thread is not expected to panic and should run without issues.")
-                .expect("I'm not quite sure as to what the error conditions for this should be.");
+                .expect("The worker thread is not expected to panic and should run without issues.");
         }
     }
 }

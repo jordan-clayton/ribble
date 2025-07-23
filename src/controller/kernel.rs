@@ -9,8 +9,8 @@ use crate::controller::worker::WorkerEngine;
 use crate::controller::writer::WriterEngine;
 use crate::controller::{
     AmortizedDownloadProgress, AmortizedProgress, Bus, CompletedRecordingJobs, ConsoleMessage,
-    DEFAULT_PROGRESS_SLAB_CAPACITY, NUM_VISUALIZER_BUCKETS, OfflineTranscriberFeedback, Progress,
-    RotationDirection, SMALL_UTILITY_QUEUE_SIZE, UTILITY_QUEUE_SIZE,
+    OfflineTranscriberFeedback, Progress, RotationDirection, DEFAULT_PROGRESS_SLAB_CAPACITY,
+    NUM_VISUALIZER_BUCKETS, SMALL_UTILITY_QUEUE_SIZE, UTILITY_QUEUE_SIZE,
 };
 use crate::controller::{AnalysisType, FileDownload};
 use crate::utils::errors::RibbleError;
@@ -100,7 +100,7 @@ impl Kernel {
         let progress_engine =
             ProgressEngine::new(DEFAULT_PROGRESS_SLAB_CAPACITY, progress_receiver);
         let visualizer_engine = VisualizerEngine::new(visualizer_receiver);
-        let worker_engine = WorkerEngine::new(work_receiver, &bus);
+        let worker_engine = WorkerEngine::new(work_receiver, &bus)?;
 
         let recording_directory = data_directory.join(Self::TEMP_AUDIO_DIR_SLUG);
         let writer_engine = WriterEngine::new(recording_directory, write_receiver, &bus);

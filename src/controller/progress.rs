@@ -3,6 +3,7 @@ use crate::utils::errors::RibbleError;
 use parking_lot::RwLock;
 use ribble_whisper::utils::Receiver;
 use slab::Slab;
+use std::error::Error;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -47,14 +48,14 @@ impl ProgressEngineState {
     }
     fn remove_progress_job(&self, id: usize) {
         if self.current_jobs.write().try_remove(id).is_none() {
-            todo!("LOGGING: This should never, ever be none unless there's a stale ID.");
+            log::warn!("Progress metadata missing for: {id}. Metadata/Id is stale.");
         }
     }
 }
 
 pub(super) struct ProgressEngine {
     inner: Arc<ProgressEngineState>,
-    work_thread: Option<JoinHandle<Result<(), RibbleError>>>,
+    work_thread: Option<JoinHandle<()>>,
 }
 
 impl ProgressEngine {
@@ -75,8 +76,11 @@ impl ProgressEngine {
                         id_return_sender,
                     } => {
                         let id = thread_inner.add_progress_job(job);
-                        if id_return_sender.send(id).is_err() {
-                            todo!("LOGGING");
+                        if let Err(e) = id_return_sender.send(id) {
+                            log::warn!(
+                                "Progress Id receiver missing, cannot complete rendezvous.\nError source: {}",
+                                e.source()
+                            );
                         }
                     }
                     ProgressMessage::Increment { job_id, delta } => {
@@ -96,7 +100,6 @@ impl ProgressEngine {
                     }
                 }
             }
-            Ok(())
         });
 
         let work_thread = Some(worker);
@@ -145,10 +148,9 @@ impl Drop for ProgressEngine {
     fn drop(&mut self) {
         // TODO: determine whether or not to just have a void JoinHandle.
         if let Some(thread) = self.work_thread.take() {
-            thread.join()
-                .expect("The progress worker thread is expected to never panic.").expect(
-                "I'm not quite sure what error conditions might ever happen with the thread.--This is being determined"
-            );
+            thread
+                .join()
+                .expect("The progress worker thread is expected to never panic.");
         }
     }
 }

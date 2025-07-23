@@ -1,14 +1,15 @@
 use crate::controller::{
-    AnalysisType, AtomicAnalysisType, NUM_VISUALIZER_BUCKETS, RotationDirection,
+    AnalysisType, AtomicAnalysisType, RotationDirection, NUM_VISUALIZER_BUCKETS,
 };
 use crate::utils::errors::RibbleError;
 use crossbeam::channel::Receiver;
 use parking_lot::RwLock;
 use realfft::RealFftPlanner;
+use std::error::Error;
 use std::f32::consts::PI;
 use std::ops::Deref;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
 
@@ -64,8 +65,7 @@ impl VisualizerEngineState {
         }
     }
 
-    // TODO: precompute the frame size/FFT planner, etc.
-    // TODO: maybe return RibbleAppError? Might not matter.
+    // TODO: look at precomputing the frame size/FFT planner, etc.
     fn power_analysis(&self, samples: &[f32]) -> Result<(), RibbleError> {
         // True = apply gain
         let window_samples = hann_window(samples, true);
@@ -245,8 +245,8 @@ impl VisualizerEngineState {
                 }
 
                 // TODO: this might not be necessary.
-                debug_assert!(!(freq.is_nan() || freq.is_infinite()));
-                debug_assert!(!value.is_nan());
+                debug_assert!(freq.is_normal(), "Frequency non normal: {freq}");
+                debug_assert!(value.is_normal(), "Complex value is not normal: {value}");
 
                 // Find the bucket.
                 let closest =
@@ -315,8 +315,7 @@ fn compute_welch_frames(sample_len: f32, overlap_ratio: f32) -> (usize, usize) {
 // For precomputing an FFTplanner state that can be ArcSwapped
 pub(super) struct VisualizerEngine {
     inner: Arc<VisualizerEngineState>,
-    // TODO: swap the error type once errors have been re-implemented.
-    work_thread: Option<JoinHandle<Result<(), RibbleError>>>,
+    work_thread: Option<JoinHandle<()>>,
 }
 impl VisualizerEngine {
     pub(super) fn new(incoming_samples: Receiver<VisualizerSample>) -> Self {
@@ -339,14 +338,17 @@ impl VisualizerEngine {
                     sample_rate,
                 } = packet;
 
+                // Instead of returning the error to finish the thread, just log it.
+                // There may be errors across each visualization analysis, so the loop should
+                // remain.
                 if let Err(e) = thread_inner.run_analysis(&sample, sample_rate) {
-                    todo!("LOGGING");
-                    // I'm not necessarily sure this should return an error here.
-                    // TODO: remove this after debugging and maybe just log.
-                    return Err(e);
+                    log::warn!(
+                        "Failed to run visual analysis.\nType: {}, Error: {e}, Error Source: {}",
+                        thread_inner.analysis_type.load(Ordering::Acquire),
+                        e.source()
+                    );
                 }
             }
-            Ok(())
         }));
 
         Self { inner, work_thread }
@@ -395,13 +397,9 @@ impl VisualizerEngine {
 impl Drop for VisualizerEngine {
     fn drop(&mut self) {
         if let Some(handle) = self.work_thread.take() {
-            handle
-                .join()
-                .expect(
-                    "The visualizer thread is not expected to panic and should run without issues.",
-                )
-                // TODO: clarify this
-                .expect("I haven't determined what exactly what might cause an error just yet.");
+            handle.join().expect(
+                "The visualizer thread is not expected to panic and should run without issues.",
+            );
         }
     }
 }

@@ -1,12 +1,13 @@
 use crate::controller::{
-    Bus, ConsoleMessage, DownloadRequest, RibbleMessage, SMALL_UTILITY_QUEUE_SIZE, WorkRequest,
+    Bus, ConsoleMessage, DownloadRequest, RibbleMessage, WorkRequest, SMALL_UTILITY_QUEUE_SIZE,
 };
 use crate::utils::errors::RibbleError;
 use indexmap::IndexMap;
 use parking_lot::RwLock;
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{Receiver, Sender, get_channel};
+use ribble_whisper::utils::{get_channel, Receiver, Sender};
 use ribble_whisper::whisper::model::{ModelId, ModelRetriever};
+use std::error::Error;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::ErrorKind;
@@ -15,9 +16,9 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use twox_hash::XxHash3_64;
 
-use notify_debouncer_full::notify::EventKind;
+use notify_debouncer_full::notify::{EventKind, RecursiveMode};
 use notify_debouncer_full::{
-    DebounceEventResult, DebouncedEvent, new_debouncer, notify::RecursiveMode,
+    new_debouncer, DebounceEventResult, DebouncedEvent,
 };
 
 const MODEL_ID_SEED: u64 = 0;
@@ -57,7 +58,7 @@ impl RibbleModelBankState {
                 model_map,
                 model_directory_watcher: watcher,
             }
-            .init()
+                .init()
         }
     }
 
@@ -87,14 +88,17 @@ impl RibbleModelBankState {
             return;
         }
 
-        if self.refresh_model_bank().is_err() {
-            todo!("LOGGING");
+        if let Err(e) = self.refresh_model_bank() {
+            log::warn!(
+                "Failed to refresh model bank.\nError: {e}\nError source: {}",
+                e.source()
+            );
         }
     }
 
     fn fill_model_bank(&self) -> Result<(), std::io::Error> {
         let data_directory = &self.model_directory;
-        // TODO: possibly clean this up -it's a little wild to try and read.
+
         // Read all the valid entries, filter out and extract the file_name and file size
         let mut entries = fs::read_dir(data_directory)?
             // Get entries in the directory
@@ -109,6 +113,7 @@ impl RibbleModelBankState {
             .filter(|entry| entry.metadata().is_ok())
             // Only get valid Unicode file paths
             .filter(|entry| entry.path().file_name().unwrap().to_str().is_some())
+            // Map into metadata.
             .map(|entry| {
                 (
                     Arc::from(entry.path().file_name().unwrap().to_str().unwrap()),
@@ -123,6 +128,7 @@ impl RibbleModelBankState {
         // Get a write lock to fill the map.
         let mut map_lock = self.model_map.write();
 
+        // Fill the model bank.
         for (file_name, _) in entries {
             let model_key = XxHash3_64::oneshot_with_seed(MODEL_ID_SEED, file_name.as_bytes());
             map_lock.insert(model_key, file_name);
@@ -167,7 +173,6 @@ impl RibbleModelBankState {
         }
     }
 
-    // These two methods can stay.
     fn clear(&self) {
         self.model_map.write().clear();
     }
@@ -177,8 +182,9 @@ impl RibbleModelBankState {
         Ok(self.fill_model_bank()?)
     }
 
-    // NOTE: this can probably stay, though I'm not sure I want to deal with delete buttons in the
-    // UI.
+    // NOTE: this can probably stay, though I'm not sure that I want to deal with
+    // delete buttons in the UI.
+
     // Returns Ok(Some(ModelId)) if the model was in the bank and there were no file errors
     // Returns Ok(None) if the model was not in the bank and there were no file errors
     // Returns Err when there are issues with file removal, not including missing files:
@@ -220,22 +226,18 @@ impl RibbleModelBankState {
 
 pub(crate) struct RibbleModelBank {
     inner: Arc<RibbleModelBankState>,
-    // TODO: thread handle + watcher.
     work_sender: Sender<WorkRequest>,
     download_sender: Sender<DownloadRequest>,
-    worker_thread: Option<JoinHandle<Result<(), RibbleError>>>,
+    worker_thread: Option<JoinHandle<()>>,
 }
 
 impl RibbleModelBank {
-    // NOTE: this filename should be canonicalized before it's passed in here
-    // CHECK THIS IN THE CONTROLLER CONSTRUCTOR AND ESCAPE EARLY.
+    // NOTE: this expects a fully canonicalized path.
+    // This is handled higher up in the kernel implementation, but other users must uphold this
+    // expectation.
     pub(crate) fn new(model_directory: &Path, bus: &Bus) -> Result<Self, RibbleError> {
         let (event_sender, event_receiver) = get_channel(SMALL_UTILITY_QUEUE_SIZE);
         let inner = Arc::new(RibbleModelBankState::new(model_directory, event_receiver)?);
-        // TODO: watcher thread -> watch the directory for create/modify/delete and just run the update routine.
-
-        // TODO: this will need a hooooook for errors in RibbleError
-        // Args: timeout, tick-rate (None => 1/4 * timeout), event_handler (queue)
         let mut debouncer = new_debouncer(
             std::time::Duration::from_millis(MAX_DEBOUNCE_TIME),
             None,
@@ -245,36 +247,51 @@ impl RibbleModelBank {
         let thread_inner = Arc::clone(&inner);
         let file_directory = model_directory.to_path_buf();
         let work_thread = std::thread::spawn(move || {
-            debouncer.watch(file_directory.as_path(), RecursiveMode::NonRecursive)?;
+            debouncer.watch(file_directory.as_path(), RecursiveMode::NonRecursive)
+                .expect("The debouncer is expected to watch without any issues.");
 
             while let Ok(result) = thread_inner.model_directory_watcher.recv() {
                 match result {
                     Ok(events) => {
                         thread_inner.handle_debounced_events(&events);
                     }
+                    // NOTE: at the moment, this is not being treated as a "fatal error",
+                    // because there is no way to restart the debouncer yet and only the background
+                    // thread will panic.
+                    //
+                    // (If this is to fail, it's more than likely to be a directory error which
+                    // would trigger higher up in the app--but monitor logs just in-case)
                     Err(mut e) => {
-                        // TODO: LOGGING
-                        // TODO TWICE: determine whether or not this should return the result.
-                        // TODO THRICE: determine whether this is considered "panic" territory, or
-                        // whether the app should continue running/optional re-spawn the thread.
-                        // Most errors seem pretty dire (can't watch/io/OS specific), but a
-                        // "refresh" button for manual directory crawling mightn't be so bad--
-                        // though this is most likely to encounter fs issues if that's true anyway.
-                        let mut last_err = None;
                         while let Some(err) = e.pop() {
-                            // TODO: LOGGING
-                            last_err = Some(err);
-                        }
-
-                        if let Some(err) = last_err.take() {
-                            return Err(err.into());
+                            log::error!(
+                                "Debouncer Error in model bank.\nError: {}\nError source: {}",
+                                err,
+                                err.source()
+                            );
                         }
                     }
                 }
             }
-
-            Ok(())
         });
+
+        // If the worker thread has already panicked/failed, this join should be very quick
+        // and the model bank should fail to construct.
+        if work_thread.is_finished() {
+            let res = work_thread.join().map_err(|e| {
+                RibbleError::ThreadPanic(format!("Failed to create debouncer thread.\n\
+                Error: {:#?}", e))
+            });
+
+            return match res {
+                Ok(_) => {
+                    let err = RibbleError::Core("Debouncer thread quit early".to_string());
+                    Err(err)
+                }
+                Err(e) => {
+                    Err(e)
+                }
+            };
+        }
 
         Ok(Self {
             inner,
@@ -300,8 +317,14 @@ impl RibbleModelBank {
     pub(crate) fn download_new_model(&self, url: &str) {
         let model_directory = self.inner.model_directory();
         let download_request = DownloadRequest::new_with_params(url, model_directory);
-        if self.download_sender.send(download_request).is_err() {
-            todo!("LOGGING: download issue.");
+        if let Err(e) = self.download_sender.try_send(download_request) {
+            log::warn!(
+                "Cannot make download request, channel either closed or too small.\n\
+                Error: {}\n\
+                Error source: {}",
+                &e
+                e.source()
+            );
         }
     }
 
@@ -311,26 +334,27 @@ impl RibbleModelBank {
         let worker = std::thread::spawn(move || {
             if !model_file_path.is_file() {
                 let err =
-                    RibbleError::Core(format!("{:?} is not a file.", model_file_path.display()));
+                    RibbleError::Core(format!("{:#?} is not a file.", model_file_path.display()));
                 return Err(err);
             }
 
             let extension = model_file_path
                 .extension()
                 .ok_or(RibbleError::Core(format!(
-                    "Invalid file: {:?}",
+                    "Invalid file: {:#?}",
                     model_file_path.display()
                 )))?;
 
             if extension != MODEL_FILE_EXTENSION {
-                let err = RibbleError::Core(format!("Invalid file_type: {:?}", extension));
+                let err =
+                    RibbleError::Core(format!("Invalid file_type: {:#?}", extension.display()));
                 return Err(err);
             }
 
             let file_name = model_file_path
                 .file_name()
                 .ok_or(RibbleError::Core(format!(
-                    "Invalid file path: {:?}",
+                    "Invalid file path: {:#?}",
                     model_file_path.display()
                 )))?;
 
@@ -339,7 +363,7 @@ impl RibbleModelBank {
             fs::copy(model_file_path.as_path(), dest.as_path())?;
             let console_message = ConsoleMessage::Status(format!(
                 "Saved model: {:#?} to models directory.",
-                file_name
+                file_name.display()
             ));
             let ribble_message = RibbleMessage::Console(console_message);
 
@@ -347,9 +371,14 @@ impl RibbleModelBank {
         });
 
         let work_request = WorkRequest::Short(worker);
-        // TODO: determine whether or not it's safe to block -- it shouuuuld be, but I'm not sure.
-        if self.work_sender.try_send(work_request).is_err() {
-            todo!("LOGGING");
+
+        if let Err(e) = self.work_sender.try_send(work_request) {
+            log::warn!(
+                "Failed to send work request. Channel may be closed or too small.\n\
+                Error: {e}\n\
+                Error source: {}",
+                e.source()
+            );
         }
     }
 
@@ -364,9 +393,9 @@ impl RibbleModelBank {
 impl Drop for RibbleModelBank {
     fn drop(&mut self) {
         if let Some(handle) = self.worker_thread.take() {
-            if handle.join().is_err() {
-                todo!("LOGGING")
-            }
+            handle
+                .join()
+                .expect("Debouncer thread is expected to work properly and should not panic.");
         }
     }
 }

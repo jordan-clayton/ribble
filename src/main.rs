@@ -28,11 +28,13 @@ mod controller;
 mod ui;
 mod utils;
 
+// TODO: Clean this preamble up after refactoring the internals.
+
 fn main() -> Result<(), WhisperAppError> {
     let proj_dirs = ProjectDirs::from(
-        constants::QUALIFIER,
-        constants::ORGANIZATION,
-        constants::APP_ID,
+        QUALIFIER,
+        ORGANIZATION,
+        APP_ID,
     );
 
     if proj_dirs.is_none() {
@@ -131,7 +133,7 @@ fn main() -> Result<(), WhisperAppError> {
     });
 
     let app = run_native(
-        constants::APP_ID,
+        APP_ID,
         native_options,
         Box::new(|cc| {
             // Support for svg.
@@ -183,14 +185,18 @@ fn main() -> Result<(), WhisperAppError> {
     Ok(())
 }
 
+// TODO: These can/should be refactored -> egui has changed significantly since this app was rewritten
+// Also... why is this not using include_image!()...?
 #[cfg(not(target_os = "macos"))]
 fn build_viewport() -> ViewportBuilder {
     let image_bytes = include_bytes!("assets/whisper_app_icon_128x128@1x.png");
     let icon = load_icon(image_bytes);
     let mut viewport = ViewportBuilder::default()
-        .with_app_id(constants::APP_ID)
-        .with_title(constants::APP_ID)
+        .with_app_id(APP_ID)
+        .with_title(APP_ID)
         .with_resizable(true)
+        // TODO: abstract this size into a constant.
+        // Also, maybe start maximized.
         .with_inner_size(vec2(1024.0, 768.0));
 
     if let Some(icon_data) = icon {
@@ -205,8 +211,8 @@ fn build_viewport() -> ViewportBuilder {
     let image_bytes = include_bytes!("assets/whisper_app_icon_1024x1024@1x.png");
     let icon = load_icon(image_bytes);
     let mut viewport = ViewportBuilder::default()
-        .with_app_id(constants::APP_ID)
-        .with_title(constants::APP_ID)
+        .with_app_id(APP_ID)
+        .with_title(APP_ID)
         .with_resizable(true)
         .with_titlebar_shown(false)
         .with_inner_size(vec2(1024.0, 768.0));
@@ -216,3 +222,6 @@ fn build_viewport() -> ViewportBuilder {
     }
     viewport
 }
+pub const APP_ID: &str = "Ribble";
+pub const QUALIFIER: &str = "com";
+pub const ORGANIZATION: &str = "Jordan";

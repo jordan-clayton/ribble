@@ -2,8 +2,8 @@ use crate::controller::audio_backend_proxy::AudioBackendProxy;
 use crate::controller::kernel::Kernel;
 use crate::controller::{
     AmortizedDownloadProgress, AmortizedProgress, AnalysisType, CompletedRecordingJobs,
-    ConsoleMessage, FileDownload, NUM_VISUALIZER_BUCKETS, OfflineTranscriberFeedback, Progress,
-    RotationDirection,
+    ConsoleMessage, FileDownload, OfflineTranscriberFeedback, Progress, RotationDirection,
+    NUM_VISUALIZER_BUCKETS,
 };
 use crate::utils::errors::RibbleError;
 use crate::utils::preferences::UserPreferences;
@@ -13,6 +13,7 @@ use ribble_whisper::transcriber::{TranscriptionSnapshot, WhisperControlPhrase};
 use ribble_whisper::utils::Sender;
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model::ModelId;
+use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -37,7 +38,7 @@ pub(crate) struct RibbleController {
 impl RibbleController {
     const RECOMMENDED_MAX_WHISPER_THREADS: usize = 8;
     // NOTE: The data_directory needs to be absolute -> there's a guard for this in the
-    // kernel and it will return Err() if the path is relative.
+    // kernel, and it will return Err() if the path is relative.
     pub(crate) fn new(
         data_directory: &Path,
         audio_backend: AudioBackendProxy,
@@ -63,10 +64,10 @@ impl RibbleController {
 
     // Only try_send the toast -> this shouldn't ever really block
     pub(crate) fn send_toast(&self, toast: egui_notify::Toast) {
-        if self.toasts_sender.try_send(toast).is_err() {
-            todo!(
-                "LOGGING -> this should only error out when the queue is full (wouldblock) or the app has closed."
-            );
+        if let Err(e) = self.toasts_sender.try_send(toast) {
+            log::warn!("Failed to send toast to UI, channel closed or too small.\n\
+            Error: {}\n\
+            Error source: {}", &e, e.source());
         }
     }
 
@@ -113,7 +114,7 @@ impl RibbleController {
         self.kernel.copy_new_model_to_bank(file_path);
     }
 
-    // (Id, File name)
+    // (ID, File name)
     pub(crate) fn try_read_model_list(&self, copy_buffer: &mut Vec<(ModelId, Arc<str>)>) {
         self.kernel.try_read_model_list(copy_buffer);
     }

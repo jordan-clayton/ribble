@@ -1,16 +1,13 @@
-use crate::controller::ConsoleMessage;
-use crate::controller::RibbleMessage;
-use crate::controller::WorkRequest;
-use crate::controller::{Bus, CompletedRecordingJobs};
+use crate::controller::{Bus, CompletedRecordingJobs, ConsoleMessage, RibbleMessage, WorkRequest};
 use crate::utils::errors::RibbleError;
-use crate::utils::recorder_configs::RibbleRecordingConfigs;
-use crate::utils::recorder_configs::RibbleRecordingExportFormat;
+use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExportFormat};
 use hound::{WavReader, WavSpec, WavWriter};
 use indexmap::IndexMap;
 use parking_lot::RwLock;
 use ribble_whisper::audio::pcm::IntoPcmS16;
 use ribble_whisper::utils::{Receiver, Sender};
-use std::path::{Path, PathBuf};
+use std::error::Error;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::JoinHandle;
@@ -24,7 +21,7 @@ pub(super) struct WriteRequest {
 // TODO: this might need to spawn a debouncer thread;
 // Since the model folder is accessible via the UI,
 // it is possible for a user to navigate to the recordings folder
-// and delete a file.
+// and delete a file willy-nilly.
 //
 // If they try and load said file after it's deleted, they will get
 // annoying UI, but the missing file will be removed by the next repaint.
@@ -33,12 +30,9 @@ pub(super) struct WriteRequest {
 // - Debouncer -> guaranteed coherent, runs on a bg thread, not super expensive but
 //   extra thread overhead.
 // - Filtering (check for file) -> likely coherent, incurs memory allocation each read.
-// - Toast + repaint -> informs, very cheap, more UI friction than debouncer
+// - *Going with this so far* Toast + repaint -> informs, very cheap, more UI friction than debouncer
 
 impl WriteRequest {
-    // NOTE: instead of just copying over the passed configs, this should take a RecordingConfigs
-    // that's been constructed by using RibbleRecordingConfigs::from_mic_capture(...);
-    // SEE ABOVE TODO: change to confirmed so that all spec details are known + NO AUTO.
     pub(super) fn new(receiver: Receiver<Arc<[f32]>>, spec: RibbleRecordingConfigs) -> Self {
         Self { receiver, spec }
     }
@@ -103,7 +97,7 @@ impl WriterEngineState {
         latest
     }
 
-    // NOTE: if this is causing issues with the UI loop, return an option instead and use heuristics.
+    // NOTE: if this is called and causing issues with the UI loop, return an option instead and use heuristics.
     // If the offline/recording has been run at least once, there must exist a recording that can
     // be loaded.
     fn get_num_completed(&self) -> usize {
@@ -228,16 +222,15 @@ impl WriterEngineState {
         // Unpack the request
         let (receiver, spec) = request.unpack();
 
-        // The files should look like "tmp<ticket_no>.wav"
+        // The files should look like "tmp_recording_<ticket_no>.wav"
         let ticket_no = self.ticket.fetch_add(1, Ordering::AcqRel);
         let tmp_name = Self::TMP_FILE;
         let ext = Self::FILE_EXTENSION;
-        let file_name = format!("{tmp_name}{ticket_no}.{ext}");
+        let file_name = format!("{tmp_name}_{ticket_no}.{ext}");
         let path = self.data_directory.join(&file_name);
 
         // Make a new WavWriter
         let wav_spec = spec.into_wav_spec(RibbleRecordingExportFormat::F32)?;
-        // TODO: write an errors hook for hound errors.
         let mut writer = WavWriter::create(path, wav_spec)?;
         // NOTE: SDL (current backend sends interleaved data)
         // Wav is also interleaved, so this can just automatically write samples
@@ -288,7 +281,7 @@ impl WriterEngineState {
 
 pub(super) struct WriterEngine {
     inner: Arc<WriterEngineState>,
-    request_polling_thread: Option<JoinHandle<Result<(), RibbleError>>>,
+    request_polling_thread: Option<JoinHandle<()>>,
     // NOTE: this isn't the absolute best architecture decision, but it solves the need for 'static
     // lifetimes when spawning threads for clearing/exporting.
     work_sender: Sender<WorkRequest>,
@@ -310,16 +303,15 @@ impl WriterEngine {
                 let handle_request =
                     std::thread::spawn(move || request_handler_inner.handle_new_request(request));
 
-                // TODO: this doesn't work -> The thread needs to be spawned here
                 let work_request = WorkRequest::Short(handle_request);
 
-                if thread_inner.work_request_sender.send(work_request).is_err() {
-                    todo!("LOGGING");
-                    break;
+                if let Err(e) = thread_inner.work_request_sender.send(work_request) {
+                    log::warn!(
+                        "Work engine closed. Cannot send new requests.\nError source: {}",
+                        e.source()
+                    );
                 }
             }
-
-            Ok(())
         });
 
         Self {
@@ -329,29 +321,25 @@ impl WriterEngine {
         }
     }
 
-    // TODO: take a copy of the work_request sender and send from here.
-    //
-    // NOTE: Send the key in if the user wants to export a recording.
-    // NOTE TWICE: remove .into() once RibbleAppError has been removed.
     pub(super) fn export_recording(
         &self,
         out_path: PathBuf,
-        // This is the key -> clone it in the UI and take ownership of the pointer
+        // This is the key -> The caller needs to clone it higher up and pass ownership of the new pointer
         job_file_name: Arc<str>,
         output_format: RibbleRecordingExportFormat,
     ) {
         let thread_inner = Arc::clone(&self.inner);
-        // NOTE: these either need to be static references, or copy-on-write.
-        // Since it's not expected to happen often, CoW is most likely the easiest solution to
-        // avoid atomic shared pointers.
         let worker = std::thread::spawn(move || {
             thread_inner.export_recording(out_path, job_file_name, output_format)
         });
 
         let work_request = WorkRequest::Short(worker);
 
-        if self.work_sender.send(work_request).is_err() {
-            todo!("LOGGING");
+        if let Err(e) = self.work_sender.send(work_request) {
+            log::warn!(
+                "Work engine closed, cannot send export request.\nError source: {}",
+                e.source()
+            );
         }
     }
 
@@ -409,10 +397,14 @@ impl WriterEngine {
         let worker = std::thread::spawn(move || thread_inner.clear_cache());
 
         let work_request = WorkRequest::Short(worker);
-        // TODO: TEST THE BLOCKING -> If this encounters any blocking, the short queue needs to be
-        // increased.
-        if self.work_sender.send(work_request).is_err() {
-            todo!("LOGGING");
+        if let Err(e) = self.work_sender.try_send(work_request) {
+            log::warn!(
+                "Cannot send new work request. Channel may be closed or too small.\n\
+            Error: {}\n\
+            Error source: {}",
+                e,
+                e.source()
+            );
         }
     }
 }
@@ -420,12 +412,13 @@ impl WriterEngine {
 impl Drop for WriterEngine {
     fn drop(&mut self) {
         if let Some(handle) = self.request_polling_thread.take() {
-            handle
-                .join()
-                .expect("The Writer thread is not expected to panic and should run without issues.")
-                .expect("I'm not sure what the errors for this might be")
+            handle.join().expect(
+                "The Writer thread is not expected to panic and should run without issues.",
+            );
         }
         // Also, clear the cache.
-        let _ = self.inner.clear_cache();
+        if let Err(e) = self.inner.clear_cache() {
+            log::error!("{}\nError source: {}", &e, e.source());
+        }
     }
 }

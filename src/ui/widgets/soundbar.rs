@@ -45,7 +45,6 @@ fn draw_soundbar(
     ui: &mut Ui,
     rect: Rect,
     buckets: &[f32; NUM_VISUALIZER_BUCKETS],
-    // TODO: change this to a gradient.
     color_interpolator: &ColorInterpolator,
 ) -> Response {
     // This might actually be best to do once-padding

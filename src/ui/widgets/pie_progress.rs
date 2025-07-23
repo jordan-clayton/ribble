@@ -1,11 +1,12 @@
-use egui::epaint::{Pos2, Vec2, PathShape, PathStroke};
-use egui::{Sense, Ui, Response, Widget};
+use egui::epaint::{PathShape, PathStroke, Pos2, Vec2};
+use egui::{Response, Sense, Ui, Widget};
 use std::cell::OnceCell;
 use std::f32::consts::PI;
 
 // Instead of generating a mesh, a convex fill should hopefully be cheaper.
 static PIE_VERTICES: OnceCell<Vec<Pos2>> = OnceCell::new();
 const RESOLUTION: usize = 128;
+const INNER_RADIUS_PERCENT: f32 = 0.9;
 
 // This initializes a list of vertices that approximate a unit circle with
 // centre (0, 0)
@@ -37,8 +38,7 @@ fn draw_progress_pie(ui: &mut Ui, current: f32, total_size: f32) -> Response {
         let rect = rect.expand(visuals.expansion);
         let radius = 0.5 * rect.height();
 
-        // TODO: define a constant for the inner pie.
-        let inner_radius = radius * 0.9;
+        let inner_radius = radius * INNER_RADIUS_PERCENT;
 
         let center = rect.center();
         let painter = ui.painter();

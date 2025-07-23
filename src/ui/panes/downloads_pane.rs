@@ -65,12 +65,9 @@ impl PaneView for DownloadsPane {
 
                                 ui.add(pb);
                                 if ui.button(CANCELLATION_X).clicked() {
-                                    // NOTE: at the moment, this is a blocking method.
-                                    // Writers should still get priority, but if there's any jank,
+                                    // NOTE: at the moment, this is a read-blocking method.
+                                    // The contention should be minimal, but if there's any jank,
                                     // run the action on a short-lived background thread instead.
-                                    //
-                                    // TODO: Actually, yes, This should probably happen on a background thread
-                                    // with a flag to prevent grandma clicks.
                                     controller.abort_download(*download_id);
                                 }
 

@@ -119,7 +119,6 @@ impl VadConfigs {
                         SILERO_VOICE_PROBABILITY_THRESHOLD
                     }
                     VadStrictness::Medium => OFFLINE_VOICE_PROBABILITY_THRESHOLD,
-                    // TODO: determine whether to abstract the numbers into constants
                     VadStrictness::Strict => Self::STRICTEST_PROBABILITY,
                 };
 

@@ -1,19 +1,15 @@
-use crate::controller::Progress;
-use crate::controller::WorkRequest;
 use crate::controller::visualizer::VisualizerSample;
 use crate::controller::writer::WriteRequest;
 use crate::controller::{
-    AtomicOfflineTranscriberFeedback, OfflineTranscriberFeedback, RibbleMessage,
+    AtomicOfflineTranscriberFeedback, Bus, ConsoleMessage, OfflineTranscriberFeedback, Progress,
+    ProgressMessage, RibbleMessage, WorkRequest, UTILITY_QUEUE_SIZE,
 };
-use crate::controller::{Bus, UTILITY_QUEUE_SIZE};
-use crate::controller::{ConsoleMessage, ProgressMessage};
 use crate::utils::dc_block::DCBlock;
 use crate::utils::errors::RibbleError;
 use crate::utils::recorder_configs::{
     RibbleChannels, RibblePeriod, RibbleRecordingConfigs, RibbleSampleRate,
 };
-use crate::utils::vad_configs::RibbleVAD;
-use crate::utils::vad_configs::VadConfigs;
+use crate::utils::vad_configs::{RibbleVAD, VadConfigs};
 use arc_swap::ArcSwap;
 use crossbeam::channel::TrySendError;
 use crossbeam::scope;
@@ -26,21 +22,22 @@ use ribble_whisper::audio::{AudioChannelConfiguration, WhisperAudioSample};
 use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
 use ribble_whisper::transcriber::{
-    CallbackTranscriber, Transcriber, TranscriptionSnapshot, WHISPER_SAMPLE_RATE, WhisperCallbacks,
-    WhisperControlPhrase, WhisperOutput, redirect_whisper_logging_to_hooks,
+    redirect_whisper_logging_to_hooks, CallbackTranscriber, Transcriber, TranscriptionSnapshot, WhisperCallbacks,
+    WhisperControlPhrase, WhisperOutput, WHISPER_SAMPLE_RATE,
 };
 use ribble_whisper::utils::callback::{
     ShortCircuitRibbleWhisperCallback, StaticRibbleWhisperCallback,
 };
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{Sender, get_channel};
+use ribble_whisper::utils::{get_channel, Sender};
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model::ModelRetriever;
+use std::error::Error;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 struct TranscriberEngineState {
@@ -98,8 +95,12 @@ impl TranscriberEngineState {
     fn cleanup_remove_progress_job(&self, maybe_id: Option<usize>) {
         if let Some(id) = maybe_id {
             let remove_setup = ProgressMessage::Remove { job_id: id };
-            if self.progress_message_sender.send(remove_setup).is_err() {
-                todo!("LOGGING");
+            if let Err(e) = self.progress_message_sender.send(remove_setup) {
+                log::warn!(
+                    "Progress channel closed, cannot send transcriber remove progress message.\n\
+                Error source: {}",
+                    e.source()
+                );
             }
         }
     }
@@ -107,18 +108,16 @@ impl TranscriberEngineState {
     fn update_increment_progress_job(&self, maybe_id: Option<usize>, delta: u64) {
         if let Some(id) = maybe_id {
             let update_progress_message = ProgressMessage::Increment { job_id: id, delta };
-            if self
-                .progress_message_sender
-                .send(update_progress_message)
-                .is_err()
-            {
-                todo!("LOGGING.");
+            if let Err(e) = self.progress_message_sender.send(update_progress_message) {
+                log::warn!(
+                    "Progress channel closed, cannot send transcriber increment progress message.\n\
+                Error source: {}",
+                    e.source()
+                );
             }
         }
     }
 
-    // NOTE: this could probably just spawn the thread here and return it?
-    // If choosing to do that, keep the interface consistent and change RecorderEngine.
     fn run_realtime_transcription<M, A>(
         &self,
         audio_backend: &A,
@@ -135,22 +134,25 @@ impl TranscriberEngineState {
         let (id_sender, id_receiver) = get_channel(1);
         let setup_progress_message = ProgressMessage::Request {
             job: setup_progress,
-            // TODO: rename this; it's confusing.
             id_return_sender: id_sender,
         };
 
-        if self
-            .progress_message_sender
-            .send(setup_progress_message)
-            .is_err()
-        {
-            todo!("LOGGING");
+        if let Err(e) = self.progress_message_sender.send(setup_progress_message) {
+            log::warn!(
+                "Progress channel closed, cannot get id in real-time transcriber setup.\n\
+            Error source: {}",
+                e.source()
+            );
         }
 
         let setup_id = match id_receiver.recv() {
             Ok(id) => Some(id),
-            Err(_) => {
-                todo!("LOGGING");
+            Err(e) => {
+                log::warn!(
+                    "Progress engine did not complete rendezvous for setup progress job.\n\
+                Error source: {}",
+                    e.source()
+                );
                 None
             }
         };
@@ -202,11 +204,10 @@ impl TranscriberEngineState {
             // Transcriber runner flag
             let t_thread_run_transcription = Arc::clone(&self.realtime_running);
 
-            // Disable stderr/stdout
+            // Redirect whisper logging to the logger.
             redirect_whisper_logging_to_hooks();
             // Close the "Setup" progress job
             self.cleanup_remove_progress_job(setup_id);
-
             // Get the confirmed recording specs for the writer.
             let confirmed_recording_configs = RibbleRecordingConfigs::from_mic_capture(&mic);
 
@@ -224,9 +225,13 @@ impl TranscriberEngineState {
             // Start a write job
             let (write_sender, write_receiver) = get_channel::<Arc<[f32]>>(UTILITY_QUEUE_SIZE);
             let write_request = WriteRequest::new(write_receiver, confirmed_recording_configs);
-            if self.write_request_sender.send(write_request).is_err() {
-                todo!("LOGGING");
+            if let Err(e) = self.write_request_sender.send(write_request) {
+                log::warn!(
+                    "Writer engine closed, cannot send recording request.\nError source: {}",
+                    e.source()
+                );
             }
+
             // Start the mic feed
             mic.play();
 
@@ -254,13 +259,20 @@ impl TranscriberEngineState {
                             // Fan the data out.
 
                             // If the write thread panics, the receiver will be deallocated.
+                            // Stop the transcription because the recording is gone.
                             if let Err(TrySendError::Disconnected(_)) =
                                 write_sender.try_send(Arc::clone(&audio))
                             {
                                 a_thread_recording_expected_available
                                     .store(false, Ordering::Release);
                                 a_thread_run_transcription.store(false, Ordering::Release);
-                                todo!("LOGGING");
+
+                                // If it's because of a panic, the panic will be propagated from the writer
+                                // to the UI.
+                                // It could be the case that the writer thread just finished early,
+                                // and this thread just needs to finish.
+                                let warning = "Writer thread disconnected during transcription loop.";
+                                log::warn!("{warning}");
                             }
 
                             // TODO: have to use self, but just use this to stub.
@@ -268,12 +280,13 @@ impl TranscriberEngineState {
                             let visualizer_sample =
                                 VisualizerSample::new(Arc::clone(&audio), WHISPER_SAMPLE_RATE);
 
-                            if self
+                            if let Err(e) = self
                                 .visualizer_sample_sender
-                                .send(visualizer_sample)
-                                .is_err()
+                                .try_send(visualizer_sample)
                             {
-                                todo!("LOGGING");
+                                log::warn!("Failed to send data to visualizer engine, channel closed or too small.\n\
+                                Error: {}\n\
+                                Error source: {}", &e, e.source());
                             }
                         }
                         Err(_) => a_thread_run_transcription.store(false, Ordering::Release),
@@ -309,28 +322,39 @@ impl TranscriberEngineState {
             let res = transcription_thread
                 .join()
                 .unwrap_or_else(|e| {
+                    // Wrap the error in a RibbleWhisper "Unknown" to satisfy the type constraints
+                    // of the join.
                     let err = RibbleWhisperError::Unknown(format!("{:?}", e));
                     Err(err)
                 })
                 .map_err(|e| {
                     if matches!(e, RibbleWhisperError::Unknown(_)) {
-                        RibbleError::ThreadPanic(e.to_string())
+                        // Since the format string is auto-appended, remove the "Unknown Error "
+                        // prefix to make things a little easier to read.
+                        RibbleError::ThreadPanic(e.to_string().replace("Unknown Error ", ""))
                     } else {
                         e.into()
                     }
                 });
             res
         })
-        .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e)))??;
+            // Since the type is opaque here (scope return), it's not entirely known as to what the error is.
+            // The easiest thing to do here is to wrap it in a "ThreadPanic", as even if the exit is
+            // somewhat graceful, an error has forced the transcriber to stop early.
+            .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e)));
 
         mic.pause();
-
         // Send the device back to be closed
         // Since SDL AudioDevices can only be dropped on the main thread, this needs to be sent
         // back to be dropped.
         //
         // Until a different/better backend solution is written, this will have to do.
+        // NOTE: THE COMPILER MAY FIND THIS TO BE A USE-AFTER-MOVE
+        // It shouldn't be -> the early return only happens if there is an error.
         audio_backend.close_capture(mic);
+
+        // Unwrap the result -after- closing the microphone capture.
+        let result = result??;
 
         self.finalize_transcription(result);
 
@@ -377,18 +401,22 @@ impl TranscriberEngineState {
             id_return_sender: id_sender,
         };
 
-        if self
-            .progress_message_sender
-            .send(setup_progress_message)
-            .is_err()
-        {
-            todo!("LOGGING");
+        if let Err(e) = self.progress_message_sender.send(setup_progress_message) {
+            log::warn!(
+                "Progress engine closed, cannot send offline setup job.\n\
+            Error source: {}",
+                e.source()
+            );
         }
 
         let setup_id = match id_receiver.recv() {
             Ok(id) => Some(id),
-            Err(_) => {
-                todo!("LOGGING");
+            Err(e) => {
+                log::warn!(
+                    "Progress engine did not complete setup rendezvous.\n\
+                Error source: {}",
+                    e.source()
+                );
                 None
             }
         };
@@ -423,18 +451,25 @@ impl TranscriberEngineState {
             id_return_sender: id_sender,
         };
 
-        if self
+        if let Err(e) = self
             .progress_message_sender
             .send(load_audio_progress_message)
-            .is_err()
         {
-            todo!("LOGGING");
+            log::warn!(
+                "Progress engine closed, cannot send offline load audio job.\n
+                Error source: {}",
+                e.source()
+            );
         }
 
         let load_audio_id = match id_receiver.recv() {
             Ok(id) => Some(id),
-            Err(_) => {
-                todo!("LOGGING");
+            Err(e) => {
+                log::warn!(
+                    "Progress engine did not complete load audio rendezvous.\n
+                    Error source: {}",
+                    e.source()
+                );
                 None
             }
         };
@@ -503,18 +538,25 @@ impl TranscriberEngineState {
                 id_return_sender: id_sender,
             };
 
-            if self
+            if let Err(e) = self
                 .progress_message_sender
                 .send(transcription_progress_message)
-                .is_err()
             {
-                todo!("LOGGING");
+                log::warn!(
+                    "Progress engine closed, cannot send transcription progress job.\n
+                    Error source: {}",
+                    e.source()
+                );
             }
 
             let transcription_id = match id_receiver.recv() {
                 Ok(id) => Some(id),
-                Err(_) => {
-                    todo!("LOGGING");
+                Err(e) => {
+                    log::warn!(
+                        "Progress engine did not complete transcription rendezvous.\n
+                        Error source: {}",
+                        e.source()
+                    );
                     None
                 }
             };
@@ -530,8 +572,10 @@ impl TranscriberEngineState {
                         delta: percent as u64,
                     };
 
-                    if progress_sender.send(progress_message).is_err() {
-                        // TODO: LOGGING.
+                    if let Err(e) = progress_sender.try_send(progress_message) {
+                        log::warn!("Failed to send progress updates, channel is either closed or too small.\n\
+                        Error: {}\n\
+                        Error source: {}", &e, e.source());
                     }
                 }
             };
@@ -542,6 +586,8 @@ impl TranscriberEngineState {
             let segment_closure = move |snapshot| {
                 // Take the snapshot into an Arc (for swapping in the print loop).
                 let a_snap = Arc::new(snapshot);
+                // TODO: determine whether or not this should actually log.
+                //
                 // Send it off to the print loop -> This shouldn't likely ever have an issue with
                 // a full queue--whisper dwarfs the callback, giving the print loop time to receive.
                 // If it fails due to a dropped receiver, this sender should -also- be gone.
@@ -586,9 +632,6 @@ impl TranscriberEngineState {
                 new_segment: segment_callback,
             };
 
-            // TODO: restructure this such that all setup happens before the scope block.
-            // Build the transcriber -in- the transcription thread itself and match
-
             let transcription_thread = s.spawn(move |_| {
                 let res = offline_transcriber
                     .process_with_callbacks(run_transcription, whisper_callbacks);
@@ -596,7 +639,7 @@ impl TranscriberEngineState {
                 res
             });
 
-            // It's easier to just duplicate the code, rather than try to factor this into a
+            // NOTE: It's easier to just duplicate the code, rather than try to factor this into a
             // method.
             // Lifetime issues are a major pain point and I just don't want to have to deal with
             // them.
@@ -632,14 +675,19 @@ impl TranscriberEngineState {
                 })
                 .map_err(|e| {
                     if matches!(e, RibbleWhisperError::Unknown(_)) {
-                        RibbleError::ThreadPanic(e.to_string())
+                        // Remove the prefix from the "Unknown" error to replace it with a
+                        // ThreadPanic.
+                        RibbleError::ThreadPanic(e.to_string().replace("Unknown Error ", ""))
                     } else {
                         e.into()
                     }
                 });
             res
         })
-        .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e)))??;
+            // NOTE: the type of this is opaque due to the scope return.
+            // It is most likely to be a ThreadPanic (ThreadPanic), due to locally scoped threads.
+            // If this is particularly obtrusive, look at trying to deduplicate.
+            .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e)))??;
 
         self.finalize_transcription(result);
 
@@ -661,7 +709,6 @@ impl TranscriberEngineState {
     fn clear_transcription(&self) {
         self.current_snapshot
             .store(Arc::new(TranscriptionSnapshot::default()));
-        // TODO: implement default in whisper_rs -> needs an IDLE.
         self.current_control_phrase
             .store(Arc::new(WhisperControlPhrase::default()))
     }
@@ -714,7 +761,6 @@ impl TranscriberEngine {
         }
     }
 
-    // TODO: remove if unused.
     pub(super) fn transcriber_running(&self) -> bool {
         self.realtime_running() || self.offline_running()
     }
@@ -782,8 +828,6 @@ impl TranscriberEngine {
         self.inner.current_audio_file_path.load_full()
     }
 
-    // TODO: It mightn't be possible to meet the static lifetime requirements here.
-    // If that's the case, look into cloning the backend.
     pub(super) fn start_realtime_transcription<M, A>(
         &self,
         audio_backend: Arc<A>,
@@ -800,8 +844,10 @@ impl TranscriberEngine {
         });
 
         let work_request = WorkRequest::Long(worker);
-        if self.work_request_sender.send(work_request).is_err() {
-            todo!("LOGGING");
+        if let Err(e) = self.work_request_sender.try_send(work_request) {
+            log::warn!("Cannot send real-time transcription request, channel is too small or closed.\n\
+            Error: {}\n\
+                Error source: {}", &e, e.source());
         }
     }
 
@@ -821,8 +867,10 @@ impl TranscriberEngine {
 
         // Send off the request
         let work_request = WorkRequest::Long(worker);
-        if self.work_request_sender.send(work_request).is_err() {
-            todo!("LOGGING");
+        if let Err(e) = self.work_request_sender.try_send(work_request) {
+            log::warn!("Cannot send offline transcription request, channel is too small or closed.\n\
+            Error: {}\n\
+                Error source: {}", &e, e.source());
         }
     }
 
@@ -831,8 +879,10 @@ impl TranscriberEngine {
         let worker = std::thread::spawn(move || thread_inner.save_transcription(out_path));
 
         let work_request = WorkRequest::Short(worker);
-        if self.work_request_sender.send(work_request).is_err() {
-            todo!("LOGGING");
+        if let Err(e) = self.work_request_sender.try_send(work_request) {
+            log::warn!("Cannot send save request, channel is too small or closed.\n\
+            Error: {}\n\
+                Error source: {}", &e, e.source());
         }
     }
 }

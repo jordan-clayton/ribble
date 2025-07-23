@@ -199,8 +199,30 @@ impl RibbleTree {
             }
         }
     }
+
+    // Vertical (root) (OR) Tabs **(better idea):
+    //  // Horizontal:
+    //      // Vertical:
+    //          // Transcription
+    //          // Visualizer
+    //      // Transcriber
+
+    // Perhaps leave progress/downloads/console as "extra goodies" people can open if they want.
+    // TODO: test -> I'm not sure if leaf-order is right to left, or left to right.
     fn default_tree() -> egui_tiles::Tree<RibblePane> {
-        todo!("BUILD THE DEFAULT TREE")
+        let mut tiles = egui_tiles::Tiles::default();
+        let transcriber_layout = {
+            let children = vec![tiles.insert_pane(RibblePaneId::Transcription.into()), tiles.insert_pane(RibblePaneId::Visualizer.into())];
+            tiles.insert_vertical_tile(children)
+        };
+
+        let main_layout = {
+            let children = vec![transcriber_layout, tiles.insert_pane(RibblePaneId::Transcriber.into())];
+            tiles.insert_horizontal_tile(children)
+        };
+
+        let root = tiles.insert_tab_tile(vec![main_layout]);
+        egui_tiles::Tree::new("ribble_tree", root, tiles)
     }
 }
 

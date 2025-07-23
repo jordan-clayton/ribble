@@ -3,8 +3,8 @@ use atomic_enum::atomic_enum;
 use egui::{RichText, Visuals};
 use ribble_whisper::utils::Sender;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
@@ -21,6 +21,11 @@ mod transcriber;
 mod visualizer;
 mod worker;
 mod writer;
+
+// TODO: perhaps make this a "resolution" parameter.
+// It's also more than likely fine to double this, if not quadruple.
+// TODO: test performance with higher resolutions.
+pub(crate) const NUM_VISUALIZER_BUCKETS: usize = 32;
 
 pub const UTILITY_QUEUE_SIZE: usize = 32;
 
@@ -496,7 +501,6 @@ impl CompletedRecordingJobs {
     }
 }
 
-pub(crate) const NUM_VISUALIZER_BUCKETS: usize = 32;
 
 pub(crate) enum RotationDirection {
     Clockwise,

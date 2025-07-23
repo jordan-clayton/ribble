@@ -1,4 +1,4 @@
-use crate::controller::DEFAULT_NUM_CONSOLE_MESSAGES;
+use crate::controller::{DEFAULT_NUM_CONSOLE_MESSAGES, MIN_NUM_CONSOLE_MESSAGES};
 use egui_colorgradient::{ColorInterpolator, Gradient};
 use strum::{AsRefStr, Display, EnumIter, EnumString};
 
@@ -128,9 +128,7 @@ impl UserPreferences {
     }
 
     pub(crate) fn with_console_message_size(mut self, new_size: usize) -> Self {
-        // TODO: if going to limit the console messages to a predefined minimum,
-        // The constants should go somewhere else
-        self.console_message_size = new_size.max(1);
+        self.console_message_size = new_size.max(MIN_NUM_CONSOLE_MESSAGES);
         self
     }
     pub(crate) fn with_system_theme(mut self, new_theme: RibbleAppTheme) -> Self {

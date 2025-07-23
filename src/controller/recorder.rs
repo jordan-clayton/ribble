@@ -1,10 +1,8 @@
-use crate::controller::Progress;
-use crate::controller::RibbleMessage;
-use crate::controller::WorkRequest;
 use crate::controller::visualizer::VisualizerSample;
 use crate::controller::writer::WriteRequest;
-use crate::controller::{Bus, UTILITY_QUEUE_SIZE};
-use crate::controller::{ConsoleMessage, ProgressMessage};
+use crate::controller::{
+    Bus, ConsoleMessage, Progress, ProgressMessage, RibbleMessage, WorkRequest, UTILITY_QUEUE_SIZE,
+};
 use crate::utils::errors::RibbleError;
 use crate::utils::recorder_configs::RibbleRecordingConfigs;
 use arc_swap::ArcSwap;
@@ -12,9 +10,10 @@ use crossbeam::channel::TrySendError;
 use ribble_whisper::audio::audio_backend::AudioBackend;
 use ribble_whisper::audio::microphone::MicCapture;
 use ribble_whisper::audio::recorder::ArcChannelSink;
-use ribble_whisper::utils::{Sender, get_channel};
-use std::sync::Arc;
+use ribble_whisper::utils::{get_channel, Sender};
+use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 struct RecorderEngineState {
     recorder_running: Arc<AtomicBool>,
@@ -38,8 +37,11 @@ impl RecorderEngineState {
     fn cleanup_remove_progress_job(&self, maybe_id: Option<usize>) {
         if let Some(id) = maybe_id {
             let remove_setup = ProgressMessage::Remove { job_id: id };
-            if self.progress_message_sender.send(remove_setup).is_err() {
-                todo!("LOGGING");
+            if let Err(e) = self.progress_message_sender.send(remove_setup) {
+                log::warn!(
+                    "Progress engine closed. Cannot send recorder remove setup message.\nError source: {}",
+                    e.source()
+                );
             }
         }
     }
@@ -48,7 +50,6 @@ impl RecorderEngineState {
     where
         A: AudioBackend<ArcChannelSink<f32>> + Send + Sync,
     {
-        // TODO: set up the progress engine message queue
         let setup_progress = Progress::new_indeterminate("Setting up recording.");
         let (id_sender, id_receiver) = get_channel(1);
 
@@ -57,18 +58,20 @@ impl RecorderEngineState {
             id_return_sender: id_sender,
         };
 
-        if self
-            .progress_message_sender
-            .send(progress_setup_message)
-            .is_err()
-        {
-            // TODO: logging
+        if let Err(e) = self.progress_message_sender.send(progress_setup_message) {
+            log::warn!(
+                "Progress engine closed. Cannot send recorder start setup message.\nError source: {}",
+                e.source()
+            );
         }
 
         let setup_id = match id_receiver.recv() {
             Ok(id) => Some(id),
-            Err(_) => {
-                todo!("LOGGING");
+            Err(e) => {
+                log::warn!(
+                    "Progress engine did not complete rendezvous, cannot get job id.\nError source: {}",
+                    e.source()
+                );
                 None
             }
         };
@@ -80,7 +83,6 @@ impl RecorderEngineState {
             self.cleanup_remove_progress_job(setup_id);
             Err(e)
         })?;
-        // TODO: send a write job through a channel -> Send the receiver.
         let (write_sender, write_receiver) = get_channel::<Arc<[f32]>>(UTILITY_QUEUE_SIZE);
         let confirmed_specs = RibbleRecordingConfigs::from_mic_capture(&mic);
 
@@ -98,8 +100,11 @@ impl RecorderEngineState {
 
         if let Some(id) = setup_id {
             let remove_message = ProgressMessage::Remove { job_id: id };
-            if self.progress_message_sender.send(remove_message).is_err() {
-                todo!("LOGGING")
+            if let Err(e) = self.progress_message_sender.send(remove_message) {
+                log::warn!(
+                    "Progress engine closed, cannot send recorder remove message.\nError source: {}",
+                    e.source()
+                );
             }
         }
 
@@ -115,18 +120,28 @@ impl RecorderEngineState {
 
                     let next_visualizer_sample =
                         VisualizerSample::new(Arc::clone(&audio), sample_rate as f64);
-                    if self
-                        .visualizer_sample_sender
-                        .send(next_visualizer_sample)
-                        .is_err()
-                    {
-                        todo!("LOGGING")
+                    if let Err(e) = self.visualizer_sample_sender.try_send(next_visualizer_sample) {
+                        log::warn!(
+                            "Cannot send new visualizer samples, channel closed or too small.\n\
+                            Error: {}\n\
+                            Error source: {}",
+                            &e,
+                            e.source()
+                        );
                     }
                 }
-                Err(_) => self.recorder_running.store(false, Ordering::Release),
+                // This only happens if the audio callback has been dropped and there's no more
+                // audio to process.
+                Err(_) => {
+                    log::info!(
+                        "Audio callback closed, causing sending channel drop. Recording should be complete."
+                    );
+                    self.recorder_running.store(false, Ordering::Release);
+                }
             }
         }
         mic.pause();
+        audio_backend.close_capture(mic);
 
         Ok(())
     }
@@ -145,8 +160,6 @@ impl RecorderEngine {
         }
     }
 
-    // TODO: figure out the cheapest way to solve this issue;
-    // Either by taking an Arc<A>, or by consuming A (and imposing Clone restrictions)
     pub(super) fn start_recording<A>(&self, audio_backend: Arc<A>)
     where
         A: AudioBackend<ArcChannelSink<f32>> + Send + Sync + 'static,
@@ -157,15 +170,20 @@ impl RecorderEngine {
         let thread_inner = Arc::clone(&self.inner);
         // Spawn a (long job) thread and send it off to the worker to join it.
         let worker = std::thread::spawn(move || {
-            thread_inner.run_recorder_loop(audio_backend.as_ref());
+            thread_inner.run_recorder_loop(audio_backend.as_ref())?;
             let message = String::from("Finished recording!");
             let console_message = ConsoleMessage::Status(message);
             Ok(RibbleMessage::Console(console_message))
         });
 
         let request = WorkRequest::Long(worker);
-        if self.work_request_sender.send(request).is_err() {
-            todo!("LOGGING!");
+        if let Err(e) = self.work_request_sender.try_send(request) {
+            log::warn!(
+                "Error sending recording work request. Channel may be too small, or worker engine missing.\n\
+                Error: {e}\n\
+                Error source: {}",
+                e.source()
+            );
         }
     }
 

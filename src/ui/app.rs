@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::path::Path;
 use std::thread::JoinHandle;
 
@@ -59,8 +60,8 @@ pub struct Ribble {
 
     theme_animator: ThemeAnimator,
 
-    // TODO: if only logging, remove the result.
-    periodic_serialize: Option<JoinHandle<Result<(), RibbleError>>>,
+    // NOTE: this logs internally on failure to serialize.
+    periodic_serialize: Option<JoinHandle<()>>,
 
     cached_downloads_progress: AmortizedDownloadProgress,
     cached_progress: AmortizedProgress,
@@ -182,12 +183,11 @@ impl Ribble {
         let controller = self.controller.clone();
         // NOTE: this is a proxy object that avoids cloning the entire tree/behavior.
         // It's not as cheap as cloning the controller and uses CoW.
-        let tree_serializer = self.tree_serializer();
+        let tree_serializer = self.tree.tree_serializer();
 
         let worker = std::thread::spawn(move || {
             controller.serialize_user_data();
             tree_serializer.serialize();
-            Ok(())
         });
 
         self.periodic_serialize = Some(worker)
@@ -209,8 +209,12 @@ impl eframe::App for Ribble {
             match request {
                 AudioCaptureRequest::Open(spec, sink, sender) => {
                     let shared_capture = self.open_audio_device(spec, sink);
-                    if sender.send(shared_capture).is_err() {
-                        // TODO: logging
+
+                    // If there's a problem with communicating to send a handle to the requesting thread,
+                    // treat this as an error and close the app after logging.
+                    if let Err(e) = sender.try_send(shared_capture) {
+                        log::error!("Cannot return audio device to requesting thread: {}", e.source());
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 }
                 AudioCaptureRequest::Close(device_id) => {

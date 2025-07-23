@@ -770,10 +770,9 @@ impl PaneView for TranscriberPane {
                                 } else {
                                     // The writer engine will prune out its nonexistent file-paths,
                                     // so perhaps maybe a "toast" is sufficient here to say "sorry
-                                    // cannot find recording" -> there's an egui-notify (thread
-                                    // safe) toasts library that might be a good idea.
+                                    // cannot find recording".
                                     //
-                                    // Otherwise a debouncer will be necessary to maintain the state
+                                    // Otherwise, a debouncer will be necessary to maintain the state
                                     // of the directory.
 
                                     log::warn!("Temporary recording file missing: {file_name}");

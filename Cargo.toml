@@ -21,14 +21,9 @@ serde = { version = "1.0.204", features = ["derive"] }
 strum = "0.27.1"
 # TODO: determine whether or not to include integrity checking utilities; might be out of scope
 ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.1.2", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler", "sdl2-static", "ribble-logging"] }
-# TODO: Implement genuine logging once the app has been rewritten.
 # TODO: bring in a logging impl crate once the app has been rewritten.
-# TODO: ADD LOGGING TO RIBBLE_WHISPER
 log = "0.4.22"
 ron = "0.10.1"
-# TODO: This is for image/svg loading but might be deprecated; check for alternatives
-# TODO TWICE: actually, just remove this and use the egui emoji font.
-image = "0.25.2"
 irox-egui-extras = "0.7.0"
 slab = "0.4.9"
 parking_lot = { version = "0.12.4", features = ["deadlock_detection"] }
@@ -42,19 +37,15 @@ ort-sys = "=2.0.0-rc.9"
 ort = { version = "=2.0.0-rc.9", features = ["ndarray"] }
 thiserror = "2.0.12"
 indexmap = { version = "2.10.0", features = ["serde", "rayon"] }
-# TODO: I believe this is going unused -> remove it if so.
-case_style = "0.2.1"
 twox-hash = { version = "2.1.1", features = ["xxhash3_64"] }
 enum_dispatch = "0.3.13"
 mimalloc = "0.1.47"
-# TODO: I believe this is going unused -> remove it if so.
-url = "2.5.4"
 egui_tiles = { version = "0.13.0", features = ["serde"] }
 opener = { version = "0.8.2", features = ["reveal"] }
 egui-theme-lerp = "0.3.0"
 notify-debouncer-full = { version = "0.5.0", features = ["crossbeam-channel"] }
 unit-prefix = "0.5.1"
-egui-colorgradient = "0.2.2"
+egui-colorgradient = "0.2.0"
 egui-notify = "0.20.0"
 
 # TODO: benches to resolve performance questions re: visualizer

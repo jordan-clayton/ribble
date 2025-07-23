@@ -4,14 +4,15 @@ use crate::controller::{
 };
 use crate::utils::errors::RibbleError;
 use parking_lot::RwLock;
-use ribble_whisper::downloader::SyncDownload;
 use ribble_whisper::downloader::downloaders::sync_download_request;
+use ribble_whisper::downloader::SyncDownload;
 use ribble_whisper::utils::callback::{RibbleAbortCallback, RibbleWhisperCallback};
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{Receiver, Sender, get_channel};
+use ribble_whisper::utils::{get_channel, Receiver, Sender};
 use slab::Slab;
-use std::sync::Arc;
+use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 
 const FALLBACK_NAME: &'static str = "invalid_download";
@@ -46,7 +47,7 @@ impl DownloadEngineState {
             return Err(RibbleWhisperError::ParameterError(format!(
                 "File not found, likely invalid url.\nURL:{url}"
             ))
-            .into());
+                .into());
         }
 
         let progress_job =
@@ -62,7 +63,7 @@ impl DownloadEngineState {
             FileDownload::new(content_name, progress_view, Arc::clone(&abort_download));
 
         // Place it in the bank of downloads -> the progress updated by the progress_callback is
-        // shared, so the state will be accessible from the UI (outside of progress-bars).
+        // shared, so the state will be accessible from the UI (outside progress-bars, that is).
         let download_id = self.file_downloads.write().insert(file_download);
 
         let (id_sender, id_receiver) = get_channel(1);
@@ -71,14 +72,20 @@ impl DownloadEngineState {
             id_return_sender: id_sender,
         };
 
-        if self.progress_sender.send(progress_message).is_err() {
-            todo!("LOGGING");
+        if let Err(e) = self.progress_sender.send(progress_message) {
+            log::warn!(
+                "Progress engine closed, cannot send initial download progress request.\nError source: {}",
+                e.source()
+            );
         }
 
         let progress_id = match id_receiver.recv() {
             Ok(id) => Some(id),
-            Err(_) => {
-                todo!("LOGGING");
+            Err(e) => {
+                log::warn!(
+                    "Progress engine did not return an ID due to rendezvous fail.\nError source: {}",
+                    e.source()
+                );
                 None
             }
         };
@@ -93,8 +100,13 @@ impl DownloadEngineState {
                 job_id: progress_id.unwrap(),
                 delta: n as u64,
             };
-            if callback_progress_sender.send(update).is_err() {
-                todo!("LOGGING");
+
+            if let Err(e) = callback_progress_sender.try_send(update) {
+                log::warn!(
+                    "Cannot send update request, channel either closed or too small.\nError: {}\nError source: {}",
+                    &e,
+                    e.source()
+                );
             }
         };
 
@@ -108,7 +120,7 @@ impl DownloadEngineState {
 
         // NOTE: This is a blocking call; download the file.
         let download_path = sync_downloader.download(dest_dir.as_path());
-        // Regardless of whether or not it ends because of an error, the download needs to get
+        // Regardless of whether  it ends because of an error, the download needs to get
         // removed--there's no "resume"/"pause" because it's a blocking download, so there's no way
         // to expose that feature right now.
         // This may change at a later date, but for now it's good enough.
@@ -123,7 +135,7 @@ impl DownloadEngineState {
             .try_remove(download_id)
             .is_none()
         {
-            todo!("LOGGING");
+            log::warn!("File download metadata missing after download.");
         };
 
         let download_path = download_path?;
@@ -134,8 +146,11 @@ impl DownloadEngineState {
         // Remove the progress job now that the file's downloaded.
         if let Some(id) = progress_id {
             let finished = ProgressMessage::Remove { job_id: id };
-            if self.progress_sender.send(finished).is_err() {
-                todo!("LOGGING");
+            if let Err(e) = self.progress_sender.send(finished) {
+                log::warn!(
+                    "Progress engine closed, cannot send removal request.\nError source: {}",
+                    e.source()
+                );
             }
         }
 
@@ -144,35 +159,37 @@ impl DownloadEngineState {
             "Successfully downloaded {content_name} to {}",
             download_path.display()
         ));
+
         let ribble_message = RibbleMessage::Console(console_message);
 
         Ok(ribble_message)
     }
 
-    // NOTE: THIS WILL BLOCK -> it may need to be called on a background thread.
+    // Since the download is already happening on a thread, only the abort flag needs to be set;
+    // The metadata will be removed automatically and does not need to be manually removed.
+    // NOTE: this will still block at the moment -> it's tricky to coordinate another thread with
+    // the download thread in place; if this becomes an issue, then look at spawning another
+    // thread.
     fn abort_download(&self, download_id: usize) {
-        let mut write_guard = self.file_downloads.write();
-        if let Some(download) = write_guard.try_remove(download_id) {
+        let read_guard = self.file_downloads.read();
+        if let Some(download) = read_guard.get(download_id) {
             download.abort_download();
         } else {
-            todo!("LOGGING: key is missing.");
+            log::warn!("Download metadata missing for id: {download_id}");
         }
     }
 }
 
 pub(super) struct DownloadEngine {
     inner: Arc<DownloadEngineState>,
-    work_thread: Option<JoinHandle<Result<(), RibbleError>>>,
+    work_thread: Option<JoinHandle<()>>,
 }
 
 impl DownloadEngine {
-    // TODO: refactor this to take in a bus once the bus impl is done.
     pub(super) fn new(incoming_jobs: Receiver<DownloadRequest>, bus: &Bus) -> Self {
         let inner = Arc::new(DownloadEngineState::new(incoming_jobs, bus));
         let thread_inner = Arc::clone(&inner);
 
-        // TODO: Either split this, or refactor the abort method to spawn a thread to grab the
-        // write lock.
         let worker = std::thread::spawn(move || {
             while let Ok(download_job) = thread_inner.incoming_jobs.recv() {
                 let download_inner = Arc::clone(&thread_inner);
@@ -180,13 +197,14 @@ impl DownloadEngine {
                     std::thread::spawn(move || download_inner.run_download(download_job));
 
                 let work_request = WorkRequest::Short(start_download);
-                if thread_inner.worker_sender.send(work_request).is_err() {
-                    // TODO: do some sort of logging -> worker engine is deallocated and this should
-                    // only be the case when the app is closing.
+                if let Err(e) = thread_inner.worker_sender.send(work_request) {
+                    log::warn!(
+                        "Worker Engine closed. Can no longer send requests.\nError source: {}",
+                        e.source()
+                    );
                     break;
                 }
             }
-            Ok(())
         });
 
         let work_thread = Some(worker);
@@ -197,7 +215,13 @@ impl DownloadEngine {
     pub(super) fn try_get_current_downloads(&self, copy_buffer: &mut Vec<(usize, FileDownload)>) {
         if let Some(guard) = self.inner.file_downloads.try_read() {
             copy_buffer.clear();
-            copy_buffer.extend(guard.iter().map(|(key, val)| (key, val.clone())));
+            // Filter out aborted downloads and return a cloned list.
+            copy_buffer.extend(
+                guard
+                    .iter()
+                    .filter(|(_, download)| !download.should_abort.load(Ordering::Acquire))
+                    .map(|(key, val)| (key, val.clone())),
+            );
         }
     }
 
@@ -207,11 +231,16 @@ impl DownloadEngine {
             let download_progress: AmortizedDownloadProgress = jobs
                 .iter()
                 .fold((0usize, 0usize), |(current, total), (_, file_download)| {
-                    let progress = file_download.progress();
-                    (
-                        current + progress.current_position() as usize,
-                        total + progress.total_size() as usize,
-                    )
+                    // If the download is aborted, don't accumulated it.
+                    if file_download.should_abort.load(Ordering::Acquire) {
+                        (current, total)
+                    } else {
+                        let progress = file_download.progress();
+                        (
+                            current + progress.current_position() as usize,
+                            total + progress.total_size() as usize,
+                        )
+                    }
                 })
                 .into();
             Some(download_progress)
@@ -220,8 +249,7 @@ impl DownloadEngine {
         }
     }
 
-    // TODO: this needs to either happen on a thread, or there needs to be a gc epoch to remove
-    // expired downloads.
+    // NOTE: Metadata removal is handled internally; this only sets the flag to stop the download.
     pub(super) fn abort_download(&self, download_id: usize) {
         self.inner.abort_download(download_id);
     }
@@ -230,9 +258,9 @@ impl DownloadEngine {
 impl Drop for DownloadEngine {
     fn drop(&mut self) {
         if let Some(handle) = self.work_thread.take() {
-            handle.join()
-                .expect("The DownloadEngine worker thread is not expected to ever panic.")
-                .expect("I genuinely don't know what sort of error condition might cause things to fail.")
+            handle
+                .join()
+                .expect("The DownloadEngine worker thread is not expected to ever panic.");
         }
     }
 }

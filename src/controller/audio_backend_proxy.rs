@@ -1,3 +1,4 @@
+use std::error::Error;
 use ribble_whisper::audio::audio_backend::AudioBackend;
 use ribble_whisper::audio::audio_backend::CaptureSpec;
 use ribble_whisper::audio::microphone::{MicCapture, Sdl2Capture};
@@ -39,9 +40,12 @@ impl AudioBackend<ArcChannelSink<f32>> for AudioBackendProxy {
 
         let request = AudioCaptureRequest::Open(spec, sink, capture_sender);
 
-        if self.request_sender.send(request).is_err() {
-            // TODO: LOGGING
+        if let Err(e) = self.request_sender.send(request) {
+            log::error!("Cannot send audio capture request to main thread. Error: {}", e.source());
+            let err = RibbleWhisperError::DeviceError("Cannot obtain audio device.".to_string());
+            return Err(err);
         }
+
 
         capture_receiver.recv().map_err(|_e| {
             RibbleWhisperError::DeviceError(
@@ -54,8 +58,10 @@ impl AudioBackend<ArcChannelSink<f32>> for AudioBackendProxy {
         let id = capture.device_id;
         let request = AudioCaptureRequest::Close(id);
 
-        if self.request_sender.send(request).is_err() {
-            // TODO: LOGGING
+        // The only case where this should ever error out is if the main thread
+        // has either panicked or has closed.
+        if let Err(e) = self.request_sender.send(request) {
+            log::error!("Cannot send audio close request to main thread. Error: {}", e.source());
         }
     }
 }

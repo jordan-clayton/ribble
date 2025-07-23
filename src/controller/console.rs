@@ -1,12 +1,12 @@
 use crate::controller::{Bus, ConsoleMessage};
-use crate::controller::{MAX_NUM_CONSOLE_MESSAGES, WorkRequest};
-use crate::controller::{MIN_NUM_CONSOLE_MESSAGES, RibbleMessage};
+use crate::controller::{RibbleMessage, WorkRequest, MAX_NUM_CONSOLE_MESSAGES, MIN_NUM_CONSOLE_MESSAGES};
 use crate::utils::errors::RibbleError;
 use parking_lot::RwLock;
 use ribble_whisper::utils::{Receiver, Sender};
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::error::Error;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 
 struct ConsoleEngineState {
@@ -96,7 +96,7 @@ impl ConsoleEngineState {
 pub(super) struct ConsoleEngine {
     inner: Arc<ConsoleEngineState>,
     work_request_sender: Sender<WorkRequest>,
-    work_thread: Option<JoinHandle<Result<(), RibbleError>>>,
+    work_thread: Option<JoinHandle<()>>,
 }
 
 // Provide access to inner
@@ -113,7 +113,6 @@ impl ConsoleEngine {
             while let Ok(console_message) = thread_inner.incoming_messages.recv() {
                 thread_inner.add_console_message(console_message);
             }
-            Ok(())
         });
 
         let work_thread = Some(worker);
@@ -144,8 +143,10 @@ impl ConsoleEngine {
         });
 
         let work_request = WorkRequest::Short(work);
-        if self.work_request_sender.send(work_request).is_err() {
-            todo!("LOGGING");
+        if let Err(e) = self.work_request_sender.try_send(work_request) {
+            log::error!("Cannot send resize request, channel closed or too small.\n\
+            Error: {}\n\
+            Error source: {}", &e, e.source());
         }
     }
 }
@@ -155,8 +156,7 @@ impl Drop for ConsoleEngine {
         if let Some(handle) = self.work_thread.take() {
             handle
                 .join()
-                .expect("The Console thread should never panic.")
-                .expect("I do not know what sort of error conditions would be relevant here")
+                .expect("The Console thread should never panic.");
         }
     }
 }

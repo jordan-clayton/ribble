@@ -238,7 +238,7 @@ pub(crate) fn migrate_model_filenames(model_directory: &Path) -> Result<(), std:
 
 const OLD_STATE_FILE_NAME: &'static str = "data.ron";
 
-// If it becomes important to know whether or not this actually removed the file, change the
+// If it becomes important to know whether this actually removed the file, change the
 // return type to something that can communicate that.
 pub(crate) fn clear_old_ribble_state(data_directory: &Path) -> Result<(), std::io::Error> {
     match std::fs::remove_file(data_directory.join(OLD_STATE_FILE_NAME)) {
