@@ -20,6 +20,12 @@ pub(crate) enum RibbleError {
     WavError(#[from] hound::Error),
     #[error("DirectoryWatcher: {0}")]
     DirectoryWatcher(#[from] notify_debouncer_full::notify::Error),
+    #[error("Egui: {0}")]
+    Egui(#[from] egui::load::LoadError),
+    #[error("Eframe: {0}")]
+    Eframe(#[from] eframe::Error),
+    #[error("Logger: {0}")]
+    Logger(#[from] flexi_logger::FlexiLoggerError),
 }
 
 impl Error for RibbleError {}

@@ -10,8 +10,6 @@ crossbeam = "0.8.4"
 directories = "6.0.0"
 eframe = { version = "0.32.0", features = ["persistence", "wgpu", "x11", "wayland", "default_fonts"] }
 egui = { version = "0.32.0", features = ["persistence", "serde"] }
-# If no longer needing SVG icons, just remove this.
-egui_extras = { version = "0.32.0", features = ["svg"] }
 # This needs to be added to gain access to the default Vulkan/Gles backends in egui.
 wgpu = "26.0.1"
 hound = "3.5.1"
@@ -21,7 +19,6 @@ serde = { version = "1.0.204", features = ["derive"] }
 strum = "0.27.1"
 # TODO: determine whether or not to include integrity checking utilities; might be out of scope
 ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.1.2", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler", "sdl2-static", "ribble-logging"] }
-# TODO: bring in a logging impl crate once the app has been rewritten.
 log = "0.4.22"
 ron = "0.10.1"
 irox-egui-extras = "0.7.0"
@@ -33,6 +30,7 @@ arc-swap = "1.7.1"
 # ort crate, these two crates need to be pinned to the following versions.
 # In-case the pinning in ribble_whisper isn't respected, or I somehow make a goof-up, 
 # These will remain here until they can confidently be removed.
+# (Or, if/when Ribble-Whisper compiles and dynamically loads the runtime)
 ort-sys = "=2.0.0-rc.9"
 ort = { version = "=2.0.0-rc.9", features = ["ndarray"] }
 thiserror = "2.0.12"
@@ -47,6 +45,8 @@ notify-debouncer-full = { version = "0.5.0", features = ["crossbeam-channel"] }
 unit-prefix = "0.5.1"
 egui-colorgradient = "0.2.0"
 egui-notify = "0.20.0"
+flexi_logger = "0.31.2"
+image = "0.25.6"
 
 # TODO: benches to resolve performance questions re: visualizer
 [dev-dependencies]
