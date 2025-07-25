@@ -1,6 +1,8 @@
 use crate::ui::app::Ribble;
+use crate::utils::crash_handler::set_up_desktop_crash_handler;
 use crate::utils::errors::RibbleError;
 use crate::utils::migration::RibbleVersion;
+use crash_handler::CrashHandler;
 use directories::ProjectDirs;
 use eframe::{run_native, AppCreator, NativeOptions};
 use egui::{IconData, ViewportBuilder};
@@ -28,18 +30,18 @@ pub(crate) struct RibbleRunner {
     app: AppCreator<'_>,
     window_options: NativeOptions,
     logger: Option<LoggerHandle>,
+    // TODO: possibly make this an option?
+    // Not quite sure; it's most likely a good idea to have one though in case Whisper.cpp segfaults.
+    crash_handler: CrashHandler,
 }
 
-// TODO: version filename
-// Path should be .../data_directory/version.ron or similar
 impl RibbleRunner {
     const VERSION_FILE_NAME: &'static str = "version.ron";
-    // TODO: if this needs to change, change it
+    // TODO: if this constant needs to change, change it
     // Right now it's good for a "week's worth".
     const MAX_LOG_FILES: usize = 7;
     const LOG_FILE_NAME: &'static str = "ribble_log";
 
-    // TODO: add crash handler setup and implementation, call the functions here once written.
     pub(crate) fn new() -> Result<Self, RibbleError> {
         // Set up the project directory
         let proj_dirs = ProjectDirs::from(
@@ -77,12 +79,14 @@ impl RibbleRunner {
         // This needs to be kept alive until the app goes out of scope (consume on run).
         let logger_handle = logger.start()?;
 
+        // Set up the crash handler
+        let crash_handler = set_up_desktop_crash_handler()?;
+
         // Load the version & handle updates
         // The path gets canonicalized (and allocated) in the method, so only send the data directory here.
         let version = Self::deserialize_version(data_directory.as_path());
         // TODO: check for "needs update" or similar and do something about it.
         // Perhaps just open a link to the new releases page.
-
         // Handle migration if not already done -> this needs some tlc,
         // especially with the model bank.
 
@@ -106,6 +110,7 @@ impl RibbleRunner {
             app,
             window_options,
             logger: Some(logger_handle),
+            crash_handler,
         })
     }
 

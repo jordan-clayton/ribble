@@ -1,6 +1,8 @@
 use crate::utils::errors::RibbleError;
 use crash_handler::{make_crash_event, CrashContext, CrashEventResult, CrashHandler};
 
+// NOTE: this could be a completely generic function -> if that's required, return a Result<CrashHandler> instead
+// and coerce it at the call site.
 pub(crate) fn set_up_desktop_crash_handler() -> Result<CrashHandler, RibbleError> {
     let handler = unsafe {
         CrashHandler::attach(make_crash_event(crash_popup))?
@@ -8,6 +10,8 @@ pub(crate) fn set_up_desktop_crash_handler() -> Result<CrashHandler, RibbleError
     Ok(handler)
 }
 
+
+// TODO: consider lower-case hexadecimal for all, or treat the pointers as usize and Uppercase
 
 // This is a "handled"-only sort of deal, by which I mean
 // an OS pop-up will pop up if the program isn't already terminated
@@ -139,6 +143,9 @@ fn crash_popup(crash_context: &CrashContext) -> CrashEventResult {
     CrashEventResult::Handled(true)
 }
 
+// NOTE: if inline constants get stabilized in match expressions,
+// consider moving the implementation back up into the appropriate config block.
+// Otherwise, these are probably sufficient.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod exception_constants {
     use crash_handler::Signal;

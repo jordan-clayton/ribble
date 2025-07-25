@@ -7,4 +7,4 @@ pub(crate) mod preferences;
 pub(crate) mod realtime_settings;
 pub(crate) mod recorder_configs;
 pub(crate) mod vad_configs;
-mod crash_handler;
+pub(crate) mod crash_handler;
