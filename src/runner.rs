@@ -56,24 +56,26 @@ impl RibbleRunner {
         debug_assert!(data_directory.is_absolute(), "Data dir path not canonicalized.");
         debug_assert!(data_directory.is_dir(), "Data dir not a directory.");
 
-        // TODO: determine whether to restrict this to debug only.
-        // If so, just assign none to the logger.
-        // It's most likely a good idea to retain a crash log.
-        // Log all messages; they should be few, but use an async writer to reduce I/O
-        let logger = Logger::try_with_str("info")?
+        // Set up the logger - duplicate to stderr in debug mode only to reduce IO.
+        let mut logger = Logger::try_with_str("info")?
             .log_to_file(FileSpec::default()
                 .directory(data_directory.as_path())
                 .basename(Self::LOG_FILE_NAME)
             )
-            .duplicate_to_stderr(Duplicate::All)
             .write_mode(WriteMode::BufferAndFlush)
             .rotate(
                 Criterion::Age(Age::Day),
                 Naming::Timestamps,
                 Cleanup::KeepLogFiles(Self::MAX_LOG_FILES),
-            )
-            // This needs to be kept alive until the app goes out of scope (consume on run).
-            .start()?;
+            );
+        logger = if cfg!(debug_assertions) {
+            logger
+                .duplicate_to_stderr(Duplicate::All)
+        } else {
+            logger
+        };
+        // This needs to be kept alive until the app goes out of scope (consume on run).
+        let logger_handle = logger.start()?;
 
         // Load the version & handle updates
         // The path gets canonicalized (and allocated) in the method, so only send the data directory here.
@@ -103,7 +105,7 @@ impl RibbleRunner {
             data_directory,
             app,
             window_options,
-            logger: Some(logger),
+            logger: Some(logger_handle),
         })
     }
 

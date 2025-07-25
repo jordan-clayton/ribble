@@ -1,4 +1,3 @@
-pub(crate) mod constants;
 pub(crate) mod dc_block;
 pub(crate) mod errors;
 pub(crate) mod include;
@@ -8,3 +7,4 @@ pub(crate) mod preferences;
 pub(crate) mod realtime_settings;
 pub(crate) mod recorder_configs;
 pub(crate) mod vad_configs;
+mod crash_handler;
