@@ -3,6 +3,24 @@ name = "ribble"
 version = "0.1.2"
 edition = "2024"
 
+# Opt-level 3 by default
+[profile.package]
+inherits = "release"
+lto = true
+codegen-units = 1
+# NOTE: Stripping might be better to do after the build.
+strip = true
+
+# Opt-level 3 by default
+[profile.profiling]
+inherits = "release"
+debug = true
+lto = true
+codegen-units = 1
+incremental = false
+strip = false
+
+
 [dependencies]
 atomic_enum = "0.3.0"
 catppuccin-egui = { version = "5.6.0", default-features = false, features = ["egui32"] }
