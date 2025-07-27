@@ -1,3 +1,4 @@
+#![windows_subsystem = "windows"] // Hide console window in release mode on windows
 use mimalloc::MiMalloc;
 
 use crate::runner::RibbleRunner;
@@ -8,11 +9,12 @@ use crate::utils::errors::RibbleError;
 static GLOBAL: MiMalloc = MiMalloc;
 
 mod controller;
+mod runner;
 mod ui;
 mod utils;
-mod runner;
 
 fn main() -> Result<(), RibbleError> {
     let ribble = RibbleRunner::new()?;
     ribble.run()
 }
+
