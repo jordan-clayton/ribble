@@ -1,7 +1,7 @@
-use crate::controller::CompletedRecordingJobs;
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::panes::PaneView;
+use crate::controller::CompletedRecordingJobs;
 use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
 use crate::utils::recorder_configs::{
     RibbleChannels, RibblePeriod, RibbleRecordingExportFormat, RibbleSampleRate,
 };
@@ -181,7 +181,10 @@ impl PaneView for RecordingPane {
                                         &mut self.export_format,
                                         format,
                                         format.as_ref(),
-                                    );
+                                    ).on_hover_ui(|ui| {
+                                        ui.style_mut().interaction.selectable_labels = true;
+                                        ui.label(format.tooltip());
+                                    });
                                 }
                             });
                         ui.end_row();

@@ -1,10 +1,10 @@
 use egui::epaint::{PathShape, PathStroke, Pos2, Vec2};
 use egui::{Response, Sense, Ui, Widget};
-use std::cell::OnceCell;
 use std::f32::consts::PI;
+use std::sync::OnceLock;
 
 // Instead of generating a mesh, a convex fill should hopefully be cheaper.
-static PIE_VERTICES: OnceCell<Vec<Pos2>> = OnceCell::new();
+static PIE_VERTICES: OnceLock<Vec<Pos2>> = OnceLock::new();
 const RESOLUTION: usize = 128;
 const INNER_RADIUS_PERCENT: f32 = 0.9;
 
@@ -19,7 +19,8 @@ fn init_pie_vertices() -> Vec<Pos2> {
     for i in 0..=RESOLUTION {
         let t = i as f32 / RESOLUTION as f32;
         let angle = t * 2.0 * PI;
-        vertices.push(Vec2::angled(angle).into())
+        let new_pos = Vec2::angled(angle);
+        vertices.push(Pos2::new(new_pos.x, new_pos.y));
     }
 
     vertices
@@ -54,7 +55,7 @@ fn draw_progress_pie(ui: &mut Ui, current: f32, total_size: f32) -> Response {
         let points = vertices[0..=last_vertex]
             .iter()
             .copied()
-            .map(|point| center + (inner_radius * point).into())
+            .map(|point| center + (inner_radius * Vec2::new(point.x, point.y)))
             .collect();
         painter.add(PathShape::convex_polygon(
             points,
@@ -66,6 +67,6 @@ fn draw_progress_pie(ui: &mut Ui, current: f32, total_size: f32) -> Response {
     response
 }
 
-pub(in crate::ui) fn pie_progress(current: f32, total_size: f32) -> impl Widget + '_ {
+pub(in crate::ui) fn pie_progress(current: f32, total_size: f32) -> impl Widget {
     move |ui: &mut Ui| draw_progress_pie(ui, current, total_size)
 }

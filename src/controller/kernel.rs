@@ -7,11 +7,7 @@ use crate::controller::transcriber::TranscriberEngine;
 use crate::controller::visualizer::VisualizerEngine;
 use crate::controller::worker::WorkerEngine;
 use crate::controller::writer::WriterEngine;
-use crate::controller::{
-    AmortizedDownloadProgress, AmortizedProgress, Bus, CompletedRecordingJobs, ConsoleMessage,
-    OfflineTranscriberFeedback, Progress, RotationDirection, DEFAULT_PROGRESS_SLAB_CAPACITY,
-    NUM_VISUALIZER_BUCKETS, SMALL_UTILITY_QUEUE_SIZE, UTILITY_QUEUE_SIZE,
-};
+use crate::controller::{AmortizedDownloadProgress, AmortizedProgress, Bus, CompletedRecordingJobs, ConsoleMessage, ModelFile, OfflineTranscriberFeedback, Progress, RotationDirection, DEFAULT_PROGRESS_SLAB_CAPACITY, NUM_VISUALIZER_BUCKETS, SMALL_UTILITY_QUEUE_SIZE, UTILITY_QUEUE_SIZE};
 use crate::controller::{AnalysisType, FileDownload};
 use crate::utils::errors::RibbleError;
 use crate::utils::preferences::UserPreferences;
@@ -191,7 +187,7 @@ impl Kernel {
     }
 
     // (ID, File name)
-    pub(super) fn try_read_model_list(&self, copy_buffer: &mut Vec<(ModelId, Arc<str>)>) {
+    pub(super) fn try_read_model_list(&self, copy_buffer: &mut Vec<(ModelId, ModelFile)>) {
         self.model_bank.try_read_model_list(copy_buffer);
     }
 

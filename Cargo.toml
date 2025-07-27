@@ -11,17 +11,17 @@ directories = "6.0.0"
 eframe = { version = "0.32.0", features = ["persistence", "wgpu", "x11", "wayland", "default_fonts"] }
 egui = { version = "0.32.0", features = ["persistence", "serde"] }
 # This needs to be added to gain access to the default Vulkan/Gles backends in egui.
-wgpu = "26.0.1"
+wgpu = "=25.0.2"
 hound = "3.5.1"
 realfft = "3.3.0"
 rfd = "0.15.3"
 serde = { version = "1.0.204", features = ["derive"] }
 strum = "0.27.1"
-# TODO: determine whether or not to include integrity checking utilities; might be out of scope
-ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.1.2", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler", "sdl2-static", "ribble-logging"] }
+# TODO: determine whether to include integrity checking utilities; might be out of scope
+ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.1.3", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler", "sdl2-static", "ribble-logging"] }
 log = "0.4.22"
 ron = "0.10.1"
-irox-egui-extras = "0.7.0"
+irox-egui-extras = { path = "external/irox/libraries/egui_extras" }
 slab = "0.4.9"
 parking_lot = { version = "0.12.4", features = ["deadlock_detection"] }
 arc-swap = "1.7.1"
@@ -52,7 +52,7 @@ cfg-if = "1.0.1"
 
 # TODO: benches to resolve performance questions re: visualizer
 [dev-dependencies]
-criterion = "0.6.0"
+criterion = "0.7.0"
 
 [features]
 default = []

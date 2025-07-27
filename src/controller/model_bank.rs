@@ -1,12 +1,10 @@
-use crate::controller::{
-    Bus, ConsoleMessage, DownloadRequest, RibbleMessage, WorkRequest, SMALL_UTILITY_QUEUE_SIZE,
-};
+use crate::controller::{Bus, ConsoleMessage, DownloadRequest, ModelFile, RibbleMessage, WorkRequest, SMALL_UTILITY_QUEUE_SIZE};
 use crate::utils::errors::RibbleError;
 use indexmap::IndexMap;
 use parking_lot::RwLock;
 use ribble_whisper::utils::errors::RibbleWhisperError;
 use ribble_whisper::utils::{get_channel, Receiver, Sender};
-use ribble_whisper::whisper::model::{ModelId, ModelRetriever};
+use ribble_whisper::whisper::model::{ModelId, ModelLocation, ModelRetriever};
 use std::error::Error;
 use std::ffi::OsStr;
 use std::fs;
@@ -22,17 +20,22 @@ use notify_debouncer_full::{
 };
 
 const MODEL_ID_SEED: u64 = 0;
-const MODEL_FILE_EXTENSION: &'static str = "bin";
+const MODEL_FILE_EXTENSION: &str = "bin";
 // NOTE: THIS IS IN MILLISECONDS
 // NOTE TWICE: if this is burning cycles, increase the timeout or add an explicit tick-rate that's
 // close to the actual timeout.
 const MAX_DEBOUNCE_TIME: u64 = 2000;
 
+const PACKED_MODELS: [&'static [u8]; 2] = [
+    include_bytes!("../models/ggml-base-q5_1.bin"),
+    include_bytes!("../models/ggml-tiny-q5_1.bin")
+];
+
 struct RibbleModelBankState {
     model_directory: PathBuf,
     // NOTE: this isn't using ribble_whisper's model/ConcurrentModelBank abstraction.
     // It's way, way easier and cheaper to use Arc<str>
-    model_map: RwLock<IndexMap<ModelId, Arc<str>>>,
+    model_map: RwLock<IndexMap<ModelId, ModelFile>>,
     model_directory_watcher: Receiver<DebounceEventResult>,
 }
 
@@ -90,7 +93,7 @@ impl RibbleModelBankState {
 
         if let Err(e) = self.refresh_model_bank() {
             log::warn!(
-                "Failed to refresh model bank.\nError: {e}\nError source: {}",
+                "Failed to refresh model bank.\nError: {e}\nError source: {:#?}",
                 e.source()
             );
         }
@@ -116,11 +119,18 @@ impl RibbleModelBankState {
             // Map into metadata.
             .map(|entry| {
                 (
-                    Arc::from(entry.path().file_name().unwrap().to_str().unwrap()),
+                    ModelFile::File(Arc::from(entry.path().file_name().unwrap().to_str().unwrap())),
                     entry.metadata().unwrap().len(),
                 )
             })
-            .collect::<Vec<(Arc<str>, u64)>>();
+            .collect::<Vec<(ModelFile, u64)>>();
+
+        // Push entries for the two asset-packed models.
+        for (idx, model) in PACKED_MODELS.iter().enumerate() {
+            let packed = ModelFile::Packed(idx);
+            let size = model.len() as u64;
+            entries.push((packed, size))
+        };
 
         // Sort by file size.
         entries.sort_by(|(_, size1), (_, size2)| size1.cmp(size2));
@@ -129,44 +139,56 @@ impl RibbleModelBankState {
         let mut map_lock = self.model_map.write();
 
         // Fill the model bank.
-        for (file_name, _) in entries {
-            let model_key = XxHash3_64::oneshot_with_seed(MODEL_ID_SEED, file_name.as_bytes());
-            map_lock.insert(model_key, file_name);
+        for (model_file, _) in entries {
+            let model_key = match &model_file {
+                ModelFile::Packed(idx) => {
+                    XxHash3_64::oneshot_with_seed(MODEL_ID_SEED, ModelFile::PACKED_NAMES[*idx].as_bytes())
+                }
+                ModelFile::File(file_name) => {
+                    XxHash3_64::oneshot_with_seed(MODEL_ID_SEED, file_name.as_ref().as_bytes())
+                }
+            };
+            map_lock.insert(model_key, model_file);
         }
 
         Ok(())
-    }
-
-    fn get_model(&self, model_id: ModelId) -> Option<Arc<str>> {
-        self.model_map
-            .read()
-            .get(&model_id)
-            .and_then(|model| Some(Arc::clone(model)))
     }
 
     fn contains_model(&self, model_id: ModelId) -> bool {
         self.model_map.read().contains_key(&model_id)
     }
 
-    fn retrieve_model_path(&self, model_id: ModelId) -> Option<PathBuf> {
-        self.model_map
-            .read()
-            .get(&model_id)
-            .and_then(|model| Some(self.model_directory().join(model.as_ref())))
+    fn retrieve_model(&self, model_id: ModelId) -> Option<ModelLocation> {
+        self.model_map.read().get(&model_id).and_then(|model| {
+            let out = match model {
+                ModelFile::Packed(idx) => {
+                    ModelLocation::StaticBuffer(&*PACKED_MODELS[*idx])
+                }
+                ModelFile::File(name) => {
+                    ModelLocation::DynamicFilePath(self.model_directory().join(name.as_ref()))
+                }
+            };
+            Some(out)
+        })
     }
 
     // NOTE: this code can probably stay, though it should be impossible for this to return false based on
     // the directory crawler.
     fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError> {
         if let Some(model) = self.model_map.read().get(&model_id) {
-            let full_path = self.model_directory.join(model.as_ref());
-            let metadata = fs::metadata(&full_path);
-            match metadata {
-                Ok(m) => Ok(m.is_file()),
-                Err(e) => match e.kind() {
-                    ErrorKind::NotFound => Ok(false),
-                    _ => Err(RibbleWhisperError::IOError(e)),
-                },
+            match model {
+                ModelFile::Packed(_) => Ok(true),
+                ModelFile::File(path) => {
+                    let full_path = self.model_directory.join(path.as_ref());
+                    let metadata = fs::metadata(&full_path);
+                    match metadata {
+                        Ok(m) => Ok(m.is_file()),
+                        Err(e) => match e.kind() {
+                            ErrorKind::NotFound => Ok(false),
+                            _ => Err(RibbleWhisperError::IOError(e)),
+                        },
+                    }
+                }
             }
         } else {
             Ok(false)
@@ -187,6 +209,8 @@ impl RibbleModelBankState {
 
     // Returns Ok(Some(ModelId)) if the model was in the bank and there were no file errors
     // Returns Ok(None) if the model was not in the bank and there were no file errors
+    // OR: if it's called on an asset-packed model.
+
     // Returns Err when there are issues with file removal, not including missing files:
     // - Since the file was to be removed anyway, it's not an error if it's missing and the map
     //   should be updated regardless.
@@ -197,15 +221,22 @@ impl RibbleModelBankState {
     ) -> Result<Option<ModelId>, RibbleWhisperError> {
         let mut write_guard = self.model_map.write();
         if let Some(model) = write_guard.get(&model_id) {
-            // First check to see that it exists in the file_system before removing.
-            // To avoid two lookups, just manually check here.
-            match fs::remove_file(self.model_directory.join(model.as_ref())) {
-                Ok(_) => {}
-                Err(e) => match e.kind() {
-                    ErrorKind::NotFound => {}
-                    _ => return Err(RibbleWhisperError::IOError(e)),
-                },
-            };
+            match model {
+                ModelFile::Packed(_) => {
+                    return Ok(None);
+                }
+                ModelFile::File(path) => {
+                    // First check to see that it exists in the file_system before removing.
+                    // To avoid two lookups, just manually check here.
+                    match fs::remove_file(self.model_directory.join(path.as_ref())) {
+                        Ok(_) => {}
+                        Err(e) => match e.kind() {
+                            ErrorKind::NotFound => {}
+                            _ => return Err(RibbleWhisperError::IOError(e)),
+                        },
+                    };
+                }
+            }
         };
 
         if swap {
@@ -264,7 +295,7 @@ impl RibbleModelBank {
                     Err(mut e) => {
                         while let Some(err) = e.pop() {
                             log::error!(
-                                "Debouncer Error in model bank.\nError: {}\nError source: {}",
+                                "Debouncer Error in model bank.\nError: {}\nError source: {:#?}",
                                 err,
                                 err.source()
                             );
@@ -321,8 +352,8 @@ impl RibbleModelBank {
             log::warn!(
                 "Cannot make download request, channel either closed or too small.\n\
                 Error: {}\n\
-                Error source: {}",
-                &e
+                Error source: {:#?}",
+                &e,
                 e.source()
             );
         }
@@ -376,16 +407,16 @@ impl RibbleModelBank {
             log::warn!(
                 "Failed to send work request. Channel may be closed or too small.\n\
                 Error: {e}\n\
-                Error source: {}",
+                Error source: {:#?}",
                 e.source()
             );
         }
     }
 
-    pub(crate) fn try_read_model_list(&self, copy_buffer: &mut Vec<(ModelId, Arc<str>)>) {
+    pub(crate) fn try_read_model_list(&self, copy_buffer: &mut Vec<(ModelId, ModelFile)>) {
         if let Some(guard) = self.inner.model_map.try_read() {
             copy_buffer.clear();
-            copy_buffer.extend(guard.iter().map(|(k, v)| (*k, Arc::clone(v))));
+            copy_buffer.extend(guard.iter().map(|(k, v)| (*k, v.clone())));
         }
     }
 }
@@ -401,7 +432,7 @@ impl Drop for RibbleModelBank {
 }
 
 impl ModelRetriever for RibbleModelBank {
-    fn retrieve_model_path(&self, model_id: ModelId) -> Option<PathBuf> {
-        self.inner.retrieve_model_path(model_id)
+    fn retrieve_model(&self, model_id: ModelId) -> Option<ModelLocation> {
+        self.inner.retrieve_model(model_id)
     }
 }

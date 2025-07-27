@@ -1,5 +1,5 @@
 use crate::controller::ribble_controller::RibbleController;
-use crate::controller::{CompletedRecordingJobs, OfflineTranscriberFeedback};
+use crate::controller::{CompletedRecordingJobs, ModelFile, OfflineTranscriberFeedback};
 use crate::ui::panes::PaneView;
 use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::ui::widgets::toggle_switch::toggle;
@@ -11,7 +11,7 @@ use std::sync::Arc;
 use strum::IntoEnumIterator;
 
 // Icon button for opening a link to huggingface/a readme explainer
-const LINK_ICON: &'static str = "🌐";
+const LINK_ICON: &str = "🌐";
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(in crate::ui) struct TranscriberPane {
@@ -22,18 +22,13 @@ pub(in crate::ui) struct TranscriberPane {
     recordings_buffer: Vec<(Arc<str>, CompletedRecordingJobs)>,
     #[serde(skip)]
     #[serde(default)]
-    model_list: Vec<(ModelId, Arc<str>)>,
-    // This is to avoid re-allocating an empty Arc<str> if a model has not yet been set.
-    #[serde(skip)]
-    #[serde(default = "set_model_empty")]
-    model_empty_name: Arc<str>,
+    model_list: Vec<(ModelId, ModelFile)>,
     #[serde(skip)]
     #[serde(default)]
     recording_modal: bool,
     #[serde(skip)]
     #[serde(default)]
     download_modal: bool,
-
     #[serde(skip)]
     #[serde(default)]
     model_url: String,
@@ -44,20 +39,12 @@ fn set_realtime() -> bool {
     true
 }
 
-// TODO: not sure if this is entirely the best way to solve this problem
-// Seeing as matching will result in a covariant type return and I don't want to have to duplicate
-// the UI code based on a match or bother with type-erasing enums.
-fn set_model_empty() -> Arc<str> {
-    Arc::from("")
-}
-
 impl Default for TranscriberPane {
     fn default() -> Self {
         Self {
             realtime: true,
             recordings_buffer: vec![],
             model_list: vec![],
-            model_empty_name: set_model_empty(),
             recording_modal: false,
             download_modal: false,
             model_url: Default::default(),
@@ -89,8 +76,15 @@ impl PaneView for TranscriberPane {
 
         let configs = *controller.read_transcription_configs();
         let vad_configs = *controller.read_vad_configs();
+        let current_model = configs
+            .model_id()
+            .clone()
+            .and_then(|id| self.model_list.iter().find(|(k, _)| *k == id))
+            // Since this is a trivial clone, it's easiest to avoid borrowing.
+            .and_then(|model| Some(model.clone()));
+
         // RUN TRANSCRIPTION
-        let can_run_transcription = configs.model_id().is_some() && !audio_worker_running;
+        let can_run_transcription = current_model.is_some() && !audio_worker_running;
 
         // HEADING
         let header_text = if self.realtime {
@@ -281,55 +275,47 @@ impl PaneView for TranscriberPane {
                                         ui.horizontal_wrapped(|ui| {
                                             // Try-Get the model list from the controller.
                                             controller.try_read_model_list(&mut self.model_list);
-                                            // Get a clone of the model_id
+                                            // Get a clone of the model_id to modify
                                             let mut model_id = configs.model_id().clone();
-                                            // Try to get the display name by binary searching the
-                                            // list.
-                                            let display_name = match model_id {
-                                                // This is just an Arc<str> of the empty string;
-                                                // To avoid constantly re-allocating
-                                                None => Arc::clone(&self.model_empty_name),
-                                                Some(id) => {
-                                                    // This has to be a linear search;
-                                                    // The items themselves are in ascending order
-                                                    // based on filesize, but there's no order to the keys themselves.
-                                                    let found = self.model_list.iter()
-                                                        .find(|&(k, _)| k == &id);
-                                                    match found {
-                                                        Some((_, name)) => {
-                                                            Arc::clone(name)
-                                                        }
-                                                        None => Arc::clone(&self.model_empty_name),
+
+                                            let model_id_combobox = match current_model{
+                                                Some((_, file)) => {
+                                                    match file{
+                                                        ModelFile::Packed(idx) => {
+                                                            egui::ComboBox::from_id_salt("model_id_combobox")
+                                                                .selected_text(ModelFile::PACKED_NAMES[idx])
+                                                        },
+                                                        ModelFile::File(name) => {
+                                                            egui::ComboBox::from_id_salt("model_id_combobox")
+                                                                .selected_text(name.as_ref())
+
+                                                        },
                                                     }
+                                                },
+                                                None => {
+                                                    egui::ComboBox::from_id_salt("model_id_combobox")
+                                                        .selected_text("Select a model.")
                                                 }
                                             };
 
-                                            // If there's a discrepancy with the model_id and the
-                                            // display name, that means there's a stale ID
-                                            // reference.
-                                            // In this case, the configs need to be written to
-                                            // reflact the updated state. 
-                                            if display_name.as_ref().is_empty() && model_id.is_some() {
-                                                // TODO: log this - this shouldn't really ever happen?
-                                                // except in the case where a file was re-named.
-                                                // Or: the hashing is non-deterministic which will
-                                                // need to be fixed.
-
-                                                let new_configs = configs.with_model_id(None);
-                                                controller.write_transcription_configs(new_configs);
-                                            }
-
-                                            let model_id_salt = egui::Id::new("model_id_combobox");
-
-                                            egui::ComboBox::from_id_salt(model_id_salt)
-                                                .selected_text(display_name.as_ref())
-                                                .show_ui(ui, |ui| {
-                                                    for (m_id, m_name) in self.model_list.iter() {
-                                                        if ui.selectable_value(&mut model_id, Some(*m_id), m_name.as_ref())
-                                                            .clicked() {
-                                                            let new_configs = configs.with_model_id(model_id);
-                                                            controller.write_transcription_configs(new_configs);
-                                                        }
+                                            model_id_combobox.show_ui(ui, |ui| {
+                                                    for (m_id, model_file) in self.model_list.iter() {
+                                                        match model_file {
+                                                            ModelFile::Packed(idx) => {
+                                                                if ui.selectable_value(&mut model_id, Some(*m_id), ModelFile::PACKED_NAMES[*idx])
+                                                                    .clicked() {
+                                                                    let new_configs = configs.with_model_id(model_id);
+                                                                    controller.write_transcription_configs(new_configs);
+                                                                }
+                                                            }
+                                                            ModelFile::File(file_name) => {
+                                                                if ui.selectable_value(&mut model_id, Some(*m_id), file_name.as_ref())
+                                                                    .clicked() {
+                                                                    let new_configs = configs.with_model_id(model_id);
+                                                                    controller.write_transcription_configs(new_configs);
+                                                                }
+                                                            }
+                                                        };
                                                     }
                                                 });
 

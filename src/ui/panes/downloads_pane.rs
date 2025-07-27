@@ -1,5 +1,5 @@
-use crate::controller::FileDownload;
 use crate::controller::ribble_controller::RibbleController;
+use crate::controller::FileDownload;
 use crate::ui::panes::ribble_pane::{PaneView, RibblePaneId};
 use irox_egui_extras::progressbar::ProgressBar;
 use unit_prefix::NumberPrefix;
@@ -12,7 +12,7 @@ pub(in crate::ui) struct DownloadsPane {
 }
 
 // https://unicodeplus.com/U+1F5D9 -> "X" (Cancellation glyph)
-const CANCELLATION_X: &'static str = "🗙";
+const CANCELLATION_X: &str = "🗙";
 
 impl PaneView for DownloadsPane {
     fn pane_id(&self) -> RibblePaneId {
@@ -48,8 +48,8 @@ impl PaneView for DownloadsPane {
                                 let current_bytes = download_progress.current_position();
                                 let total_size = download_progress.total_size();
 
-                                let cur_bytes_text = NumberPrefix::binary(current_bytes);
-                                let total_bytes_text = NumberPrefix::binary(total_size);
+                                let cur_bytes_text = NumberPrefix::binary(current_bytes as f32);
+                                let total_bytes_text = NumberPrefix::binary(total_size as f32);
                                 let bytes_format = match (cur_bytes_text, total_bytes_text) {
                                     (NumberPrefix::Standalone(cur), NumberPrefix::Standalone(tot)) => format!("{cur}/{tot} B"),
                                     (NumberPrefix::Standalone(cur), NumberPrefix::Prefixed(prefix, tot)) => format!("{cur} B/{tot} {prefix}B"),

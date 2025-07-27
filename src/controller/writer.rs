@@ -8,8 +8,8 @@ use ribble_whisper::audio::pcm::IntoPcmS16;
 use ribble_whisper::utils::{Receiver, Sender};
 use std::error::Error;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -307,7 +307,7 @@ impl WriterEngine {
 
                 if let Err(e) = thread_inner.work_request_sender.send(work_request) {
                     log::warn!(
-                        "Work engine closed. Cannot send new requests.\nError source: {}",
+                        "Work engine closed. Cannot send new requests.\nError source: {:#?}",
                         e.source()
                     );
                 }
@@ -337,7 +337,7 @@ impl WriterEngine {
 
         if let Err(e) = self.work_sender.send(work_request) {
             log::warn!(
-                "Work engine closed, cannot send export request.\nError source: {}",
+                "Work engine closed, cannot send export request.\nError source: {:#?}",
                 e.source()
             );
         }
@@ -401,7 +401,7 @@ impl WriterEngine {
             log::warn!(
                 "Cannot send new work request. Channel may be closed or too small.\n\
             Error: {}\n\
-            Error source: {}",
+            Error source: {:#?}",
                 e,
                 e.source()
             );
@@ -418,7 +418,7 @@ impl Drop for WriterEngine {
         }
         // Also, clear the cache.
         if let Err(e) = self.inner.clear_cache() {
-            log::error!("{}\nError source: {}", &e, e.source());
+            log::error!("{}\nError source: {:#?}", &e, e.source());
         }
     }
 }

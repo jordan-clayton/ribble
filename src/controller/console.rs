@@ -1,6 +1,5 @@
 use crate::controller::{Bus, ConsoleMessage};
 use crate::controller::{RibbleMessage, WorkRequest, MAX_NUM_CONSOLE_MESSAGES, MIN_NUM_CONSOLE_MESSAGES};
-use crate::utils::errors::RibbleError;
 use parking_lot::RwLock;
 use ribble_whisper::utils::{Receiver, Sender};
 use std::collections::VecDeque;
@@ -146,7 +145,7 @@ impl ConsoleEngine {
         if let Err(e) = self.work_request_sender.try_send(work_request) {
             log::error!("Cannot send resize request, channel closed or too small.\n\
             Error: {}\n\
-            Error source: {}", &e, e.source());
+            Error source: {:#?}", &e, e.source());
         }
     }
 }

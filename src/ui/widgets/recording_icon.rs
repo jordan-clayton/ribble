@@ -1,10 +1,10 @@
-use std::f32::consts::PI;
 use egui::{
     lerp, vec2, Response, Rgba, Sense, Stroke, Ui, Widget,
 };
+use std::f32::consts::PI;
 
 
-const DULL_GREY: Rgba = Rgba::from_black_alpha(0.7);
+const DULL_GREY: Rgba = Rgba::from_rgba_premultiplied(0.0, 0.0, 0.0, 0.7);
 
 fn draw_recording_icon(
     ui: &mut Ui,
@@ -20,7 +20,7 @@ fn draw_recording_icon(
         let final_color =
             if animate {
                 ui.ctx().request_repaint();
-                let mut time = ui.input(|i| i.time as f32) % animation_duration;
+                let time = ui.input(|i| i.time as f32) % animation_duration;
                 let expansion = (2.0 * PI) / animation_duration;
                 debug_assert!(expansion.is_normal());
                 // NOTE: this is phase-shifted right by pi/2

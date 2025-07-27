@@ -1,15 +1,15 @@
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::panes::PaneView;
 use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
 use egui_notify::Toast;
 
 #[derive(Copy, Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct TranscriptionPane {}
 
 // Clipboard: https://unicodeplus.com/U+1F4CB
-const COPY_ICON: &'static str = "📋";
+const COPY_ICON: &str = "📋";
 // Floppy Disk: https://unicodeplus.com/U+1F4BE
-const SAVE_ICON: &'static str = "💾";
+const SAVE_ICON: &str = "💾";
 
 impl PaneView for TranscriptionPane {
     fn pane_id(&self) -> RibblePaneId {

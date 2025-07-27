@@ -2,6 +2,7 @@ use crate::utils::errors::RibbleError;
 use atomic_enum::atomic_enum;
 use egui::{RichText, Visuals};
 use ribble_whisper::utils::Sender;
+use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -238,7 +239,7 @@ enum ProgressMessage {
 }
 
 #[derive(Debug)]
-struct AtomicProgress {
+pub(crate) struct AtomicProgress {
     pos: AtomicU64,
     capacity: AtomicU64,
 }
@@ -542,6 +543,32 @@ impl AnalysisType {
             }
             (AnalysisType::SpectrumDensity, RotationDirection::CounterClockwise) => {
                 AnalysisType::Power
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum ModelFile {
+    Packed(usize),
+    File(Arc<str>),
+}
+
+impl ModelFile {
+    pub(crate) const PACKED_NAMES: [&'static str; 2] = [
+        "ggml-tiny.q0.bin",
+        "ggml-base.q0.bin"
+    ];
+}
+
+impl Display for ModelFile {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ModelFile::Packed(id) => {
+                write!(f, "ModelFile::Packed: {}", Self::PACKED_NAMES[*id])
+            }
+            ModelFile::File(name) => {
+                write!(f, "ModelFile::File: {name}")
             }
         }
     }

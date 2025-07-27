@@ -1,10 +1,6 @@
 use crate::controller::audio_backend_proxy::AudioBackendProxy;
 use crate::controller::kernel::Kernel;
-use crate::controller::{
-    AmortizedDownloadProgress, AmortizedProgress, AnalysisType, CompletedRecordingJobs,
-    ConsoleMessage, FileDownload, OfflineTranscriberFeedback, Progress, RotationDirection,
-    NUM_VISUALIZER_BUCKETS,
-};
+use crate::controller::{AmortizedDownloadProgress, AmortizedProgress, AnalysisType, CompletedRecordingJobs, ConsoleMessage, FileDownload, ModelFile, OfflineTranscriberFeedback, Progress, RotationDirection, NUM_VISUALIZER_BUCKETS};
 use crate::utils::errors::RibbleError;
 use crate::utils::preferences::UserPreferences;
 use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExportFormat};
@@ -67,7 +63,7 @@ impl RibbleController {
         if let Err(e) = self.toasts_sender.try_send(toast) {
             log::warn!("Failed to send toast to UI, channel closed or too small.\n\
             Error: {}\n\
-            Error source: {}", &e, e.source());
+            Error source: {:#?}", &e, e.source());
         }
     }
 
@@ -115,7 +111,7 @@ impl RibbleController {
     }
 
     // (ID, File name)
-    pub(crate) fn try_read_model_list(&self, copy_buffer: &mut Vec<(ModelId, Arc<str>)>) {
+    pub(crate) fn try_read_model_list(&self, copy_buffer: &mut Vec<(ModelId, ModelFile)>) {
         self.kernel.try_read_model_list(copy_buffer);
     }
 

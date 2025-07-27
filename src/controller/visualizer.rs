@@ -343,7 +343,7 @@ impl VisualizerEngine {
                 // remain.
                 if let Err(e) = thread_inner.run_analysis(&sample, sample_rate) {
                     log::warn!(
-                        "Failed to run visual analysis.\nType: {}, Error: {e}, Error Source: {}",
+                        "Failed to run visual analysis.\nType: {}, Error: {e}, Error Source: {:#?}",
                         thread_inner.analysis_type.load(Ordering::Acquire),
                         e.source()
                     );

@@ -39,7 +39,7 @@ impl RecorderEngineState {
             let remove_setup = ProgressMessage::Remove { job_id: id };
             if let Err(e) = self.progress_message_sender.send(remove_setup) {
                 log::warn!(
-                    "Progress engine closed. Cannot send recorder remove setup message.\nError source: {}",
+                    "Progress engine closed. Cannot send recorder remove setup message.\nError source: {:#?}",
                     e.source()
                 );
             }
@@ -60,7 +60,7 @@ impl RecorderEngineState {
 
         if let Err(e) = self.progress_message_sender.send(progress_setup_message) {
             log::warn!(
-                "Progress engine closed. Cannot send recorder start setup message.\nError source: {}",
+                "Progress engine closed. Cannot send recorder start setup message.\nError source: {:#?}",
                 e.source()
             );
         }
@@ -69,7 +69,7 @@ impl RecorderEngineState {
             Ok(id) => Some(id),
             Err(e) => {
                 log::warn!(
-                    "Progress engine did not complete rendezvous, cannot get job id.\nError source: {}",
+                    "Progress engine did not complete rendezvous, cannot get job id.\nError source: {:#?}",
                     e.source()
                 );
                 None
@@ -102,7 +102,7 @@ impl RecorderEngineState {
             let remove_message = ProgressMessage::Remove { job_id: id };
             if let Err(e) = self.progress_message_sender.send(remove_message) {
                 log::warn!(
-                    "Progress engine closed, cannot send recorder remove message.\nError source: {}",
+                    "Progress engine closed, cannot send recorder remove message.\nError source: {:#?}",
                     e.source()
                 );
             }
@@ -124,7 +124,7 @@ impl RecorderEngineState {
                         log::warn!(
                             "Cannot send new visualizer samples, channel closed or too small.\n\
                             Error: {}\n\
-                            Error source: {}",
+                            Error source: {:#?}",
                             &e,
                             e.source()
                         );
@@ -181,7 +181,7 @@ impl RecorderEngine {
             log::warn!(
                 "Error sending recording work request. Channel may be too small, or worker engine missing.\n\
                 Error: {e}\n\
-                Error source: {}",
+                Error source: {:#?}",
                 e.source()
             );
         }

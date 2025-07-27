@@ -98,7 +98,7 @@ impl TranscriberEngineState {
             if let Err(e) = self.progress_message_sender.send(remove_setup) {
                 log::warn!(
                     "Progress channel closed, cannot send transcriber remove progress message.\n\
-                Error source: {}",
+                Error source: {:#?}",
                     e.source()
                 );
             }
@@ -111,7 +111,7 @@ impl TranscriberEngineState {
             if let Err(e) = self.progress_message_sender.send(update_progress_message) {
                 log::warn!(
                     "Progress channel closed, cannot send transcriber increment progress message.\n\
-                Error source: {}",
+                Error source: {:#?}",
                     e.source()
                 );
             }
@@ -140,7 +140,7 @@ impl TranscriberEngineState {
         if let Err(e) = self.progress_message_sender.send(setup_progress_message) {
             log::warn!(
                 "Progress channel closed, cannot get id in real-time transcriber setup.\n\
-            Error source: {}",
+            Error source: {:#?}",
                 e.source()
             );
         }
@@ -150,7 +150,7 @@ impl TranscriberEngineState {
             Err(e) => {
                 log::warn!(
                     "Progress engine did not complete rendezvous for setup progress job.\n\
-                Error source: {}",
+                Error source: {:#?}",
                     e.source()
                 );
                 None
@@ -227,7 +227,7 @@ impl TranscriberEngineState {
             let write_request = WriteRequest::new(write_receiver, confirmed_recording_configs);
             if let Err(e) = self.write_request_sender.send(write_request) {
                 log::warn!(
-                    "Writer engine closed, cannot send recording request.\nError source: {}",
+                    "Writer engine closed, cannot send recording request.\nError source: {:#?}",
                     e.source()
                 );
             }
@@ -286,7 +286,7 @@ impl TranscriberEngineState {
                             {
                                 log::warn!("Failed to send data to visualizer engine, channel closed or too small.\n\
                                 Error: {}\n\
-                                Error source: {}", &e, e.source());
+                                Error source: {:#?}", &e, e.source());
                             }
                         }
                         Err(_) => a_thread_run_transcription.store(false, Ordering::Release),
@@ -404,7 +404,7 @@ impl TranscriberEngineState {
         if let Err(e) = self.progress_message_sender.send(setup_progress_message) {
             log::warn!(
                 "Progress engine closed, cannot send offline setup job.\n\
-            Error source: {}",
+            Error source: {:#?}",
                 e.source()
             );
         }
@@ -414,7 +414,7 @@ impl TranscriberEngineState {
             Err(e) => {
                 log::warn!(
                     "Progress engine did not complete setup rendezvous.\n\
-                Error source: {}",
+                Error source: {:#?}",
                     e.source()
                 );
                 None
@@ -457,7 +457,7 @@ impl TranscriberEngineState {
         {
             log::warn!(
                 "Progress engine closed, cannot send offline load audio job.\n
-                Error source: {}",
+                Error source: {:#?}",
                 e.source()
             );
         }
@@ -467,7 +467,7 @@ impl TranscriberEngineState {
             Err(e) => {
                 log::warn!(
                     "Progress engine did not complete load audio rendezvous.\n
-                    Error source: {}",
+                    Error source: {:#?}",
                     e.source()
                 );
                 None
@@ -544,7 +544,7 @@ impl TranscriberEngineState {
             {
                 log::warn!(
                     "Progress engine closed, cannot send transcription progress job.\n
-                    Error source: {}",
+                    Error source: {:#?}",
                     e.source()
                 );
             }
@@ -554,7 +554,7 @@ impl TranscriberEngineState {
                 Err(e) => {
                     log::warn!(
                         "Progress engine did not complete transcription rendezvous.\n
-                        Error source: {}",
+                        Error source: {:#?}",
                         e.source()
                     );
                     None
@@ -575,7 +575,7 @@ impl TranscriberEngineState {
                     if let Err(e) = progress_sender.try_send(progress_message) {
                         log::warn!("Failed to send progress updates, channel is either closed or too small.\n\
                         Error: {}\n\
-                        Error source: {}", &e, e.source());
+                        Error source: {:#?}", &e, e.source());
                     }
                 }
             };
@@ -847,7 +847,7 @@ impl TranscriberEngine {
         if let Err(e) = self.work_request_sender.try_send(work_request) {
             log::warn!("Cannot send real-time transcription request, channel is too small or closed.\n\
             Error: {}\n\
-                Error source: {}", &e, e.source());
+                Error source: {:#?}", &e, e.source());
         }
     }
 
@@ -870,7 +870,7 @@ impl TranscriberEngine {
         if let Err(e) = self.work_request_sender.try_send(work_request) {
             log::warn!("Cannot send offline transcription request, channel is too small or closed.\n\
             Error: {}\n\
-                Error source: {}", &e, e.source());
+                Error source: {:#?}", &e, e.source());
         }
     }
 
@@ -882,7 +882,7 @@ impl TranscriberEngine {
         if let Err(e) = self.work_request_sender.try_send(work_request) {
             log::warn!("Cannot send save request, channel is too small or closed.\n\
             Error: {}\n\
-                Error source: {}", &e, e.source());
+                Error source: {:#?}", &e, e.source());
         }
     }
 }

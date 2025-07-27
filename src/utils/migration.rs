@@ -1,11 +1,8 @@
-// A collection of tools to make migrating between versions of Ribble a little bit easier.
-use crate::utils::errors::RibbleError;
-use crate::utils::include;
 use ribble_whisper::whisper::model::DefaultModelType;
 use std::error::Error;
 use std::fmt::Display;
 use std::num::ParseIntError;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use strum::IntoEnumIterator;
 
 #[derive(Debug)]
@@ -77,7 +74,7 @@ impl RibbleVersion {
         self.patch = patch;
         self
     }
-    pub(crate) fn set_min_compatibile(mut self, min_compatible: Self) -> Self {
+    pub(crate) fn set_min_compatible(mut self, min_compatible: Self) -> Self {
         self.min_compatible = min_compatible.into();
         self
     }
@@ -118,7 +115,7 @@ impl Version for RibbleVersion {
 
     fn compatible(&self, other: Self) -> bool {
         let other_comp: (usize, usize, usize) = other.into();
-        other_comp > self.min_compatible
+        other_comp >= self.min_compatible
     }
 
     fn increment_major(mut self) -> Self {
@@ -173,49 +170,6 @@ impl Display for RibbleVersion {
 impl Default for RibbleVersion {
     fn default() -> Self {
         Self::from_cfg()
-    }
-}
-
-// NOTE: this might go unused, if so, remove
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) struct RibbleMigration {
-    version: RibbleVersion,
-    current_model_directory: PathBuf,
-    model_includes_copied: bool,
-}
-
-impl RibbleMigration {
-    pub(crate) fn new(version: RibbleVersion, current_model_directory: PathBuf) -> Self {
-        Self {
-            version,
-            current_model_directory,
-            model_includes_copied: false,
-        }
-    }
-
-    pub(crate) fn with_version(mut self, new_version: RibbleVersion) -> Self {
-        self.version = new_version;
-        self
-    }
-
-    pub(crate) fn with_model_directory(mut self, new_model_directory: &Path) -> Self {
-        self.current_model_directory = new_model_directory.to_path_buf();
-        self.model_includes_copied = include::confirm_models_copied(&self.current_model_directory);
-        self
-    }
-
-    pub(crate) fn copy_model_includes(&mut self) -> Result<(), RibbleError> {
-        let res = include::copy_model_includes(self.current_model_directory.as_path());
-        self.model_includes_copied = res.is_ok();
-        res
-    }
-
-    pub(crate) fn version(&self) -> RibbleVersion {
-        self.version
-    }
-
-    pub(crate) fn model_includes_copied(&self) -> bool {
-        self.model_includes_copied
     }
 }
 

@@ -1,5 +1,4 @@
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use std::error::Error;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -22,12 +21,12 @@ pub(crate) enum RibbleError {
     DirectoryWatcher(#[from] notify_debouncer_full::notify::Error),
     #[error("Egui: {0}")]
     Egui(#[from] egui::load::LoadError),
+    // This needs to be manually mapped; Eframe errors aren't Sync or Send
     #[error("Eframe: {0}")]
-    Eframe(#[from] eframe::Error),
+    Eframe(String),
     #[error("Logger: {0}")]
     Logger(#[from] flexi_logger::FlexiLoggerError),
     #[error("Crash-Handler: {0}")]
-    CrashHandler(#[from]crash_handler::Error),
+    CrashHandler(#[from] crash_handler::Error),
 }
 
-impl Error for RibbleError {}

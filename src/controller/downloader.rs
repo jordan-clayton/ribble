@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-const FALLBACK_NAME: &'static str = "invalid_download";
+const FALLBACK_NAME: &str = "invalid_download";
 
 struct DownloadEngineState {
     // NOTE: if hashing is required, implment hash on FileDownload and use an IndexSet/ pre-hash
@@ -74,7 +74,7 @@ impl DownloadEngineState {
 
         if let Err(e) = self.progress_sender.send(progress_message) {
             log::warn!(
-                "Progress engine closed, cannot send initial download progress request.\nError source: {}",
+                "Progress engine closed, cannot send initial download progress request.\nError source: {:#?}",
                 e.source()
             );
         }
@@ -83,7 +83,7 @@ impl DownloadEngineState {
             Ok(id) => Some(id),
             Err(e) => {
                 log::warn!(
-                    "Progress engine did not return an ID due to rendezvous fail.\nError source: {}",
+                    "Progress engine did not return an ID due to rendezvous fail.\nError source: {:#?}",
                     e.source()
                 );
                 None
@@ -103,7 +103,7 @@ impl DownloadEngineState {
 
             if let Err(e) = callback_progress_sender.try_send(update) {
                 log::warn!(
-                    "Cannot send update request, channel either closed or too small.\nError: {}\nError source: {}",
+                    "Cannot send update request, channel either closed or too small.\nError: {}\nError source: {:#?}",
                     &e,
                     e.source()
                 );
@@ -148,7 +148,7 @@ impl DownloadEngineState {
             let finished = ProgressMessage::Remove { job_id: id };
             if let Err(e) = self.progress_sender.send(finished) {
                 log::warn!(
-                    "Progress engine closed, cannot send removal request.\nError source: {}",
+                    "Progress engine closed, cannot send removal request.\nError source: {:#?}",
                     e.source()
                 );
             }
@@ -199,7 +199,7 @@ impl DownloadEngine {
                 let work_request = WorkRequest::Short(start_download);
                 if let Err(e) = thread_inner.worker_sender.send(work_request) {
                     log::warn!(
-                        "Worker Engine closed. Can no longer send requests.\nError source: {}",
+                        "Worker Engine closed. Can no longer send requests.\nError source: {:#?}",
                         e.source()
                     );
                     break;

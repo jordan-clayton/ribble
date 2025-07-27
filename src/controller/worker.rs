@@ -43,7 +43,7 @@ impl WorkerInner {
             RibbleMessage::Console(msg) => {
                 if let Err(e) = self.console_message_sender.send(msg) {
                     log::warn!(
-                        "Console engine closed. Cannot send new messages.\nError source: {}",
+                        "Console engine closed. Cannot send new messages.\nError source: {:#?}",
                         e.source()
                     );
                 }
@@ -54,7 +54,7 @@ impl WorkerInner {
                     let err_msg = ConsoleMessage::Error(e);
                     if let Err(e) = self.console_message_sender.send(err_msg) {
                         log::warn!(
-                            "Console engine closed. Cannot send new error messages.\nError source: {}",
+                            "Console engine closed. Cannot send new error messages.\nError source: {:#?}",
                             e.source()
                         );
                     }
@@ -70,7 +70,7 @@ impl WorkerInner {
         let error_msg = ConsoleMessage::Error(error);
         if let Err(e) = self.console_message_sender.send(error_msg) {
             log::warn!(
-                "Console engine closed. Cannot send new error messages.\nError source: {}",
+                "Console engine closed. Cannot send new error messages.\nError source: {:#?}",
                 e.source()
             );
         }
@@ -103,12 +103,12 @@ impl WorkerEngine {
                         match request {
                             WorkRequest::Long(work) => {
                                 if let Err(e) = forwarder_inner.long_outgoing.send(work) {
-                                    log::warn!("Worker long queue somehow closed. Cannot forward in new requests.\nError source: {}", e.source());
+                                    log::warn!("Worker long queue somehow closed. Cannot forward in new requests.\nError source: {:#?}", e.source());
                                 }
                             }
                             WorkRequest::Short(work) => {
                                 if let Err(e) = forwarder_inner.short_outgoing.send(work) {
-                                    log::warn!("Worker short queue somehow closed. Cannot forward in new requests.\nError source: {}", e.source());
+                                    log::warn!("Worker short queue somehow closed. Cannot forward in new requests.\nError source: {:#?}", e.source());
                                 }
                             }
                         }

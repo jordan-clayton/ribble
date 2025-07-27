@@ -1,5 +1,4 @@
 use crate::controller::{AmortizedProgress, Progress, ProgressMessage};
-use crate::utils::errors::RibbleError;
 use parking_lot::RwLock;
 use ribble_whisper::utils::Receiver;
 use slab::Slab;
@@ -78,7 +77,7 @@ impl ProgressEngine {
                         let id = thread_inner.add_progress_job(job);
                         if let Err(e) = id_return_sender.send(id) {
                             log::warn!(
-                                "Progress Id receiver missing, cannot complete rendezvous.\nError source: {}",
+                                "Progress Id receiver missing, cannot complete rendezvous.\nError source: {:#?}",
                                 e.source()
                             );
                         }

@@ -70,7 +70,7 @@ impl RibbleTree {
     }
 
     pub(in crate::ui) fn add_new_pane(&mut self, pane_id: RibblePaneId) {
-        self.behavior.add_child = Some(pane_id);
+        self.behavior.add_new_pane(pane_id);
     }
 
     // This checks for a new child and either focuses/inserts the tab

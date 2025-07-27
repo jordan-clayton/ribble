@@ -9,9 +9,10 @@ use crate::controller::audio_backend_proxy::{
 };
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{AmortizedDownloadProgress, AmortizedProgress, UI_UPDATE_QUEUE_SIZE};
-use crate::ui::panes::RibbleTree;
 use crate::ui::panes::ribble_pane::{ClosableRibbleViewPane, RibblePaneId};
+use crate::ui::panes::RibbleTree;
 use crate::ui::widgets::pie_progress::pie_progress;
+use crate::ui::widgets::recording_icon::recording_icon;
 use crate::utils::errors::RibbleError;
 use crate::utils::preferences::RibbleAppTheme;
 use eframe::Storage;
@@ -19,21 +20,20 @@ use egui_notify::{Toast, Toasts};
 use egui_theme_lerp::ThemeAnimator;
 use irox_egui_extras::progressbar::ProgressBar;
 use ribble_whisper::audio::audio_backend::{
-    AudioBackend, CaptureSpec, Sdl2Backend, default_backend,
+    default_backend, AudioBackend, CaptureSpec, Sdl2Backend,
 };
 use ribble_whisper::audio::microphone::Sdl2Capture;
 use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::sdl2;
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{Receiver, get_channel};
+use ribble_whisper::utils::{get_channel, Receiver};
 use std::sync::Arc;
 use strum::IntoEnumIterator;
-use crate::ui::widgets::recording_icon::recording_icon;
 
 // TODO: FIND AN APPROPRIATE SPOT FOR GUI/STYLING CONSTANTS
 // Icon constants
-const HAMBURGER: &'static str = "☰";
-const NO_DOWNLOADS: &'static str = "📥";
+const HAMBURGER: &str = "☰";
+const NO_DOWNLOADS: &str = "📥";
 const TOOLTIP_GRACE_TIME: f32 = 0.0;
 const TOOLTIP_DELAY: f32 = 0.5;
 
@@ -49,7 +49,7 @@ const RECORDING_ICON_FLICKER_SPEED: f32 = 1.0;
 // NOTE: it might be the case that the local cache dir does need to come back. Not sure yet.
 pub struct Ribble {
     tree: RibbleTree,
-    sdl: sdl2::Sdl,
+    _sdl: sdl2::Sdl,
     backend: Sdl2Backend,
     // This needs to be polled in the UI loop to handle
     capture_requests: Receiver<AudioCaptureRequest>,
@@ -108,7 +108,7 @@ impl Ribble {
 
         Ok(Self {
             tree,
-            sdl: sdl_ctx,
+            _sdl: sdl_ctx,
             backend,
             capture_requests: request_receiver,
             toasts_handle,
@@ -149,6 +149,7 @@ impl Ribble {
     fn close_audio_device(&mut self, device_id: usize) {
         // This will panic if the device is not in the slab.
         let shared_device = self.current_devices.remove(device_id);
+        let strong_count = Arc::strong_count(&shared_device);
 
         // This will consume the inner from the Arc and leave the pointer empty.
         // It only returns Some(..) when the refcount is exactly 1
@@ -157,7 +158,7 @@ impl Ribble {
         assert!(
             device.is_some(),
             "Strong count > 1 when trying to close audio device. Count: {}",
-            Arc::strong_count(&shared_device)
+            strong_count
         );
         // The device will automatically be dropped by the end of this function.
     }
@@ -171,7 +172,7 @@ impl Ribble {
     fn check_join_last_save(&mut self) {
         if let Some(handle) = self.periodic_serialize.take() {
             if let Err(e) = handle.join() {
-                log::error!("Error serializing app state: {e}");
+                log::error!("Error serializing app state: {:#?}", e);
             }
         }
     }
@@ -213,7 +214,8 @@ impl eframe::App for Ribble {
                     // If there's a problem with communicating to send a handle to the requesting thread,
                     // treat this as an error and close the app after logging.
                     if let Err(e) = sender.try_send(shared_capture) {
-                        log::error!("Cannot return audio device to requesting thread: {}", e.source());
+                        log::error!("Cannot return audio device to requesting thread.\n\
+                        Error source: {:#?}", e.source());
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 }
@@ -329,10 +331,10 @@ impl eframe::App for Ribble {
                         // to get Red-Green-Yellow that "mostly" matches with the user's selected theme.
                         let theme = match self.controller.get_app_theme() {
                             None => {
-                                match (ui
+                                match ui
                                     .ctx()
                                     .system_theme()
-                                    .unwrap_or_else(|| egui::Theme::Dark))
+                                    .unwrap_or_else(|| egui::Theme::Dark)
                                 {
                                     egui::Theme::Dark => RibbleAppTheme::Mocha
                                         .app_theme()
