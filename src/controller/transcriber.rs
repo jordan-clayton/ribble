@@ -1,5 +1,5 @@
-use crate::controller::visualizer::VisualizerSample;
-use crate::controller::writer::WriteRequest;
+use crate::controller::VisualizerPacket;
+use crate::controller::WriteRequest;
 use crate::controller::{
     AtomicOfflineTranscriberFeedback, Bus, ConsoleMessage, OfflineTranscriberFeedback, Progress,
     ProgressMessage, RibbleMessage, WorkRequest, UTILITY_QUEUE_SIZE,
@@ -51,7 +51,7 @@ struct TranscriberEngineState {
     current_snapshot: ArcSwap<TranscriptionSnapshot>,
     current_control_phrase: ArcSwap<WhisperControlPhrase>,
     progress_message_sender: Sender<ProgressMessage>,
-    visualizer_sample_sender: Sender<VisualizerSample>,
+    visualizer_sample_sender: Sender<VisualizerPacket>,
     write_request_sender: Sender<WriteRequest>,
 }
 
@@ -224,7 +224,7 @@ impl TranscriberEngineState {
 
             // Start a write job
             let (write_sender, write_receiver) = get_channel::<Arc<[f32]>>(UTILITY_QUEUE_SIZE);
-            let write_request = WriteRequest::new(write_receiver, confirmed_recording_configs);
+            let write_request = WriteRequest::new_job(write_receiver, confirmed_recording_configs);
             if let Err(e) = self.write_request_sender.send(write_request) {
                 log::warn!(
                     "Writer engine closed, cannot send recording request.\nError source: {:#?}",
@@ -278,7 +278,7 @@ impl TranscriberEngineState {
                             // TODO: have to use self, but just use this to stub.
                             // Send out data to the VisualizerEngine
                             let visualizer_sample =
-                                VisualizerSample::new(Arc::clone(&audio), WHISPER_SAMPLE_RATE);
+                                VisualizerPacket::new(Arc::clone(&audio), WHISPER_SAMPLE_RATE);
 
                             if let Err(e) = self
                                 .visualizer_sample_sender
@@ -319,12 +319,12 @@ impl TranscriberEngineState {
             });
 
             // This -should- properly coerce into RibbleAppError, but it might need to be explicit.
-            let res = transcription_thread
+            transcription_thread
                 .join()
                 .unwrap_or_else(|e| {
                     // Wrap the error in a RibbleWhisper "Unknown" to satisfy the type constraints
                     // of the join.
-                    let err = RibbleWhisperError::Unknown(format!("{:?}", e));
+                    let err = RibbleWhisperError::Unknown(format!("{e:?}"));
                     Err(err)
                 })
                 .map_err(|e| {
@@ -335,13 +335,12 @@ impl TranscriberEngineState {
                     } else {
                         e.into()
                     }
-                });
-            res
+                })
         })
             // Since the type is opaque here (scope return), it's not entirely known as to what the error is.
             // The easiest thing to do here is to wrap it in a "ThreadPanic", as even if the exit is
             // somewhat graceful, an error has forced the transcriber to stop early.
-            .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e)));
+            .map_err(|e| RibbleError::ThreadPanic(format!("{e:?}")));
 
         mic.pause();
         // Send the device back to be closed
@@ -424,9 +423,8 @@ impl TranscriberEngineState {
         let vad_configs = self.vad_configs.load_full();
         // Unpack the VAD settings and build a VAD if the user wants to optimize.
         let vad = if !vad_configs.use_vad_offline() {
-            let vad = vad_configs.build_vad().or_else(|e| {
+            let vad = vad_configs.build_vad().inspect_err(|_e| {
                 self.cleanup_remove_progress_job(setup_id);
-                Err(e)
             })?;
 
             Some(vad)
@@ -438,9 +436,8 @@ impl TranscriberEngineState {
         // realtime parameters.
         let configs = (*self.transcription_configs.load_full()).into_whisper_v2_configs();
 
-        let n_frames = audio_file_num_frames(audio_file_path.as_path()).or_else(|e| {
+        let n_frames = audio_file_num_frames(audio_file_path.as_path()).inspect_err(|_e| {
             self.cleanup_remove_progress_job(setup_id);
-            Err(e)
         })?;
 
         let load_audio_progress = Progress::new_determinate("Loading audio", n_frames);
@@ -481,10 +478,9 @@ impl TranscriberEngineState {
         // Load the audio file.
         let loaded_audio =
             load_normalized_audio_file(audio_file_path.as_path(), Some(load_audio_callback))
-                .or_else(|e| {
+                .inspect_err(|_e| {
                     self.cleanup_remove_progress_job(setup_id);
                     self.cleanup_remove_progress_job(load_audio_id);
-                    Err(e)
                 })?;
 
         let audio = match loaded_audio {
@@ -517,9 +513,8 @@ impl TranscriberEngineState {
                 offline_transcriber_builder.with_voice_activity_detector(ribble_vad);
         }
 
-        let offline_transcriber = offline_transcriber_builder.build().or_else(|e| {
+        let offline_transcriber = offline_transcriber_builder.build().inspect_err(|_e| {
             self.cleanup_remove_progress_job(setup_id);
-            Err(e)
         })?;
 
         let run_transcription = Arc::clone(&self.offline_running);
@@ -666,11 +661,11 @@ impl TranscriberEngineState {
             // It is also most likely that if this job is still in the buffer, it's the only
             // one in the buffer, (or it did get removed and the buffer is empty).
             // Test this, but if either prove to be true, then it shouldn't matter wrt remove_progress_job.
-            let res = transcription_thread
+            transcription_thread
                 .join()
                 .unwrap_or_else(|e| {
                     self.cleanup_remove_progress_job(transcription_id);
-                    let error = RibbleWhisperError::Unknown(format!("{:?}", e));
+                    let error = RibbleWhisperError::Unknown(format!("{e:?}"));
                     Err(error)
                 })
                 .map_err(|e| {
@@ -681,13 +676,12 @@ impl TranscriberEngineState {
                     } else {
                         e.into()
                     }
-                });
-            res
+                })
         })
             // NOTE: the type of this is opaque due to the scope return.
             // It is most likely to be a ThreadPanic (ThreadPanic), due to locally scoped threads.
             // If this is particularly obtrusive, look at trying to deduplicate.
-            .map_err(|e| RibbleError::ThreadPanic(format!("{:?}", e)))??;
+            .map_err(|e| RibbleError::ThreadPanic(format!("{e:?}")))??;
 
         self.finalize_transcription(result);
 

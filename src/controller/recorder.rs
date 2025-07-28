@@ -1,5 +1,5 @@
-use crate::controller::visualizer::VisualizerSample;
-use crate::controller::writer::WriteRequest;
+use crate::controller::VisualizerPacket;
+use crate::controller::WriteRequest;
 use crate::controller::{
     Bus, ConsoleMessage, Progress, ProgressMessage, RibbleMessage, WorkRequest, UTILITY_QUEUE_SIZE,
 };
@@ -20,7 +20,7 @@ struct RecorderEngineState {
     recorder_configs: ArcSwap<RibbleRecordingConfigs>,
     progress_message_sender: Sender<ProgressMessage>,
     write_request_sender: Sender<WriteRequest>,
-    visualizer_sample_sender: Sender<VisualizerSample>,
+    visualizer_sample_sender: Sender<VisualizerPacket>,
 }
 
 impl RecorderEngineState {
@@ -86,7 +86,7 @@ impl RecorderEngineState {
         let (write_sender, write_receiver) = get_channel::<Arc<[f32]>>(UTILITY_QUEUE_SIZE);
         let confirmed_specs = RibbleRecordingConfigs::from_mic_capture(&mic);
 
-        let request = WriteRequest::new(write_receiver, confirmed_specs);
+        let request = WriteRequest::new_job(write_receiver, confirmed_specs);
 
         // Send off the request to write the file
         if self.write_request_sender.send(request).is_err() {
@@ -119,7 +119,7 @@ impl RecorderEngineState {
                     }
 
                     let next_visualizer_sample =
-                        VisualizerSample::new(Arc::clone(&audio), sample_rate as f64);
+                        VisualizerPacket::new(Arc::clone(&audio), sample_rate as f64);
                     if let Err(e) = self.visualizer_sample_sender.try_send(next_visualizer_sample) {
                         log::warn!(
                             "Cannot send new visualizer samples, channel closed or too small.\n\

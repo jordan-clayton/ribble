@@ -131,6 +131,8 @@ impl Ribble {
     ) -> Result<SharedSdl2Capture<ArcChannelSink<f32>>, RibbleWhisperError> {
         // Try to open capture
         // Give ownership to the Arc temporarily
+        // -This is technically a major "warn", but there are mechanisms in place to ensure that
+        // the device is only dropped on the main thread.
         let device = Arc::new(self.backend.open_capture(spec, sink)?);
 
         // Clone a reference to consume for the shared capture
@@ -149,7 +151,7 @@ impl Ribble {
     fn close_audio_device(&mut self, device_id: usize) {
         // This will panic if the device is not in the slab.
         let shared_device = self.current_devices.remove(device_id);
-        let strong_count = Arc::strong_count(&shared_device);
+        let _strong_count = Arc::strong_count(&shared_device);
 
         // This will consume the inner from the Arc and leave the pointer empty.
         // It only returns Some(..) when the refcount is exactly 1
@@ -157,22 +159,21 @@ impl Ribble {
 
         assert!(
             device.is_some(),
-            "Strong count > 1 when trying to close audio device. Count: {}",
-            strong_count
+            "Strong count > 1 when trying to close audio device. Count: {_strong_count}"
         );
         // The device will automatically be dropped by the end of this function.
     }
 
     fn get_system_visuals(ctx: &egui::Context) -> egui::Visuals {
         ctx.system_theme()
-            .unwrap_or_else(|| egui::Theme::Dark)
+            .unwrap_or(egui::Theme::Dark)
             .default_visuals()
     }
 
     fn check_join_last_save(&mut self) {
         if let Some(handle) = self.periodic_serialize.take() {
             if let Err(e) = handle.join() {
-                log::error!("Error serializing app state: {:#?}", e);
+                log::error!("Error serializing app state: {e:#?}");
             }
         }
     }
@@ -197,7 +198,9 @@ impl Ribble {
 
 impl Drop for Ribble {
     fn drop(&mut self) {
+        log::info!("Dropping Ribble App; joining/running Ribble save.");
         self.check_join_last_save();
+        log::info!("Final app save called.");
         // NOTE: the kernel and the RibbleTree both serialize on drop.
         // This is just to join the last eframe::App save() call.
     }
@@ -334,7 +337,7 @@ impl eframe::App for Ribble {
                                 match ui
                                     .ctx()
                                     .system_theme()
-                                    .unwrap_or_else(|| egui::Theme::Dark)
+                                    .unwrap_or(egui::Theme::Dark)
                                 {
                                     egui::Theme::Dark => RibbleAppTheme::Mocha
                                         .app_theme()
@@ -349,18 +352,16 @@ impl eframe::App for Ribble {
 
                         let (color, msg, animate) = if idle {
                             (theme.green, "Ready.", false)
+                        } else if offline {
+                            (theme.yellow, "Transcribing audio file.", true)
                         } else {
-                            if offline {
-                                (theme.yellow, "Transcribing audio file.", true)
+                            let device_running = !self.current_devices.is_empty();
+                            let msg = if device_running {
+                                "Recording."
                             } else {
-                                let device_running = !self.current_devices.is_empty();
-                                let msg = if device_running {
-                                    "Recording."
-                                } else {
-                                    "Preparing to record."
-                                };
-                                (theme.red, msg, device_running)
-                            }
+                                "Preparing to record."
+                            };
+                            (theme.red, msg, device_running)
                         };
 
                         ui.add(recording_icon(color.into(), animate, RECORDING_ICON_FLICKER_SPEED));
@@ -441,10 +442,14 @@ impl eframe::App for Ribble {
     // or whether to just spawn a separate thread and periodically run the save method.
     // It'll get a little bit spicy on close, seeing as this also gets called on shutdown,
     // And each individual resource also serializes itself on shutdown.
+
+    // This is causing some weird issues -> it's failing to initialize the Storage
     fn save(&mut self, _storage: &mut dyn Storage) {
         self.serialize_app_state();
     }
 
+    // TODO: determine whether or not to just periodically run serialization on the background thread itself and join on drop.
+    // Would be easier; I'm not using egui's persistence and the tree saves itself.
     fn persist_egui_memory(&self) -> bool {
         true
     }

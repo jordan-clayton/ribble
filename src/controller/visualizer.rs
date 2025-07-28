@@ -1,6 +1,4 @@
-use crate::controller::{
-    AnalysisType, AtomicAnalysisType, RotationDirection, NUM_VISUALIZER_BUCKETS,
-};
+use crate::controller::{AnalysisType, AtomicAnalysisType, RotationDirection, VisualizerPacket, NUM_VISUALIZER_BUCKETS};
 use crate::utils::errors::RibbleError;
 use crossbeam::channel::Receiver;
 use parking_lot::RwLock;
@@ -13,23 +11,9 @@ use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
 
-pub(super) struct VisualizerSample {
-    sample: Arc<[f32]>,
-    sample_rate: f64,
-}
-
-impl VisualizerSample {
-    pub(super) fn new(sample: Arc<[f32]>, sample_rate: f64) -> Self {
-        Self {
-            sample,
-            sample_rate,
-        }
-    }
-}
-
 struct VisualizerEngineState {
     planner: RwLock<RealFftPlanner<f32>>,
-    incoming_samples: Receiver<VisualizerSample>,
+    incoming_samples: Receiver<VisualizerPacket>,
     buffer: RwLock<[f32; NUM_VISUALIZER_BUCKETS]>,
     visualizer_running: AtomicBool,
     analysis_type: AtomicAnalysisType,
@@ -41,7 +25,7 @@ impl VisualizerEngineState {
     const POWER_GAIN: f32 = 30.0;
     const WAVEFORM_GAIN: f32 = Self::POWER_GAIN / 2.0;
 
-    fn new(incoming_samples: Receiver<VisualizerSample>) -> Self {
+    fn new(incoming_samples: Receiver<VisualizerPacket>) -> Self {
         let buffer = RwLock::new([0.0; NUM_VISUALIZER_BUCKETS]);
         let visualizer_running = AtomicBool::new(false);
         let analysis_type = AtomicAnalysisType::new(AnalysisType::Waveform);
@@ -174,7 +158,7 @@ impl VisualizerEngineState {
 
         // Normalize between [-1, 1]
         for rms in amp_envelope.iter_mut() {
-            *rms = *rms / max_rms;
+            *rms /= max_rms;
         }
 
         debug_assert_eq!(
@@ -265,7 +249,7 @@ impl VisualizerEngineState {
 
         // Normalize the buckets
         for res in spectrum_samples.iter_mut() {
-            *res = *res / max_amp;
+            *res /= max_amp;
         }
         debug_assert!(
             spectrum_samples.iter().all(|n| *n <= 1.0 && *n >= 0.0),
@@ -318,7 +302,7 @@ pub(super) struct VisualizerEngine {
     work_thread: Option<JoinHandle<()>>,
 }
 impl VisualizerEngine {
-    pub(super) fn new(incoming_samples: Receiver<VisualizerSample>) -> Self {
+    pub(super) fn new(incoming_samples: Receiver<VisualizerPacket>) -> Self {
         let inner = Arc::new(VisualizerEngineState::new(incoming_samples));
         let thread_inner = Arc::clone(&inner);
 
@@ -333,20 +317,20 @@ impl VisualizerEngine {
                     continue;
                 }
 
-                let VisualizerSample {
-                    sample,
-                    sample_rate,
-                } = packet;
-
-                // Instead of returning the error to finish the thread, just log it.
-                // There may be errors across each visualization analysis, so the loop should
-                // remain.
-                if let Err(e) = thread_inner.run_analysis(&sample, sample_rate) {
-                    log::warn!(
+                match packet {
+                    VisualizerPacket::VisualizerSample { sample, sample_rate } => {
+                        // Instead of returning the error to finish the thread, just log it.
+                        // There may be errors across each visualization analysis, so the loop should
+                        // remain.
+                        if let Err(e) = thread_inner.run_analysis(&sample, sample_rate) {
+                            log::warn!(
                         "Failed to run visual analysis.\nType: {}, Error: {e}, Error Source: {:#?}",
                         thread_inner.analysis_type.load(Ordering::Acquire),
                         e.source()
                     );
+                        }
+                    }
+                    VisualizerPacket::Shutdown => break,
                 }
             }
         }));
@@ -396,10 +380,13 @@ impl VisualizerEngine {
 
 impl Drop for VisualizerEngine {
     fn drop(&mut self) {
+        log::info!("Dropping VisualizerEngine.");
         if let Some(handle) = self.work_thread.take() {
+            log::info!("Joining VisualizerEngine work thread.");
             handle.join().expect(
                 "The visualizer thread is not expected to panic and should run without issues.",
             );
+            log::info!("VisualizerEngine work thread joined.");
         }
     }
 }

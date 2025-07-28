@@ -1,6 +1,6 @@
-use crate::controller::{AmortizedProgress, Progress, ProgressMessage};
+use crate::controller::{AmortizedProgress, Bus, Progress, ProgressMessage};
 use parking_lot::RwLock;
-use ribble_whisper::utils::Receiver;
+use ribble_whisper::utils::{Receiver, Sender};
 use slab::Slab;
 use std::error::Error;
 use std::sync::Arc;
@@ -97,6 +97,7 @@ impl ProgressEngine {
                     ProgressMessage::Remove { job_id } => {
                         thread_inner.remove_progress_job(job_id);
                     }
+                    ProgressMessage::Shutdown => break,
                 }
             }
         });
@@ -145,11 +146,13 @@ impl ProgressEngine {
 
 impl Drop for ProgressEngine {
     fn drop(&mut self) {
-        // TODO: determine whether or not to just have a void JoinHandle.
+        log::info!("Dropping ProgressEngine");
         if let Some(thread) = self.work_thread.take() {
+            log::info!("Joining ProgressEngine work thread.");
             thread
                 .join()
                 .expect("The progress worker thread is expected to never panic.");
+            log::info!("ProgressEngine work thread joined.");
         }
     }
 }

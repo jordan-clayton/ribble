@@ -39,12 +39,13 @@ pub(super) struct Kernel {
     console_engine: ConsoleEngine,
     progress_engine: ProgressEngine,
     visualizer_engine: VisualizerEngine,
-    worker_engine: WorkerEngine,
+    _worker_engine: WorkerEngine,
     writer_engine: WriterEngine,
     download_engine: DownloadEngine,
     // Since model bank needs to be accessed elsewhere (e.g. TranscriberEngine), this needs to be
     // in a shared pointer.
     model_bank: Arc<RibbleModelBank>,
+    bus: Bus,
 }
 
 impl Kernel {
@@ -60,8 +61,7 @@ impl Kernel {
     ) -> Result<Self, RibbleError> {
         if !data_directory.is_absolute() {
             return Err(RibbleError::Core(format!(
-                "Data directory not canonicalized: {:#?}",
-                data_directory
+                "Data directory not canonicalized: {data_directory:#?}"
             )));
         }
 
@@ -139,10 +139,11 @@ impl Kernel {
             console_engine,
             progress_engine,
             visualizer_engine,
-            worker_engine,
+            _worker_engine: worker_engine,
             writer_engine,
             download_engine,
             model_bank,
+            bus,
         })
     }
     // USER PREFERENCES
@@ -229,7 +230,7 @@ impl Kernel {
         self.transcriber_engine.stop_realtime()
     }
     pub(super) fn stop_offline(&self) {
-        self.transcriber_engine.stop_realtime()
+        self.transcriber_engine.stop_offline()
     }
     pub(super) fn read_transcription_snapshot(&self) -> Arc<TranscriptionSnapshot> {
         self.transcriber_engine.read_transcription_snapshot()
@@ -442,11 +443,16 @@ impl Kernel {
 
 impl Drop for Kernel {
     fn drop(&mut self) {
+        log::info!("Dropping Kernel.");
+        log::info!("Launching sentinels to close engines.");
+        self.bus.try_close_bus();
+        log::info!("Serializing user data.");
         self.serialize_user_data();
+        log::info!("Kernel cleanup completed.");
     }
 }
 
-// Basic serializeable/deserializable app state.
+// Basic serializable/deserializable app state.
 // At this time, there isn't much to keep track of, but this may
 // start to grow as features get added.
 //

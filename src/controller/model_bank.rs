@@ -14,10 +14,8 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use twox_hash::XxHash3_64;
 
-use notify_debouncer_full::notify::{EventKind, RecursiveMode};
-use notify_debouncer_full::{
-    new_debouncer, DebounceEventResult, DebouncedEvent,
-};
+use notify_debouncer_full::notify::{EventKind, RecommendedWatcher, RecursiveMode};
+use notify_debouncer_full::{new_debouncer, DebounceEventResult, DebouncedEvent, Debouncer, RecommendedCache};
 
 const MODEL_ID_SEED: u64 = 0;
 const MODEL_FILE_EXTENSION: &str = "bin";
@@ -26,7 +24,7 @@ const MODEL_FILE_EXTENSION: &str = "bin";
 // close to the actual timeout.
 const MAX_DEBOUNCE_TIME: u64 = 2000;
 
-const PACKED_MODELS: [&'static [u8]; 2] = [
+const PACKED_MODELS: [&[u8]; 2] = [
     include_bytes!("../models/ggml-base-q5_1.bin"),
     include_bytes!("../models/ggml-tiny-q5_1.bin")
 ];
@@ -53,7 +51,7 @@ impl RibbleModelBankState {
         if !fs::metadata(&model_directory)?.is_dir() {
             Err(RibbleError::IOError(std::io::Error::new(
                 ErrorKind::NotADirectory,
-                format!("Model path: {:?} is not a directory", model_directory),
+                format!("Model path: {model_directory:?} is not a directory"),
             )))
         } else {
             Self {
@@ -159,16 +157,15 @@ impl RibbleModelBankState {
     }
 
     fn retrieve_model(&self, model_id: ModelId) -> Option<ModelLocation> {
-        self.model_map.read().get(&model_id).and_then(|model| {
-            let out = match model {
+        self.model_map.read().get(&model_id).map(|model| {
+            match model {
                 ModelFile::Packed(idx) => {
-                    ModelLocation::StaticBuffer(&*PACKED_MODELS[*idx])
+                    ModelLocation::StaticBuffer(PACKED_MODELS[*idx])
                 }
                 ModelFile::File(name) => {
                     ModelLocation::DynamicFilePath(self.model_directory().join(name.as_ref()))
                 }
-            };
-            Some(out)
+            }
         })
     }
 
@@ -242,14 +239,12 @@ impl RibbleModelBankState {
         if swap {
             Ok({
                 write_guard
-                    .swap_remove(&model_id)
-                    .and_then(|_| Some(model_id))
+                    .swap_remove(&model_id).map(|_| model_id)
             })
         } else {
             Ok({
                 write_guard
-                    .shift_remove(&model_id)
-                    .and_then(|_| Some(model_id))
+                    .shift_remove(&model_id).map(|_| model_id)
             })
         }
     }
@@ -260,6 +255,7 @@ pub(crate) struct RibbleModelBank {
     work_sender: Sender<WorkRequest>,
     download_sender: Sender<DownloadRequest>,
     worker_thread: Option<JoinHandle<()>>,
+    debouncer: Option<Debouncer<RecommendedWatcher, RecommendedCache>>,
 }
 
 impl RibbleModelBank {
@@ -275,12 +271,17 @@ impl RibbleModelBank {
             event_sender,
         )?;
 
+
         let thread_inner = Arc::clone(&inner);
         let file_directory = model_directory.to_path_buf();
-        let work_thread = std::thread::spawn(move || {
-            debouncer.watch(file_directory.as_path(), RecursiveMode::NonRecursive)
-                .expect("The debouncer is expected to watch without any issues.");
 
+        // NOTE: the debouncer needs to be stored -> it will close on drop,
+        // but since the inner thread is joined and blocks on the debouncer queue, it needs to be
+        // stopped either by dropping or explicitly.
+        debouncer.watch(file_directory.as_path(), RecursiveMode::NonRecursive)
+            .expect("The debouncer is expected to watch without any issues.");
+
+        let work_thread = std::thread::spawn(move || {
             while let Ok(result) = thread_inner.model_directory_watcher.recv() {
                 match result {
                     Ok(events) => {
@@ -310,7 +311,7 @@ impl RibbleModelBank {
         if work_thread.is_finished() {
             let res = work_thread.join().map_err(|e| {
                 RibbleError::ThreadPanic(format!("Failed to create debouncer thread.\n\
-                Error: {:#?}", e))
+                Error: {e:#?}"))
             });
 
             return match res {
@@ -329,6 +330,7 @@ impl RibbleModelBank {
             work_sender: bus.work_request_sender(),
             download_sender: bus.download_request_sender(),
             worker_thread: Some(work_thread),
+            debouncer: Some(debouncer),
         })
     }
 
@@ -347,7 +349,7 @@ impl RibbleModelBank {
 
     pub(crate) fn download_new_model(&self, url: &str) {
         let model_directory = self.inner.model_directory();
-        let download_request = DownloadRequest::new_with_params(url, model_directory);
+        let download_request = DownloadRequest::new_job(url, model_directory);
         if let Err(e) = self.download_sender.try_send(download_request) {
             log::warn!(
                 "Cannot make download request, channel either closed or too small.\n\
@@ -423,10 +425,17 @@ impl RibbleModelBank {
 
 impl Drop for RibbleModelBank {
     fn drop(&mut self) {
+        log::info!("Dropping RibbleModelBank.");
+        if let Some(debouncer) = self.debouncer.take() {
+            log::info!("Stopping debouncer.");
+            debouncer.stop();
+        }
         if let Some(handle) = self.worker_thread.take() {
+            log::info!("Joining RibbleModelBank Debouncer thread.");
             handle
                 .join()
                 .expect("Debouncer thread is expected to work properly and should not panic.");
+            log::info!("RibbleModelBank Debouncer thread joined.");
         }
     }
 }

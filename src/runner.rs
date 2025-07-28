@@ -123,7 +123,7 @@ impl RibbleRunner<'_> {
                     e.source()
                 );
             }
-            migration_version.clone()
+            *migration_version
         };
 
         // Construct the app
@@ -152,7 +152,6 @@ impl RibbleRunner<'_> {
     // NOTE: Calling run will consume the runner -> the version will get serialized on drop.
     pub(crate) fn run(mut self) -> Result<(), RibbleError> {
         log::info!("Starting Ribble.");
-
         let window_options = self
             .window_options
             .take()
@@ -161,7 +160,7 @@ impl RibbleRunner<'_> {
         let app = self
             .app
             .take()
-            .ok_or(RibbleError::Core("App not initializied.".to_string()))?;
+            .ok_or(RibbleError::Core("App not initialized.".to_string()))?;
 
         run_native(APP_ID, window_options, app)
             .map_err(|err| RibbleError::Eframe(err.to_string()))?;
@@ -218,8 +217,9 @@ impl RibbleRunner<'_> {
 
 impl Drop for RibbleRunner<'_> {
     fn drop(&mut self) {
-        log::info!("Dropping ribble runner.");
+        log::info!("Dropping ribble runner, serializing version.");
         self.serialize_version();
+        log::info!("Final serialize completed.");
     }
 }
 
@@ -227,6 +227,8 @@ impl Drop for RibbleRunner<'_> {
 fn build_window(persistence_path: PathBuf) -> NativeOptions {
     NativeOptions {
         viewport: build_viewport(),
+        // TODO: this seems to be causing an error.
+        // For some reason eframe::native::file_storage is trying to create a "ribble" file instead of treating this as a directory.
         persistence_path: Some(persistence_path),
         persist_window: true,
         ..Default::default()
@@ -242,6 +244,7 @@ fn build_viewport() -> ViewportBuilder {
         .with_resizable(true)
         .with_icon(load_icon())
         // NOTE: if maximizing is too annoying, go back to a default size.
+        // TODO: this is not being respected atm -> look into it.
         .with_maximized(true)
 }
 
@@ -260,13 +263,13 @@ fn build_viewport() -> ViewportBuilder {
 fn load_icon() -> Arc<IconData> {
     image::load_from_memory(ICON_BYTES)
         .ok()
-        .and_then(|image| {
+        .map(|image| {
             let (i_width, i_height) = image.dimensions();
-            Some(Arc::new(IconData {
+            Arc::new(IconData {
                 rgba: image.to_rgba8().to_vec(),
                 width: i_width,
                 height: i_height,
-            }))
+            })
             // This is explicitly the OS default instead of "egui's" default.
         })
         .unwrap_or(Arc::new(IconData::default()))

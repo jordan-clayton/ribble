@@ -109,7 +109,7 @@ impl Version for RibbleVersion {
     }
 
     fn from_cfg() -> Self {
-        const VER: &'static str = env!("CARGO_PKG_VERSION");
+        const VER: &str = env!("CARGO_PKG_VERSION");
         Self::from_semver_string(VER).expect("From semver string expects Cargo semver format.")
     }
 
@@ -179,6 +179,8 @@ impl Default for RibbleVersion {
 // this will not preserve the integrity.
 //
 // NOTE: remember to make a note of this in the instructions.
+// NOTE TWICE: this is not the prettiest/most efficient, but it gets the job done and it only ever
+// really runs once (at the moment), so it's fine.
 pub(crate) fn migrate_model_filenames(model_directory: &Path) -> Result<(), std::io::Error> {
     for default_model_type in DefaultModelType::iter() {
         let test_path = model_directory.join(default_model_type.old_file_name());
@@ -186,11 +188,21 @@ pub(crate) fn migrate_model_filenames(model_directory: &Path) -> Result<(), std:
             let new_path = model_directory.join(default_model_type.to_file_name());
             std::fs::rename(test_path, new_path)?;
         }
+        // There is an edge-case. Whisper large got renamed to LargeV1, so there will be lingering
+        // large.bin in the model directory unless it's fully migrated over to the new file naming.
+        if matches!(default_model_type, DefaultModelType::LargeV1) {
+            let alt_file_name = default_model_type.old_file_name().replace("-v1", "");
+            let alt_path = model_directory.join(alt_file_name);
+            if alt_path.is_file() {
+                let new_path = model_directory.join(default_model_type.to_file_name());
+                std::fs::rename(alt_path, new_path)?;
+            }
+        }
     }
     Ok(())
 }
 
-const OLD_STATE_FILE_NAME: &'static str = "data.ron";
+const OLD_STATE_FILE_NAME: &str = "data.ron";
 
 // If it becomes important to know whether this actually removed the file, change the
 // return type to something that can communicate that.

@@ -1,7 +1,9 @@
 use crate::utils::errors::RibbleError;
+use crate::utils::recorder_configs::RibbleRecordingConfigs;
 use atomic_enum::atomic_enum;
 use egui::{RichText, Visuals};
-use ribble_whisper::utils::Sender;
+use ribble_whisper::utils::{Receiver, Sender};
+use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -51,10 +53,10 @@ struct Bus {
     console_message_sender: Sender<ConsoleMessage>,
     progress_message_sender: Sender<ProgressMessage>,
     work_request_sender: Sender<WorkRequest>,
-    write_request_sender: Sender<writer::WriteRequest>,
+    write_request_sender: Sender<WriteRequest>,
     // TODO: future thing -> possibly stick this in a data structure with the sample rate.
     // Pre-computing and re-initializing the FFT thingy might get a little sticky.
-    visualizer_sample_sender: Sender<visualizer::VisualizerSample>,
+    visualizer_sample_sender: Sender<VisualizerPacket>,
     download_request_sender: Sender<DownloadRequest>,
 }
 
@@ -63,8 +65,8 @@ impl Bus {
         console_message_sender: Sender<ConsoleMessage>,
         progress_message_sender: Sender<ProgressMessage>,
         work_request_sender: Sender<WorkRequest>,
-        write_request_sender: Sender<writer::WriteRequest>,
-        visualizer_sample_sender: Sender<visualizer::VisualizerSample>,
+        write_request_sender: Sender<WriteRequest>,
+        visualizer_sample_sender: Sender<VisualizerPacket>,
         download_request_sender: Sender<DownloadRequest>,
     ) -> Self {
         Self {
@@ -84,17 +86,49 @@ impl Bus {
     fn progress_message_sender(&self) -> Sender<ProgressMessage> {
         self.progress_message_sender.clone()
     }
-    fn write_request_sender(&self) -> Sender<writer::WriteRequest> {
+    fn write_request_sender(&self) -> Sender<WriteRequest> {
         self.write_request_sender.clone()
     }
     fn work_request_sender(&self) -> Sender<WorkRequest> {
         self.work_request_sender.clone()
     }
-    fn visualizer_sample_sender(&self) -> Sender<visualizer::VisualizerSample> {
+    fn visualizer_sample_sender(&self) -> Sender<VisualizerPacket> {
         self.visualizer_sample_sender.clone()
     }
     fn download_request_sender(&self) -> Sender<DownloadRequest> {
         self.download_request_sender.clone()
+    }
+
+    // NOTE: this needs to be explicitly called (by the kernel or authoritative owner),
+    // The kernel will not be able to drop its own engines if they're stuck waiting on queues
+    // Since this is a shared bus, it's unknown if the senders/receivers are dropped.
+    fn try_close_bus(&self) {
+        let Bus {
+            console_message_sender,
+            progress_message_sender,
+            work_request_sender,
+            write_request_sender,
+            visualizer_sample_sender,
+            download_request_sender,
+        } = self;
+
+        Self::fire_sentinel_message(console_message_sender, ConsoleMessage::Shutdown);
+        Self::fire_sentinel_message(progress_message_sender, ProgressMessage::Shutdown);
+        Self::fire_sentinel_message(work_request_sender, WorkRequest::Shutdown);
+        Self::fire_sentinel_message(write_request_sender, WriteRequest::Shutdown);
+        Self::fire_sentinel_message(visualizer_sample_sender, VisualizerPacket::Shutdown);
+        Self::fire_sentinel_message(download_request_sender, DownloadRequest::Shutdown);
+    }
+
+    fn fire_sentinel_message<T: Send>(sender: &Sender<T>, msg: T) {
+        // NOTE: this could deadlock if the queues aren't large enough.
+        if let Err(e) = sender.send(msg) {
+            log::warn!(
+                "Failed to send sentinel message due to receiver drop.\n\
+           Error source: {:#?}",
+                e.source()
+            );
+        }
     }
 }
 
@@ -115,6 +149,7 @@ pub(crate) enum OfflineTranscriberFeedback {
 pub(crate) enum ConsoleMessage {
     Error(RibbleError),
     Status(String),
+    Shutdown,
 }
 
 impl ConsoleMessage {
@@ -123,6 +158,7 @@ impl ConsoleMessage {
         let (color, msg) = match self {
             ConsoleMessage::Error(msg) => (visuals.error_fg_color, msg.to_string()),
             ConsoleMessage::Status(msg) => (visuals.text_color(), msg.to_owned()),
+            ConsoleMessage::Shutdown => (visuals.text_color(), "Shutting down.".to_owned()),
         };
         // This has to make at least 1 heap allocation to coerce into a string
         // Test, but expect this to just move the string created above.
@@ -130,11 +166,16 @@ impl ConsoleMessage {
     }
 }
 
+enum RibbleWork {
+    Work(RibbleWorkerHandle),
+    Sentinel,
+}
 // There is no functional difference between members of this enum (at the moment).
 // Right now, it's just semantic & the long_queue is twice the size.
 enum WorkRequest {
     Short(RibbleWorkerHandle),
     Long(RibbleWorkerHandle),
+    Shutdown,
 }
 
 // TODO: use this for presenting in the UI.
@@ -171,44 +212,20 @@ impl FileDownload {
 
 // NOTE: if it somehow becomes necessary to send information (e.g. the returned PathBuf) back from the DownloadRequest to the
 // requester, then use a queue.
-struct DownloadRequest {
-    url: String,
-    directory: PathBuf,
+enum DownloadRequest {
+    DownloadJob {
+        url: String,
+        directory: PathBuf,
+    },
+    Shutdown,
 }
 
 impl DownloadRequest {
-    fn new() -> Self {
-        Self {
-            url: Default::default(),
-            directory: Default::default(),
-        }
-    }
-
-    fn new_with_params(url: &str, directory: &Path) -> Self {
-        Self {
+    fn new_job(url: &str, directory: &Path) -> Self {
+        Self::DownloadJob {
             url: url.to_string(),
             directory: directory.to_path_buf(),
         }
-    }
-
-    fn decompose(self) -> (String, PathBuf) {
-        (self.url, self.directory)
-    }
-
-    fn with_url(mut self, url: &str) -> Self {
-        self.url = url.to_string();
-        self
-    }
-    fn with_directory(mut self, directory: &Path) -> Self {
-        self.directory = directory.to_path_buf();
-        self
-    }
-
-    pub(crate) fn url(&self) -> &String {
-        &self.url
-    }
-    pub(crate) fn directory(&self) -> &Path {
-        self.directory.as_path()
     }
 }
 
@@ -236,6 +253,7 @@ enum ProgressMessage {
     Remove {
         job_id: usize,
     },
+    Shutdown,
 }
 
 #[derive(Debug)]
@@ -502,7 +520,6 @@ impl CompletedRecordingJobs {
     }
 }
 
-
 pub(crate) enum RotationDirection {
     Clockwise,
     CounterClockwise,
@@ -555,10 +572,7 @@ pub(crate) enum ModelFile {
 }
 
 impl ModelFile {
-    pub(crate) const PACKED_NAMES: [&'static str; 2] = [
-        "ggml-tiny.q0.bin",
-        "ggml-base.q0.bin"
-    ];
+    pub(crate) const PACKED_NAMES: [&'static str; 2] = ["ggml-tiny.q0.bin", "ggml-base.q0.bin"];
 }
 
 impl Display for ModelFile {
@@ -570,6 +584,49 @@ impl Display for ModelFile {
             ModelFile::File(name) => {
                 write!(f, "ModelFile::File: {name}")
             }
+        }
+    }
+}
+
+pub(in crate::controller) enum WriteRequest {
+    WriteJob {
+        receiver: Receiver<Arc<[f32]>>,
+        spec: RibbleRecordingConfigs,
+    },
+    Shutdown,
+}
+
+impl WriteRequest {
+    pub(in crate::controller) fn new_job(
+        receiver: Receiver<Arc<[f32]>>,
+        spec: RibbleRecordingConfigs,
+    ) -> Self {
+        Self::WriteJob { receiver, spec }
+    }
+
+    pub(in crate::controller) fn unpack(
+        self,
+    ) -> Option<(Receiver<Arc<[f32]>>, RibbleRecordingConfigs)> {
+        match self {
+            WriteRequest::WriteJob { receiver, spec } => Some((receiver, spec)),
+            WriteRequest::Shutdown => None,
+        }
+    }
+}
+
+pub(in crate::controller) enum VisualizerPacket {
+    VisualizerSample {
+        sample: Arc<[f32]>,
+        sample_rate: f64,
+    },
+    Shutdown,
+}
+
+impl VisualizerPacket {
+    pub(in crate::controller) fn new(sample: Arc<[f32]>, sample_rate: f64) -> Self {
+        Self::VisualizerSample {
+            sample,
+            sample_rate,
         }
     }
 }

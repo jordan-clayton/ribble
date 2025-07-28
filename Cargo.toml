@@ -30,6 +30,8 @@ directories = "6.0.0"
 eframe = { version = "0.32.0", features = ["persistence", "wgpu", "x11", "wayland", "default_fonts"] }
 egui = { version = "0.32.0", features = ["persistence", "serde"] }
 # This needs to be added to gain access to the default Vulkan/Gles backends in egui.
+# TODO: look at wgpu - might need to strip unused backends if they're being pulled in
+# The binary is gigantic atm.
 wgpu = "=25.0.2"
 hound = "3.5.1"
 realfft = "3.3.0"

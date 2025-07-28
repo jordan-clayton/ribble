@@ -11,6 +11,7 @@ use ribble_whisper::utils::errors::RibbleWhisperError;
 use ribble_whisper::utils::{get_channel, Receiver, Sender};
 use slab::Slab;
 use std::error::Error;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -38,9 +39,9 @@ impl DownloadEngineState {
         }
     }
 
-    fn run_download(&self, job: DownloadRequest) -> Result<RibbleMessage, RibbleError> {
-        let (url, dest_dir) = job.decompose();
-
+    // NOTE: these just take in the resources by value -> they're owned by the DownloadRequest::DownloadJob
+    // There's no real need to take it in via reference.
+    fn run_download(&self, url: String, dest_dir: PathBuf) -> Result<RibbleMessage, RibbleError> {
         let sync_downloader = sync_download_request(&url, FALLBACK_NAME)?;
         let content_name = sync_downloader.content_name();
         if content_name == FALLBACK_NAME {
@@ -192,17 +193,22 @@ impl DownloadEngine {
 
         let worker = std::thread::spawn(move || {
             while let Ok(download_job) = thread_inner.incoming_jobs.recv() {
-                let download_inner = Arc::clone(&thread_inner);
-                let start_download =
-                    std::thread::spawn(move || download_inner.run_download(download_job));
+                match download_job {
+                    DownloadRequest::DownloadJob { url, directory } => {
+                        let download_inner = Arc::clone(&thread_inner);
+                        let start_download =
+                            std::thread::spawn(move || download_inner.run_download(url, directory));
 
-                let work_request = WorkRequest::Short(start_download);
-                if let Err(e) = thread_inner.worker_sender.send(work_request) {
-                    log::warn!(
+                        let work_request = WorkRequest::Short(start_download);
+                        if let Err(e) = thread_inner.worker_sender.send(work_request) {
+                            log::warn!(
                         "Worker Engine closed. Can no longer send requests.\nError source: {:#?}",
                         e.source()
                     );
-                    break;
+                            break;
+                        }
+                    }
+                    DownloadRequest::Shutdown => break,
                 }
             }
         });
@@ -257,10 +263,13 @@ impl DownloadEngine {
 
 impl Drop for DownloadEngine {
     fn drop(&mut self) {
+        log::info!("Dropping DownloadEngine.");
         if let Some(handle) = self.work_thread.take() {
+            log::info!("Joining DownloadEngine work thread.");
             handle
                 .join()
                 .expect("The DownloadEngine worker thread is not expected to ever panic.");
+            log::info!("DownloadEngine work thread joined.");
         }
     }
 }

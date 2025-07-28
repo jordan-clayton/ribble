@@ -1,4 +1,4 @@
-use crate::controller::{Bus, CompletedRecordingJobs, ConsoleMessage, RibbleMessage, WorkRequest};
+use crate::controller::{Bus, CompletedRecordingJobs, ConsoleMessage, RibbleMessage, WorkRequest, WriteRequest};
 use crate::utils::errors::RibbleError;
 use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExportFormat};
 use hound::{WavReader, WavSpec, WavWriter};
@@ -13,11 +13,6 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-pub(super) struct WriteRequest {
-    receiver: Receiver<Arc<[f32]>>,
-    spec: RibbleRecordingConfigs,
-}
-
 // TODO: this might need to spawn a debouncer thread;
 // Since the model folder is accessible via the UI,
 // it is possible for a user to navigate to the recordings folder
@@ -31,16 +26,6 @@ pub(super) struct WriteRequest {
 //   extra thread overhead.
 // - Filtering (check for file) -> likely coherent, incurs memory allocation each read.
 // - *Going with this so far* Toast + repaint -> informs, very cheap, more UI friction than debouncer
-
-impl WriteRequest {
-    pub(super) fn new(receiver: Receiver<Arc<[f32]>>, spec: RibbleRecordingConfigs) -> Self {
-        Self { receiver, spec }
-    }
-
-    pub(super) fn unpack(self) -> (Receiver<Arc<[f32]>>, RibbleRecordingConfigs) {
-        (self.receiver, self.spec)
-    }
-}
 
 // NOTE: this is only send when using mpmc (crossbeam)
 // If for whatever reason the std::mpsc is required,
@@ -86,8 +71,7 @@ impl WriterEngineState {
         let latest = self
             .completed_jobs
             .read()
-            .last()
-            .and_then(|(file_name, _)| Some(self.data_directory.join(file_name.as_ref())));
+            .last().map(|(file_name, _)| self.data_directory.join(file_name.as_ref()));
 
         // If it doesn't exist, internally update the status and return the Option.
         if latest.is_none() {
@@ -218,9 +202,7 @@ impl WriterEngineState {
         }
     }
 
-    fn handle_new_request(&self, request: WriteRequest) -> Result<RibbleMessage, RibbleError> {
-        // Unpack the request
-        let (receiver, spec) = request.unpack();
+    fn handle_new_request(&self, receiver: Receiver<Arc<[f32]>>, spec: RibbleRecordingConfigs) -> Result<RibbleMessage, RibbleError> {
 
         // The files should look like "tmp_recording_<ticket_no>.wav"
         let ticket_no = self.ticket.fetch_add(1, Ordering::AcqRel);
@@ -299,17 +281,22 @@ impl WriterEngine {
         // genuinely an issue, that's low-hanging fruit.
         let polling_thread = std::thread::spawn(move || {
             while let Ok(request) = thread_inner.incoming_jobs.recv() {
-                let request_handler_inner = Arc::clone(&thread_inner);
-                let handle_request =
-                    std::thread::spawn(move || request_handler_inner.handle_new_request(request));
+                match request {
+                    WriteRequest::WriteJob { receiver, spec } => {
+                        let request_handler_inner = Arc::clone(&thread_inner);
+                        let handle_request =
+                            std::thread::spawn(move || request_handler_inner.handle_new_request(receiver, spec));
 
-                let work_request = WorkRequest::Short(handle_request);
+                        let work_request = WorkRequest::Short(handle_request);
 
-                if let Err(e) = thread_inner.work_request_sender.send(work_request) {
-                    log::warn!(
+                        if let Err(e) = thread_inner.work_request_sender.send(work_request) {
+                            log::warn!(
                         "Work engine closed. Cannot send new requests.\nError source: {:#?}",
                         e.source()
                     );
+                        }
+                    }
+                    WriteRequest::Shutdown => { break }
                 }
             }
         });
@@ -354,7 +341,7 @@ impl WriterEngine {
             copy_buffer.clear();
             copy_buffer.extend(
                 jobs.iter()
-                    .map(|(file_name, metadata)| (Arc::clone(file_name), metadata.clone())),
+                    .map(|(file_name, metadata)| (Arc::clone(file_name), *metadata)),
             );
             copy_buffer.reverse();
         }
@@ -411,14 +398,19 @@ impl WriterEngine {
 
 impl Drop for WriterEngine {
     fn drop(&mut self) {
+        log::info!("Dropping WriterEngine.");
         if let Some(handle) = self.request_polling_thread.take() {
+            log::info!("Joining WriterEngine work thread.");
             handle.join().expect(
                 "The Writer thread is not expected to panic and should run without issues.",
             );
+            log::info!("WriterEngine work thread joined.");
         }
-        // Also, clear the cache.
+        log::info!("Clearing WriterEngine cache.");
+        // Also, clear the cache - it's easier to just nuke it and let the next session start fresh.
         if let Err(e) = self.inner.clear_cache() {
             log::error!("{}\nError source: {:#?}", &e, e.source());
         }
+        log::info!("WriterEngine cache cleared.");
     }
 }

@@ -51,9 +51,7 @@ impl ConsoleEngineState {
 
     fn resize(&self, new_size: usize) {
         // Clamp the size between min/max
-        let new_size = new_size
-            .max(MIN_NUM_CONSOLE_MESSAGES)
-            .min(MAX_NUM_CONSOLE_MESSAGES);
+        let new_size = new_size.clamp(MIN_NUM_CONSOLE_MESSAGES, MAX_NUM_CONSOLE_MESSAGES);
         // Determine whether to shrink or grow.
         let capacity = self.queue_capacity.load(Ordering::Acquire);
         if new_size > capacity {
@@ -98,7 +96,6 @@ pub(super) struct ConsoleEngine {
     work_thread: Option<JoinHandle<()>>,
 }
 
-// Provide access to inner
 impl ConsoleEngine {
     pub(super) fn new(
         incoming_messages: Receiver<ConsoleMessage>,
@@ -110,7 +107,16 @@ impl ConsoleEngine {
 
         let worker = std::thread::spawn(move || {
             while let Ok(console_message) = thread_inner.incoming_messages.recv() {
+                // If it's a sentinel message to wake up the thread (in case sending handles still exist)
+                let closing_app = matches!(console_message, ConsoleMessage::Shutdown);
+                // Since there is a console message attached to the sentinel, if the GUI's still up
+                // (and the console is still displaying, this will show a "shutting down") message.
+
+                // Otherwise, it's a plain console message.
                 thread_inner.add_console_message(console_message);
+                if closing_app {
+                    break;
+                }
             }
         });
 
@@ -152,10 +158,13 @@ impl ConsoleEngine {
 
 impl Drop for ConsoleEngine {
     fn drop(&mut self) {
+        log::info!("Dropping ConsoleEngine");
         if let Some(handle) = self.work_thread.take() {
+            log::info!("Joining ConsoleEngine work thread");
             handle
                 .join()
                 .expect("The Console thread should never panic.");
+            log::info!("ConsoleEngine work thread joined.");
         }
     }
 }
