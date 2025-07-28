@@ -134,7 +134,7 @@ impl RibbleRunner<'_> {
 
         let app_path = data_directory.clone();
         let app: AppCreator<'_> = Box::new(move |cc| {
-            let ribble_app = Ribble::new(app_path.as_path(), cc)?;
+            let ribble_app = Ribble::new(version, app_path.as_path(), cc)?;
             Ok(Box::new(ribble_app))
         });
 

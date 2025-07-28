@@ -1,6 +1,6 @@
-use crate::controller::{AmortizedProgress, Bus, Progress, ProgressMessage};
+use crate::controller::{AmortizedProgress, Progress, ProgressMessage};
 use parking_lot::RwLock;
-use ribble_whisper::utils::{Receiver, Sender};
+use ribble_whisper::utils::Receiver;
 use slab::Slab;
 use std::error::Error;
 use std::sync::Arc;

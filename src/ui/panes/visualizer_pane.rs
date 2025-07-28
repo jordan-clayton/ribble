@@ -1,7 +1,7 @@
 use crate::controller::ribble_controller::RibbleController;
-use crate::controller::{AnalysisType, NUM_VISUALIZER_BUCKETS, RotationDirection};
-use crate::ui::panes::PaneView;
+use crate::controller::{AnalysisType, RotationDirection, NUM_VISUALIZER_BUCKETS};
 use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
 use crate::ui::widgets::soundbar::soundbar;
 use crate::utils::preferences::RibbleAppTheme;
 use egui_colorgradient::ColorInterpolator;
@@ -32,8 +32,8 @@ pub(crate) struct VisualizerPane {
 impl Clone for VisualizerPane {
     fn clone(&self) -> Self {
         Self {
-            visualizer_buckets: self.visualizer_buckets.clone(),
-            presentation_buckets: self.presentation_buckets.clone(),
+            visualizer_buckets: self.visualizer_buckets,
+            presentation_buckets: self.presentation_buckets,
             color_interpolator: self.current_theme.color_interpolator(),
             current_theme: self.current_theme,
         }
