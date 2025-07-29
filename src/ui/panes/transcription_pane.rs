@@ -23,7 +23,8 @@ impl PaneView for TranscriptionPane {
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
-        _tile_id: egui_tiles::TileId,
+        // Since this pane should -never- close, don't expose a way to do so.
+        _should_close: &mut bool,
         controller: RibbleController,
     ) -> egui::Response {
         let bg_col = ui.visuals().extreme_bg_color;
@@ -33,18 +34,29 @@ impl PaneView for TranscriptionPane {
 
         let control_phrase = controller.read_latest_control_phrase();
 
-        let header_height = egui::TextStyle::Heading.resolve(ui.style()).size;
-        let header_width = ui.max_rect().width();
-        let desired_size = egui::Vec2::new(header_width, header_height);
-        let layout = egui::Layout::left_to_right(egui::Align::Center)
-            .with_main_justify(true)
-            .with_main_wrap(true);
 
         // NOTE: It might be wise to implement a "transcription_is_empty()" or similar on TranscriptionSnapshot
         let transcription_empty = transcription_snapshot.confirmed().is_empty()
             && transcription_snapshot.string_segments().is_empty();
 
+
+        // TODO: this might not work just yet - test out and remove this todo if it's right.
+        // Create a (hopefully) lower-priority pane-sized interaction hitbox
+        let pane_id = egui::Id::new("transcription_pane");
+        // NOTE: This might fix things if it's an interact_bg and not "interact"
+        let resp = ui.interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::Grab);
+
+        // NOTE: this layout isn't correct yet -> swap to columns.
         egui::Frame::default().show(ui, |ui| {
+            let header_height = egui::TextStyle::Heading.resolve(ui.style()).size;
+            let header_width = ui.max_rect().width();
+            let desired_size = egui::Vec2::new(header_width, header_height);
+            let layout = egui::Layout::left_to_right(egui::Align::Center)
+                .with_main_justify(true)
+                .with_main_wrap(true);
+
+            // TODO: swap this to the column layout trick used in the main app to get things to align properly.
             ui.allocate_ui_with_layout(desired_size, layout, |ui| {
                 ui.heading("Transcription:");
                 // NOTE: this should aaaactually probably cache it instead,
@@ -93,9 +105,7 @@ impl PaneView for TranscriptionPane {
             });
         });
 
-        let pane_id = egui::Id::new("transcription_pane");
-        ui.interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
-            .on_hover_cursor(egui::CursorIcon::Grab)
+        resp
     }
 
     // NOTE: if this makes sense to close, change this.

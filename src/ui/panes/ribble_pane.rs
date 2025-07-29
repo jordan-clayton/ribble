@@ -1,8 +1,8 @@
-use enum_dispatch::enum_dispatch;
-use strum::{AsRefStr, EnumIter, EnumString, IntoStaticStr};
 // NOTE: these need to be brought into scope so that enum_dispatch can run its macros
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::panes::panes::*;
+use crate::ui::panes::pane_list::*;
+use enum_dispatch::enum_dispatch;
+use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
 
 #[enum_dispatch(RibblePane)]
 pub(in crate::ui) trait PaneView {
@@ -10,13 +10,13 @@ pub(in crate::ui) trait PaneView {
 
     fn pane_title(&self) -> egui::WidgetText;
     /// # Arguments:
-    /// * ui: egui::Ui, for drawing,
-    /// * tile_id: egui_tiles::TileId, this Pane's id
+    /// * ui: egui::Ui, for drawing
+    /// * should_close: &mut bool, set to true if the user (can and) has closed the pane.
     /// * controller: RibbleController, for accessing internal data.
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
-        tile_id: egui_tiles::TileId,
+        should_close: &mut bool,
         // If there's significant atomic overhead, swap to a reference.
         // It shouldn't be an issue though.
         controller: RibbleController,
@@ -50,7 +50,7 @@ pub(in crate::ui) enum RibblePane {
     UserPreferencesPane(UserPreferencesPane),
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash, Display, AsRefStr)]
 pub(in crate::ui) enum RibblePaneId {
     Transcriber,
     Recording,

@@ -442,6 +442,14 @@ impl eframe::App for Ribble {
                                     }
 
                                     ui.monospace("Debug:");
+                                    // FPS counter -> NOTE this is not mean frame time and is not smoothed out
+                                    // TODO: look at maybe implementing that at some point.
+                                    // stable_dt is in seconds
+                                    let dt = ui.ctx().input(|i| { i.stable_dt });
+                                    let dt_ms = dt * 1000.0;
+                                    let fps = 1.0 / dt;
+                                    ui.monospace(format!("FPS: {fps:.2}"));
+                                    ui.monospace(format!("Frame time: {dt_ms:.2} ms"));
                                 }
                             });
                         }

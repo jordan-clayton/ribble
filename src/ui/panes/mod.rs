@@ -4,7 +4,7 @@ mod transcriber_pane;
 
 mod console_pane;
 mod downloads_pane;
-pub(in crate::ui) mod panes;
+pub(in crate::ui) mod pane_list;
 mod progress_pane;
 mod transcription_pane;
 mod user_preferences_pane;
@@ -14,12 +14,13 @@ use crate::controller::ribble_controller::RibbleController;
 use crate::ui::panes::ribble_pane::{PaneView, RibblePane, RibblePaneId};
 use crate::utils::errors::RibbleError;
 use std::collections::HashMap;
+use std::error::Error;
 use std::f32::consts::PI;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use strum::EnumCount;
 
-const FOCUS_ANIMATION_DURATION: f32 = 2.0;
+const FOCUS_ANIMATION_DURATION: f32 = 1.0;
 
 pub(in crate::ui) struct RibbleTree {
     data_directory: PathBuf,
@@ -36,8 +37,7 @@ impl RibbleTree {
         data_directory: &Path,
         controller: RibbleController,
     ) -> Result<Self, RibbleError> {
-        let tree_file = data_directory.join(Self::TREE_FILE);
-        let tree = Self::deserialize_tree(tree_file.as_path());
+        let tree = Self::deserialize_tree(data_directory);
         let behavior = RibbleTreeBehavior::from_tree(controller, &tree);
         Ok(Self {
             data_directory: data_directory.to_path_buf(),
@@ -49,7 +49,9 @@ impl RibbleTree {
         })
     }
     pub(in crate::ui) fn ui(&mut self, ui: &mut egui::Ui) {
-        // Mutably borrow once: add any new panes to the tree before painting.
+        // Do a once-over of any tabs which should be closed.
+        self.check_remove_old_tabs();
+        // Add any new panes to the tree before painting.
         self.check_add_new_tabs();
 
         // Update the time for the focused_pane behavior.
@@ -71,6 +73,30 @@ impl RibbleTree {
 
     pub(in crate::ui) fn add_new_pane(&mut self, pane_id: RibblePaneId) {
         self.behavior.add_new_pane(pane_id);
+    }
+
+    fn check_remove_old_tabs(&mut self) {
+        let RibbleTree {
+            data_directory: _,
+            tree,
+            behavior,
+            ..
+        } = self;
+
+        let RibbleTreeBehavior {
+            opened_tabs,
+            remove_children,
+            ..
+        } = behavior;
+
+        while let Some((tile_id, pane_id)) = remove_children.pop() {
+            // Since this should always be a pane, there shouldn't be a need to remove
+            // recursively.
+            // The tree SimpleOptions should also take care of flattening containers.
+            // (NOTE: THIS NEEDS TO BE TESTED).
+            tree.tiles.remove(tile_id);
+            opened_tabs.remove(&pane_id);
+        }
     }
 
     // This checks for a new child and either focuses/inserts the tab
@@ -186,15 +212,20 @@ impl RibbleTree {
         TreeSerializer { out_file_path: canonicalized, tree: self.tree.clone() }
     }
 
+    // NOTE: this is screwing up.
     fn deserialize_tree(data_directory: &Path) -> egui_tiles::Tree<RibblePane> {
         let canonicalized = data_directory.join(Self::TREE_FILE);
         match std::fs::File::open(canonicalized.as_path()) {
             Ok(tree_file) => ron::de::from_reader(tree_file).unwrap_or_else(|e| {
-                log::warn!("Error deserializing tree file: {e}");
+                log::warn!("Error deserializing tree file: {}\n\
+                Error: {}\n\
+                Error:source: {:#?}", canonicalized.display(), &e, e.source());
                 Self::default_tree()
             }),
             Err(e) => {
-                log::warn!("Error opening tree file: {e}");
+                log::warn!("Error opening tree file: {}\n\
+                Error: {}\n\
+                Error source: {:#?}", canonicalized.display(), &e, e.source());
                 Self::default_tree()
             }
         }
@@ -272,6 +303,7 @@ pub(in crate::ui) struct RibbleTreeBehavior {
     gap_width: f32,
     // NOTE: this should -only- be set by the app via a "windows" menu.
     add_child: Option<RibblePaneId>,
+    remove_children: Vec<(egui_tiles::TileId, RibblePaneId)>,
     focus_non_tab_pane: Option<egui_tiles::TileId>,
     focus_time: f32,
 }
@@ -291,6 +323,7 @@ impl RibbleTreeBehavior {
             tab_bar_height: Self::TAB_BAR_HEIGHT,
             gap_width: Self::GAP_WIDTH,
             add_child: None,
+            remove_children: Vec::with_capacity(RibblePane::COUNT),
             focus_non_tab_pane: None,
             // NOTE: if this should become a settable parameter,
             // create a builder/mutator.
@@ -327,6 +360,7 @@ impl RibbleTreeBehavior {
             tab_bar_height: Self::TAB_BAR_HEIGHT,
             gap_width: Self::GAP_WIDTH,
             add_child: None,
+            remove_children: Vec::with_capacity(RibblePane::COUNT),
             focus_non_tab_pane: None,
             // TODO: remove this if it's annoying.
             focus_time: 0.0,
@@ -346,9 +380,10 @@ impl egui_tiles::Behavior<RibblePane> for RibbleTreeBehavior {
         tile_id: egui_tiles::TileId,
         pane: &mut RibblePane,
     ) -> egui_tiles::UiResponse {
+        let mut should_close = false;
         // It's cheap to clone the controller; just an atomic increment.
         // If it somehow becomes a bottleneck, take it in by reference.
-        let resp = pane.pane_ui(ui, tile_id, self.controller.clone());
+        let resp = pane.pane_ui(ui, &mut should_close, self.controller.clone());
         if let Some(focus_id) = self.focus_non_tab_pane {
             // If the user has noticed that the tab they tried to open is in focus and move their
             // mouse to it, turn off the focus.
@@ -358,6 +393,13 @@ impl egui_tiles::Behavior<RibblePane> for RibbleTreeBehavior {
 
             // This will drive the oscillating saturation to hopefully make a pane a bit more
             // noticeable.
+            ui.ctx().request_repaint();
+        }
+
+        // If the user has requested to close the pane (and it can close), push it to the
+        // remove_children vector which will get drained on the next repaint.
+        if should_close {
+            self.remove_children.push((tile_id, pane.pane_id()));
             ui.ctx().request_repaint();
         }
 
@@ -398,15 +440,19 @@ impl egui_tiles::Behavior<RibblePane> for RibbleTreeBehavior {
         if let Some(tile) = tiles.get_mut(tile_id) {
             match tile {
                 egui_tiles::Tile::Pane(ribble_tab) => {
+                    log::info!("Removing pane: {}, ID: {:#?}", ribble_tab.pane_id(), tile_id);
                     let close_tab = ribble_tab.on_pane_close(self.controller.clone());
-                    // If it's a close-able tab, remove it from the mapping.
+                    // If it's a closeable tab, remove it from the mapping.
                     if close_tab {
                         let id = ribble_tab.pane_id();
                         self.opened_tabs.remove(&id);
                     }
                     close_tab
                 }
-                egui_tiles::Tile::Container(_) => true,
+                egui_tiles::Tile::Container(container) => {
+                    log::info!("Removing container: {:#?}, ID: {:#?}", container.kind(), tile_id);
+                    true
+                }
             }
         } else {
             true
@@ -468,7 +514,7 @@ impl egui_tiles::Behavior<RibblePane> for RibbleTreeBehavior {
                     rect,
                     style.visuals.window_corner_radius,
                     egui::Stroke::new(Self::FOCUS_STROKE_WIDTH, color),
-                    egui::StrokeKind::Outside,
+                    egui::StrokeKind::Middle,
                 );
             }
         }

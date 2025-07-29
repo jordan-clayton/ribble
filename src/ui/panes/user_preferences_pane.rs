@@ -1,7 +1,7 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{MAX_NUM_CONSOLE_MESSAGES, MIN_NUM_CONSOLE_MESSAGES};
-use crate::ui::panes::PaneView;
 use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
 use crate::utils::preferences::RibbleAppTheme;
 use strum::IntoEnumIterator;
 
@@ -24,7 +24,7 @@ impl PaneView for UserPreferencesPane {
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
-        _tile_id: egui_tiles::TileId,
+        should_close: &mut bool,
         controller: RibbleController,
     ) -> egui::Response {
         let prefs = *controller.read_user_preferences();
@@ -39,6 +39,16 @@ impl PaneView for UserPreferencesPane {
 
         let mut theme = prefs.system_theme();
 
+        // TODO: this might not work just yet - test out and remove this todo if it's right.
+        // Create a (hopefully) lower-priority pane-sized interaction hitbox
+        let pane_id = egui::Id::new("user_prefs_pane");
+        let resp = ui
+            .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::Grab);
+
+        // TODO: this should a mechanism to be able to reset the layout.
+        // -Not sure how this is going to happen just yet (try to avoid exposing the information to other tabs)
+        ui.heading("Settings");
         egui::Frame::new().show(ui, |ui| {
             egui::ScrollArea::both().show(ui, |ui| {
                 egui::Grid::new("user_prefs_grid")
@@ -92,20 +102,12 @@ impl PaneView for UserPreferencesPane {
             });
         });
 
-        let pane_id = egui::Id::new("user_prefs_pane");
-        let resp = ui
-            .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
-            .on_hover_cursor(egui::CursorIcon::Grab);
 
         // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
         // will just nop.
-        let mut should_close = false;
         resp.context_menu(|ui| {
-            ui.selectable_value(&mut should_close, self.is_pane_closable(), "Close tab.");
+            ui.selectable_value(should_close, self.is_pane_closable(), "Close tab.");
         });
-        if should_close {
-            ui.close();
-        }
 
         resp
     }

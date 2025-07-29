@@ -1,7 +1,7 @@
-use crate::controller::ConsoleMessage;
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::panes::PaneView;
+use crate::controller::ConsoleMessage;
 use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
 use std::sync::Arc;
 
 #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
@@ -25,17 +25,25 @@ impl PaneView for ConsolePane {
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
-        _tile_id: egui_tiles::TileId,
+        should_close: &mut bool,
         controller: RibbleController,
     ) -> egui::Response {
         // Try to read the current messages (non-blocking).
         controller.try_get_current_messages(&mut self.message_buffer);
 
+        let pane_id = egui::Id::new("console_pane");
+        let resp = ui
+            .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
+            // This cursor needs to be on the "bg -> not quite sure how to resolve this just yet"
+            .on_hover_cursor(egui::CursorIcon::Grab);
         let bg_col = ui.visuals().extreme_bg_color;
+
+        ui.heading("Console:");
         egui::Frame::default().fill(bg_col).show(ui, |ui| {
-            ui.heading("Console:");
-            egui::ScrollArea::both()
+            egui::ScrollArea::vertical()
                 .stick_to_bottom(true)
+                // Fill space -inside- the scroll area.
+                .auto_shrink([false; 2])
                 .show(ui, |ui| {
                     ui.with_layout(
                         egui::Layout::top_down(egui::Align::LEFT).with_cross_justify(true),
@@ -48,20 +56,12 @@ impl PaneView for ConsolePane {
                 });
         });
 
-        let pane_id = egui::Id::new("console_pane");
-        let resp = ui
-            .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
-            .on_hover_cursor(egui::CursorIcon::Grab);
 
         // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
         // will just nop.
-        let mut should_close = false;
         resp.context_menu(|ui| {
-            ui.selectable_value(&mut should_close, self.is_pane_closable(), "Close tab.");
+            ui.selectable_value(should_close, self.is_pane_closable(), "Close tab.");
         });
-        if should_close {
-            ui.close();
-        }
 
 
         resp

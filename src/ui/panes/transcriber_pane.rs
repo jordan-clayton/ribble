@@ -1,7 +1,7 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{CompletedRecordingJobs, ModelFile, OfflineTranscriberFeedback};
-use crate::ui::panes::PaneView;
 use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
 use crate::ui::widgets::toggle_switch::toggle;
 use crate::utils::realtime_settings::{AudioSampleLen, RealtimeTimeout, VadSampleLen};
 use crate::utils::vad_configs::{VadFrameSize, VadStrictness, VadType};
@@ -68,7 +68,7 @@ impl PaneView for TranscriberPane {
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
-        _tile_id: egui_tiles::TileId,
+        _should_close: &mut bool,
         controller: RibbleController,
     ) -> egui::Response {
         let transcription_running = controller.transcriber_running();
@@ -76,25 +76,31 @@ impl PaneView for TranscriberPane {
 
         let configs = *controller.read_transcription_configs();
         let vad_configs = *controller.read_vad_configs();
-        let current_model = configs
-            .model_id()
-            .clone()
-            .and_then(|id| self.model_list.iter().find(|(k, _)| *k == id))
-            // Since this is a trivial clone, it's easiest to avoid borrowing.
-            .and_then(|model| Some(model.clone()));
+        let current_model = (*configs
+            .model_id())
+            .and_then(|id| self.model_list.iter().find(|(k, _)| *k == id)).cloned();
 
         // RUN TRANSCRIPTION
         let can_run_transcription = current_model.is_some() && !audio_worker_running;
 
         // HEADING
         let header_text = if self.realtime {
-            "File Transcription"
-        } else {
             "Real-time Transcription"
+        } else {
+            "File Transcription"
         };
+
+        // TODO: this might not work just yet - test out and remove this todo if it's right.
+        // Create a (hopefully) lower-priority pane-sized interaction hitbox
+        // Handle dragging the UI.
+        let pane_id = egui::Id::new("transcriber_pane");
+        // Return the interaction response.
+        let resp = ui.interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::Grab);
 
         // MAIN PANEL FRAME
         egui::Frame::default().show(ui, |ui| {
+            // TODO: cop the trick used in the main app to get this to align properly.
             let header_height = egui::TextStyle::Heading.resolve(ui.style()).size;
             let header_width = ui.max_rect().width();
             let desired_size = egui::Vec2::new(header_width, header_height);
@@ -184,7 +190,7 @@ impl PaneView for TranscriberPane {
                         egui::Grid::new("audio_file").num_columns(2).striped(true).show(ui, |ui| {
                             ui.label("Current audio file:");
                             ui.horizontal(|ui| {
-                                ui.label(format!("{:#?}", current_file));
+                                ui.label(format!("{current_file:#?}"));
                                 if ui.button("Clear").clicked() {
                                     controller.clear_audio_file_path();
                                 }
@@ -276,22 +282,21 @@ impl PaneView for TranscriberPane {
                                             // Try-Get the model list from the controller.
                                             controller.try_read_model_list(&mut self.model_list);
                                             // Get a clone of the model_id to modify
-                                            let mut model_id = configs.model_id().clone();
+                                            let mut model_id = *configs.model_id();
 
-                                            let model_id_combobox = match current_model{
+                                            let model_id_combobox = match current_model {
                                                 Some((_, file)) => {
-                                                    match file{
+                                                    match file {
                                                         ModelFile::Packed(idx) => {
                                                             egui::ComboBox::from_id_salt("model_id_combobox")
                                                                 .selected_text(ModelFile::PACKED_NAMES[idx])
-                                                        },
+                                                        }
                                                         ModelFile::File(name) => {
                                                             egui::ComboBox::from_id_salt("model_id_combobox")
                                                                 .selected_text(name.as_ref())
-
-                                                        },
+                                                        }
                                                     }
-                                                },
+                                                }
                                                 None => {
                                                     egui::ComboBox::from_id_salt("model_id_combobox")
                                                         .selected_text("Select a model.")
@@ -299,25 +304,25 @@ impl PaneView for TranscriberPane {
                                             };
 
                                             model_id_combobox.show_ui(ui, |ui| {
-                                                    for (m_id, model_file) in self.model_list.iter() {
-                                                        match model_file {
-                                                            ModelFile::Packed(idx) => {
-                                                                if ui.selectable_value(&mut model_id, Some(*m_id), ModelFile::PACKED_NAMES[*idx])
-                                                                    .clicked() {
-                                                                    let new_configs = configs.with_model_id(model_id);
-                                                                    controller.write_transcription_configs(new_configs);
-                                                                }
+                                                for (m_id, model_file) in self.model_list.iter() {
+                                                    match model_file {
+                                                        ModelFile::Packed(idx) => {
+                                                            if ui.selectable_value(&mut model_id, Some(*m_id), ModelFile::PACKED_NAMES[*idx])
+                                                                .clicked() {
+                                                                let new_configs = configs.with_model_id(model_id);
+                                                                controller.write_transcription_configs(new_configs);
                                                             }
-                                                            ModelFile::File(file_name) => {
-                                                                if ui.selectable_value(&mut model_id, Some(*m_id), file_name.as_ref())
-                                                                    .clicked() {
-                                                                    let new_configs = configs.with_model_id(model_id);
-                                                                    controller.write_transcription_configs(new_configs);
-                                                                }
+                                                        }
+                                                        ModelFile::File(file_name) => {
+                                                            if ui.selectable_value(&mut model_id, Some(*m_id), file_name.as_ref())
+                                                                .clicked() {
+                                                                let new_configs = configs.with_model_id(model_id);
+                                                                controller.write_transcription_configs(new_configs);
                                                             }
-                                                        };
-                                                    }
-                                                });
+                                                        }
+                                                    };
+                                                }
+                                            });
 
                                             if ui.button("Open Model").clicked() {
                                                 let file_dialog = rfd::FileDialog::new()
@@ -869,12 +874,7 @@ impl PaneView for TranscriberPane {
             }
         }
 
-        // Handle dragging the UI.
-        let pane_id = egui::Id::new("transcriber_pane");
-
-        // Return the interaction response.
-        ui.interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
-            .on_hover_cursor(egui::CursorIcon::Grab)
+        resp
     }
 
     fn is_pane_closable(&self) -> bool {

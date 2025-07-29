@@ -35,15 +35,21 @@ impl PaneView for RecordingPane {
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
-        _tile_id: egui_tiles::TileId,
+        should_close: &mut bool,
         controller: RibbleController,
     ) -> egui::Response {
         let recorder_running = controller.recorder_running();
         let audio_worker_running = recorder_running || controller.transcriber_running();
         let configs = *controller.read_recorder_configs();
-        egui::Frame::default().show(ui, |ui| {
-            ui.heading("Recording:");
 
+
+        // TODO: this might not work just yet - test out and remove this todo if it's right.
+        // Create a (hopefully) lower-priority pane-sized interaction hitbox
+        let pane_id = egui::Id::new("recording_pane");
+        let resp = ui.interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag());
+
+        ui.heading("Recording:");
+        egui::Frame::default().show(ui, |ui| {
             let button_spacing = ui.spacing().button_padding.y;
             ui.vertical_centered_justified(|ui| {
                 if ui
@@ -280,19 +286,12 @@ impl PaneView for RecordingPane {
             }
         }
 
-        let pane_id = egui::Id::new("recording_pane");
-        let resp = ui.interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag());
 
         // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
         // will just nop.
-        let mut should_close = false;
         resp.context_menu(|ui| {
-            ui.selectable_value(&mut should_close, self.is_pane_closable(), "Close tab.");
+            ui.selectable_value(should_close, self.is_pane_closable(), "Close tab.");
         });
-
-        if should_close {
-            ui.close();
-        }
 
         resp
     }

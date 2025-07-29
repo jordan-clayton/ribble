@@ -2,6 +2,8 @@ use crate::controller::{AnalysisType, AtomicAnalysisType, RotationDirection, Vis
 use crate::utils::errors::RibbleError;
 use crossbeam::channel::Receiver;
 use parking_lot::RwLock;
+use realfft::num_complex::{Complex, ComplexFloat};
+use realfft::num_traits::Zero;
 use realfft::RealFftPlanner;
 use std::error::Error;
 use std::f32::consts::PI;
@@ -151,7 +153,7 @@ impl VisualizerEngineState {
             .collect::<Vec<_>>();
 
         // Assert no nan/infinite
-        debug_assert!(amp_envelope.iter().all(|f| f.is_normal()));
+        debug_assert!(amp_envelope.iter().all(|f| f.is_finite() && !f.is_nan()));
 
         // Grab the maximum rms
         let max_rms = amp_envelope.iter().copied().fold(1f32, f32::max);
@@ -229,8 +231,8 @@ impl VisualizerEngineState {
                 }
 
                 // TODO: this might not be necessary.
-                debug_assert!(freq.is_normal(), "Frequency non normal: {freq}");
-                debug_assert!(value.is_normal(), "Complex value is not normal: {value}");
+                debug_assert!(freq.is_finite() || !freq.is_nan(), "Frequency inf or NaN: {freq}");
+                debug_assert!(value.is_finite() || !value.is_nan(), "Complex value inf or NaN: {value}");
 
                 // Find the bucket.
                 let closest =

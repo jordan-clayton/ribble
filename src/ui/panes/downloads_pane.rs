@@ -26,15 +26,23 @@ impl PaneView for DownloadsPane {
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
-        _tile_id: egui_tiles::TileId,
+        should_close: &mut bool,
         controller: RibbleController,
     ) -> egui::Response {
         controller.try_get_current_downloads(&mut self.current_downloads);
         if !self.current_downloads.is_empty() {
             ui.ctx().request_repaint();
         }
+
+        // TODO: this might not work just yet - test out and remove this todo if it's right.
+        // Create a (hopefully) lower-priority sense interaction to make the pane draggable.
+        let pane_id = egui::Id::new("downloads_pane");
+        let resp = ui
+            .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::Grab);
+
+        ui.heading("Downloads:");
         egui::Frame::default().show(ui, |ui| {
-            ui.heading("Downloads:");
             egui::ScrollArea::both()
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
@@ -77,21 +85,12 @@ impl PaneView for DownloadsPane {
                 });
         });
 
-        let pane_id = egui::Id::new("downloads_pane");
-        let resp = ui
-            .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
-            .on_hover_cursor(egui::CursorIcon::Grab);
 
         // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
         // will just nop.
-        let mut should_close = false;
         resp.context_menu(|ui| {
-            ui.selectable_value(&mut should_close, self.is_pane_closable(), "Close tab.");
+            ui.selectable_value(should_close, self.is_pane_closable(), "Close tab.");
         });
-
-        if should_close {
-            ui.close();
-        }
 
         resp
     }

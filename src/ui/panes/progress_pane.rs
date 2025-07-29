@@ -1,7 +1,7 @@
-use crate::controller::Progress;
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::panes::PaneView;
+use crate::controller::Progress;
 use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
 use irox_egui_extras::progressbar::ProgressBar;
 
 #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
@@ -26,7 +26,7 @@ impl PaneView for ProgressPane {
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
-        _tile_id: egui_tiles::TileId,
+        should_close: &mut bool,
         controller: RibbleController,
     ) -> egui::Response {
         // Get the current list of jobs.
@@ -37,8 +37,16 @@ impl PaneView for ProgressPane {
             ui.ctx().request_repaint();
         }
 
+        // TODO: this might not work just yet - test out and remove this todo if it's right.
+        // Create a (hopefully) lower-priority interaction box to make the pane draggable
+        let pane_id = egui::Id::new("progress_pane");
+        let resp = ui
+            .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::Grab);
+
+        ui.heading("Progress:");
+
         egui::Frame::default().show(ui, |ui| {
-            ui.heading("Progress:");
             egui::ScrollArea::both()
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
@@ -63,20 +71,12 @@ impl PaneView for ProgressPane {
                 });
         });
 
-        let pane_id = egui::Id::new("progress_pane");
-        let resp = ui
-            .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
-            .on_hover_cursor(egui::CursorIcon::Grab);
 
         // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
         // will just nop.
-        let mut should_close = false;
         resp.context_menu(|ui| {
-            ui.selectable_value(&mut should_close, self.is_pane_closable(), "Close tab.");
+            ui.selectable_value(should_close, self.is_pane_closable(), "Close tab.");
         });
-        if should_close {
-            ui.close();
-        }
 
         resp
     }

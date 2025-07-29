@@ -27,6 +27,9 @@ pub(crate) struct VisualizerPane {
     #[serde(skip)]
     #[serde(default)]
     current_theme: RibbleAppTheme,
+    #[serde(skip)]
+    #[serde(default)]
+    has_focus: bool,
 }
 
 impl Clone for VisualizerPane {
@@ -34,14 +37,19 @@ impl Clone for VisualizerPane {
         Self {
             visualizer_buckets: self.visualizer_buckets,
             presentation_buckets: self.presentation_buckets,
-            color_interpolator: self.current_theme.color_interpolator(),
+            color_interpolator: Some(self.current_theme.color_interpolator().unwrap_or(RibbleAppTheme::Mocha.color_interpolator().unwrap())),
             current_theme: self.current_theme,
+            has_focus: self.has_focus,
         }
     }
 }
 
+// NOTE NOTE NOTE: implement drop and log the color interpolator to stderr ->
+// I'm not sure where the drawing problem for the soundbar is happening.
+
 // For some reason, the egui_colorgradient structs don't implement Debug, despite all inner fields
 // implementing debug.
+// TODO: refactor this once the mystery is solved.
 impl Debug for VisualizerPane {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VisualizerPane")
@@ -68,9 +76,10 @@ impl PaneView for VisualizerPane {
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
-        _tile_id: egui_tiles::TileId,
+        should_close: &mut bool,
         controller: RibbleController,
     ) -> egui::Response {
+
         // If this is painting, a visualizer is in view, so set the visualizer to true to continue
         // processing audio data if it's coming in.
         controller.set_visualizer_visibility(true);
@@ -111,24 +120,43 @@ impl PaneView for VisualizerPane {
 
         let mut visualizer_type = controller.get_visualizer_analysis_type();
 
-        let inner = egui::Frame::default().show(ui, |ui| {
-            let color_interpolator = self
-                .color_interpolator
-                .as_ref()
-                .expect("The color interpolator is only None at construction.");
+        let pane_id = egui::Id::new("visualizer_pane");
+        let pane_max_rect = ui.max_rect();
+        let resp = ui
+            .interact(pane_max_rect, pane_id, egui::Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::Grab);
 
-            // Add the analysis type header
+        let bg_col = ui.style().visuals.extreme_bg_color;
+
+        egui::Frame::default().fill(bg_col).show(ui, |ui| {
             ui.heading(visualizer_type.as_ref());
-            let rect = ui.max_rect();
-            // The new implementation is in the widgets module.
-            ui.add(soundbar(
-                rect,
-                &self.presentation_buckets,
-                color_interpolator,
-            ));
+            ui.put(pane_max_rect, |ui: &mut egui::Ui| {
+                let color_interpolator = self
+                    .color_interpolator
+                    .as_ref()
+                    .expect("The color interpolator is only None at construction.");
+
+                ui.add(soundbar(
+                    pane_max_rect,
+                    &self.presentation_buckets,
+                    color_interpolator,
+                ))
+            });
+            // The new implementation is in the "widgets" module.
         });
 
-        if inner.response.has_focus() {
+        if resp.clicked() {
+            self.has_focus = true;
+        }
+        if resp.clicked_elsewhere() {
+            self.has_focus = false;
+        }
+
+        // Once the sense interactions have settled, this may always return true.
+        // Check once the response issue has been resolved.
+        // NOTE: could also use up (CC) and down (C)
+        // -> this should probably change if/when other visualizations (e.g. line plot) are implemented.
+        if self.has_focus {
             let (left, right) = ui.input(|i| {
                 (
                     i.key_pressed(egui::Key::ArrowLeft),
@@ -145,14 +173,9 @@ impl PaneView for VisualizerPane {
             }
         }
 
-        let pane_id = egui::Id::new("visualizer_pane");
-        let resp = ui
-            .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
-            .on_hover_cursor(egui::CursorIcon::Grab);
 
         // Add a context menu to make this close-able.
         // If this is no longer close-able, the close button will just nop.
-        let mut should_close = false;
         resp.context_menu(|ui| {
             for analysis_type in AnalysisType::iter() {
                 if ui
@@ -165,11 +188,8 @@ impl PaneView for VisualizerPane {
 
             ui.separator();
             // For closing the pane.
-            ui.selectable_value(&mut should_close, self.is_pane_closable(), "Close tab.");
+            ui.selectable_value(should_close, self.is_pane_closable(), "Close tab.");
         });
-        if should_close {
-            ui.close();
-        }
 
         resp
     }
