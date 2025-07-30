@@ -1,7 +1,7 @@
 use std::f32::consts::PI;
 
 use crate::controller::NUM_VISUALIZER_BUCKETS;
-use egui::emath::easing::{circular_in, circular_out, cubic_in, cubic_out, exponential_out};
+use egui::emath::easing::{circular_in, circular_out, cubic_out, exponential_out};
 use egui::epaint::{Hsva, Rgba};
 use egui::{lerp, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2, Widget};
 use egui_colorgradient::ColorInterpolator;
@@ -67,6 +67,11 @@ fn draw_soundbar(
     // Since the actual allocated rect caaaan be slightly smaller or larger,
     // the number of bars are calculated from the actual allocated rect.
     let num_bars = ((rect.width() - padding) / bar_plus_padding).trunc() as usize;
+
+    // TODO: not sure whether desired to use a crosshair or just the mouse pointer.
+    // Basically, if -any- rect passes the hit test, then this swaps to the crosshair.
+    let mut show_crosshair = false;
+
     if ui.is_rect_visible(rect) {
         let mouse_pos = ui
             .ctx()
@@ -94,7 +99,7 @@ fn draw_soundbar(
 
                         let height_t = interpolate_buckets(idx, num_bars, buckets);
                         col.horizontal_centered(|ui| {
-                            draw_soundbar_rect(ui, bar_width, bar_max_height, height_t, color.into(), mouse_pos);
+                            draw_soundbar_rect(ui, bar_width, bar_max_height, height_t, color.into(), mouse_pos, &mut show_crosshair);
                         });
                     }
                 });
@@ -102,7 +107,11 @@ fn draw_soundbar(
         });
     }
 
-    response
+    if show_crosshair {
+        response.on_hover_cursor(egui::CursorIcon::Crosshair)
+    } else {
+        response
+    }
 }
 
 fn draw_soundbar_rect(
@@ -116,6 +125,7 @@ fn draw_soundbar_rect(
     // Taking this in as RGBA will just create annoying problems.
     color: Hsva,
     mouse_position: Pos2,
+    show_crosshair: &mut bool,
 ) -> Response {
     let bar_height = lerp(
         BAR_MIN_HEIGHT..=bar_max_height.max(BAR_MIN_HEIGHT),
@@ -138,6 +148,9 @@ fn draw_soundbar_rect(
         let hitbox = rect.scale_from_center2(COLLISION_BOX_SCALE);
 
         let (width_expand_t, height_expand_t) = if hitbox.contains(mouse_position) {
+            // Set the show-crosshair flag.
+            *show_crosshair = true;
+
             let center = rect.center();
             // Since this interaction thing is intentionally cartoonish, this "interaction limit"
             // serves as the rectangle's "influence aura"

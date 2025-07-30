@@ -44,12 +44,8 @@ impl Clone for VisualizerPane {
     }
 }
 
-// NOTE NOTE NOTE: implement drop and log the color interpolator to stderr ->
-// I'm not sure where the drawing problem for the soundbar is happening.
-
 // For some reason, the egui_colorgradient structs don't implement Debug, despite all inner fields
 // implementing debug.
-// TODO: refactor this once the mystery is solved.
 impl Debug for VisualizerPane {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VisualizerPane")
@@ -136,13 +132,13 @@ impl PaneView for VisualizerPane {
                     .as_ref()
                     .expect("The color interpolator is only None at construction.");
 
+                // The new implementation is in the "widgets" module.
                 ui.add(soundbar(
                     pane_max_rect,
                     &self.presentation_buckets,
                     color_interpolator,
                 ))
             });
-            // The new implementation is in the "widgets" module.
         });
 
         if resp.clicked() {
