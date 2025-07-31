@@ -147,20 +147,20 @@ impl RecorderEngineState {
     }
 }
 
-pub(super) struct RecorderEngine {
+pub struct RecorderEngine {
     inner: Arc<RecorderEngineState>,
     work_request_sender: Sender<WorkRequest>,
 }
 
 impl RecorderEngine {
-    pub(super) fn new(configs: RibbleRecordingConfigs, bus: &Bus) -> Self {
+    pub fn new(configs: RibbleRecordingConfigs, bus: &Bus) -> Self {
         Self {
             inner: Arc::new(RecorderEngineState::new(configs, bus)),
             work_request_sender: bus.work_request_sender(),
         }
     }
 
-    pub(super) fn start_recording<A>(&self, audio_backend: Arc<A>)
+    pub fn start_recording<A>(&self, audio_backend: Arc<A>)
     where
         A: AudioBackend<ArcChannelSink<f32>> + Send + Sync + 'static,
     {
@@ -187,19 +187,19 @@ impl RecorderEngine {
         }
     }
 
-    pub(super) fn stop_recording(&self) {
+    pub fn stop_recording(&self) {
         self.inner.recorder_running.store(false, Ordering::Release);
     }
 
-    pub(super) fn recorder_running(&self) -> bool {
+    pub fn recorder_running(&self) -> bool {
         self.inner.recorder_running.load(Ordering::Acquire)
     }
 
-    pub(super) fn read_recorder_configs(&self) -> Arc<RibbleRecordingConfigs> {
+    pub fn read_recorder_configs(&self) -> Arc<RibbleRecordingConfigs> {
         self.inner.recorder_configs.load_full()
     }
 
-    pub(super) fn write_recorder_configs(&self, recorder_configs: RibbleRecordingConfigs) {
+    pub fn write_recorder_configs(&self, recorder_configs: RibbleRecordingConfigs) {
         self.inner
             .recorder_configs
             .store(Arc::new(recorder_configs));

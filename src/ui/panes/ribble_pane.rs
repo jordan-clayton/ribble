@@ -6,7 +6,7 @@ use enum_dispatch::enum_dispatch;
 use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
 
 #[enum_dispatch(RibblePane)]
-pub(in crate::ui) trait PaneView {
+pub trait PaneView {
     fn pane_id(&self) -> RibblePaneId;
 
     fn pane_title(&self) -> egui::WidgetText;

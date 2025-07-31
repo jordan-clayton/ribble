@@ -12,27 +12,24 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
 
-pub(crate) mod audio_backend_proxy;
-mod console;
-mod downloader;
-mod kernel;
-mod model_bank;
-mod progress;
-mod recorder;
-pub(crate) mod ribble_controller;
-mod transcriber;
-#[cfg(not(feature = "bencher"))]
-mod visualizer;
-#[cfg(feature = "bencher")]
-pub(crate) mod visualizer;
+pub mod audio_backend_proxy;
+pub mod console;
+pub mod downloader;
+pub mod kernel;
+pub mod model_bank;
+pub mod progress;
+pub mod recorder;
+pub mod ribble_controller;
+pub mod transcriber;
+pub mod visualizer;
 
-mod worker;
-mod writer;
+pub mod worker;
+pub mod writer;
 
 // TODO: perhaps make this a "resolution" parameter.
 // It's also more than likely fine to double this, if not quadruple.
 // TODO: test performance with higher resolutions.
-pub(crate) const NUM_VISUALIZER_BUCKETS: usize = 32;
+pub const NUM_VISUALIZER_BUCKETS: usize = 32;
 
 pub const UTILITY_QUEUE_SIZE: usize = 32;
 
@@ -48,12 +45,12 @@ pub const MIN_NUM_CONSOLE_MESSAGES: usize = 16;
 pub const MAX_NUM_CONSOLE_MESSAGES: usize = 64;
 type RibbleWorkerHandle = JoinHandle<Result<RibbleMessage, RibbleError>>;
 
-pub(crate) enum RibbleMessage {
+pub enum RibbleMessage {
     Console(ConsoleMessage),
     BackgroundWork(Result<(), RibbleError>),
 }
 
-struct Bus {
+pub struct Bus {
     console_message_sender: Sender<ConsoleMessage>,
     progress_message_sender: Sender<ProgressMessage>,
     work_request_sender: Sender<WorkRequest>,
@@ -143,14 +140,14 @@ impl Bus {
 #[derive(
     Default, PartialEq, Eq, EnumIter, EnumString, AsRefStr, serde::Serialize, serde::Deserialize,
 )]
-pub(crate) enum OfflineTranscriberFeedback {
+pub enum OfflineTranscriberFeedback {
     #[default]
     Minimal = 0,
     Progressive,
 }
 
 #[derive(Debug, Display)]
-pub(crate) enum ConsoleMessage {
+pub enum ConsoleMessage {
     Error(RibbleError),
     Status(String),
     Shutdown,
@@ -158,7 +155,7 @@ pub(crate) enum ConsoleMessage {
 
 impl ConsoleMessage {
     // NOTE TO SELF: call ui.label(msg.to_console_text(&visuals)) in the console tab when drawing
-    pub(crate) fn to_console_text(&self, visuals: &Visuals) -> RichText {
+    pub fn to_console_text(&self, visuals: &Visuals) -> RichText {
         let (color, msg) = match self {
             ConsoleMessage::Error(msg) => (visuals.error_fg_color, msg.to_string()),
             ConsoleMessage::Status(msg) => (visuals.text_color(), msg.to_owned()),
@@ -187,7 +184,7 @@ enum WorkRequest {
 // TODO: think about how/where to add the "abort"
 // The UI and the DownloadEngine both interop here.
 #[derive(Clone, Debug)]
-pub(crate) struct FileDownload {
+pub struct FileDownload {
     name: Arc<str>,
     progress: ProgressView,
     should_abort: Arc<AtomicBool>,
@@ -202,10 +199,10 @@ impl FileDownload {
         }
     }
 
-    pub(crate) fn name(&self) -> Arc<str> {
+    pub fn name(&self) -> Arc<str> {
         Arc::clone(&self.name)
     }
-    pub(crate) fn progress(&self) -> ProgressView {
+    pub fn progress(&self) -> ProgressView {
         self.progress.clone()
     }
 
@@ -261,7 +258,7 @@ enum ProgressMessage {
 }
 
 #[derive(Debug)]
-pub(crate) struct AtomicProgress {
+pub struct AtomicProgress {
     pos: AtomicU64,
     capacity: AtomicU64,
 }
@@ -308,14 +305,14 @@ impl AtomicProgress {
     }
 }
 
-pub(crate) enum AmortizedProgress {
+pub enum AmortizedProgress {
     NoJobs,
     Determinate { current: usize, total_size: usize },
     Indeterminate,
 }
 
 #[derive(Copy, Clone, Default)]
-pub(crate) enum AmortizedDownloadProgress {
+pub enum AmortizedDownloadProgress {
     #[default]
     NoJobs,
     Total {
@@ -324,7 +321,7 @@ pub(crate) enum AmortizedDownloadProgress {
     },
 }
 impl AmortizedDownloadProgress {
-    pub(crate) fn decompose(self) -> Option<(usize, usize)> {
+    pub fn decompose(self) -> Option<(usize, usize)> {
         match self {
             AmortizedDownloadProgress::Total {
                 current,
@@ -348,33 +345,33 @@ impl From<(usize, usize)> for AmortizedDownloadProgress {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ProgressView {
+pub struct ProgressView {
     inner: Arc<AtomicProgress>,
 }
 
 impl ProgressView {
-    pub(crate) fn new(progress: Arc<AtomicProgress>) -> Self {
+    pub fn new(progress: Arc<AtomicProgress>) -> Self {
         Self { inner: progress }
     }
 
     // Returns the progress, normalized between 0 and 1
-    pub(crate) fn current_progress(&self) -> f32 {
+    pub fn current_progress(&self) -> f32 {
         self.inner.normalized()
     }
 
-    pub(crate) fn current_position(&self) -> u64 {
+    pub fn current_position(&self) -> u64 {
         self.inner.current_position()
     }
-    pub(crate) fn total_size(&self) -> u64 {
+    pub fn total_size(&self) -> u64 {
         self.inner.total_size()
     }
-    pub(crate) fn is_finished(&self) -> bool {
+    pub fn is_finished(&self) -> bool {
         self.inner.is_finished()
     }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Progress {
+pub enum Progress {
     Determinate {
         job_name: &'static str,
         progress: Arc<AtomicProgress>,
@@ -394,7 +391,7 @@ impl Progress {
         Self::Determinate { job_name, progress }
     }
 
-    pub(crate) fn job_name(&self) -> &'static str {
+    pub fn job_name(&self) -> &'static str {
         match self {
             Progress::Determinate {
                 job_name,
@@ -441,20 +438,20 @@ impl Progress {
         }
     }
 
-    pub(crate) fn current_progress(&self) -> Option<usize> {
+    pub fn current_progress(&self) -> Option<usize> {
         match self {
             Progress::Determinate { progress, .. } => Some(progress.current_position() as usize),
             Progress::Indeterminate { .. } => None,
         }
     }
-    pub(crate) fn total_size(&self) -> Option<usize> {
+    pub fn total_size(&self) -> Option<usize> {
         match self {
             Progress::Determinate { progress, .. } => Some(progress.total_size() as usize),
             Progress::Indeterminate { .. } => None,
         }
     }
 
-    pub(crate) fn progress(&self) -> Option<f32> {
+    pub fn progress(&self) -> Option<f32> {
         match self {
             Progress::Determinate {
                 job_name: _,
@@ -465,7 +462,7 @@ impl Progress {
     }
 
     // TODO: remove if never called
-    pub(crate) fn is_finished(&self) -> bool {
+    pub fn is_finished(&self) -> bool {
         match self {
             Progress::Determinate {
                 job_name: _,
@@ -475,7 +472,7 @@ impl Progress {
         }
     }
 
-    pub(crate) fn progress_view(&self) -> Option<ProgressView> {
+    pub fn progress_view(&self) -> Option<ProgressView> {
         match self {
             Progress::Determinate {
                 job_name: _,
@@ -487,7 +484,7 @@ impl Progress {
 }
 
 #[derive(Copy, Clone)]
-pub(crate) struct CompletedRecordingJobs {
+pub struct CompletedRecordingJobs {
     // This can probably just be accumulated.
     file_size_estimate: usize,
     total_duration: Duration,
@@ -496,7 +493,7 @@ pub(crate) struct CompletedRecordingJobs {
 }
 
 impl CompletedRecordingJobs {
-    pub(crate) fn new(
+    pub fn new(
         file_size_estimate: usize,
         total_duration: Duration,
         channels: usize,
@@ -510,28 +507,28 @@ impl CompletedRecordingJobs {
         }
     }
 
-    pub(crate) fn file_size_estimate(&self) -> usize {
+    pub fn file_size_estimate(&self) -> usize {
         self.file_size_estimate
     }
-    pub(crate) fn total_duration(&self) -> Duration {
+    pub fn total_duration(&self) -> Duration {
         self.total_duration
     }
-    pub(crate) fn channels(&self) -> usize {
+    pub fn channels(&self) -> usize {
         self.channels
     }
-    pub(crate) fn sample_rate(&self) -> usize {
+    pub fn sample_rate(&self) -> usize {
         self.sample_rate
     }
 }
 
-pub(crate) enum RotationDirection {
+pub enum RotationDirection {
     Clockwise,
     CounterClockwise,
 }
 
 #[atomic_enum]
 #[derive(Default, PartialEq, EnumIter, Display, IntoStaticStr, AsRefStr)]
-pub(crate) enum AnalysisType {
+pub enum AnalysisType {
     #[strum(to_string = "Amplitude")]
     #[default]
     AmplitudeEnvelope = 0,
@@ -545,7 +542,7 @@ impl AnalysisType {
     // NOTE: this is obviously a little un-maintainable and not the greatest solution if the AnalysisTypes grow.
     // If it becomes untenable, look into a macro-based solution.
     // TODO: write a quick test to stamp out bugs here
-    pub(crate) fn rotate(&self, direction: RotationDirection) -> Self {
+    pub fn rotate(&self, direction: RotationDirection) -> Self {
         match (self, direction) {
             (AnalysisType::AmplitudeEnvelope, RotationDirection::Clockwise) => {
                 AnalysisType::Waveform
@@ -570,13 +567,13 @@ impl AnalysisType {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum ModelFile {
+pub enum ModelFile {
     Packed(usize),
     File(Arc<str>),
 }
 
 impl ModelFile {
-    pub(crate) const PACKED_NAMES: [&'static str; 2] = ["ggml-tiny.q0.bin", "ggml-base.q0.bin"];
+    pub const PACKED_NAMES: [&'static str; 2] = ["ggml-tiny.q0.bin", "ggml-base.q0.bin"];
 }
 
 impl Display for ModelFile {
@@ -618,18 +615,7 @@ impl WriteRequest {
     }
 }
 
-#[cfg(not(feature = "bencher"))]
-pub(in crate::controller) enum VisualizerPacket {
-    VisualizerSample {
-        sample: Arc<[f32]>,
-        sample_rate: f64,
-    },
-    Shutdown,
-}
-
-
-#[cfg(feature = "bencher")]
-pub(crate) enum VisualizerPacket {
+pub enum VisualizerPacket {
     VisualizerSample {
         sample: Arc<[f32]>,
         sample_rate: f64,

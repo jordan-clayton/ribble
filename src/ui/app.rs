@@ -78,7 +78,7 @@ pub struct Ribble {
 }
 
 impl Ribble {
-    pub(crate) fn new(
+    pub fn new(
         version: RibbleVersion,
         data_directory: &Path,
         cc: &eframe::CreationContext<'_>,

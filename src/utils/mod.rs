@@ -1,10 +1,10 @@
-pub(crate) mod dc_block;
-pub(crate) mod errors;
+pub mod dc_block;
+pub mod errors;
 
-pub(crate) mod migration;
-pub(crate) mod pcm_f32;
-pub(crate) mod preferences;
-pub(crate) mod realtime_settings;
-pub(crate) mod recorder_configs;
-pub(crate) mod vad_configs;
-pub(crate) mod crash_handler;
+pub mod migration;
+pub mod pcm_f32;
+pub mod preferences;
+pub mod realtime_settings;
+pub mod recorder_configs;
+pub mod vad_configs;
+pub mod crash_handler;

@@ -261,7 +261,7 @@ impl WriterEngineState {
     }
 }
 
-pub(super) struct WriterEngine {
+pub struct WriterEngine {
     inner: Arc<WriterEngineState>,
     request_polling_thread: Option<JoinHandle<()>>,
     // NOTE: this isn't the absolute best architecture decision, but it solves the need for 'static
@@ -270,7 +270,7 @@ pub(super) struct WriterEngine {
 }
 
 impl WriterEngine {
-    pub(super) fn new(
+    pub fn new(
         data_directory: PathBuf,
         incoming_jobs: Receiver<WriteRequest>,
         bus: &Bus,
@@ -308,7 +308,7 @@ impl WriterEngine {
         }
     }
 
-    pub(super) fn export_recording(
+    pub fn export_recording(
         &self,
         out_path: PathBuf,
         // This is the key -> The caller needs to clone it higher up and pass ownership of the new pointer
@@ -333,7 +333,7 @@ impl WriterEngine {
     // NOTE: since the IndexMap preserves ordering based on insertion order, this
     // Needs to be reversed so that the information is presented most-recent to least-recent
     // IF this hapeens to be causing any significant lag, reverse the iterator in the ui.
-    pub(super) fn try_get_completed_jobs(
+    pub fn try_get_completed_jobs(
         &self,
         copy_buffer: &mut Vec<(Arc<str>, CompletedRecordingJobs)>,
     ) {
@@ -347,7 +347,7 @@ impl WriterEngine {
         }
     }
 
-    pub(super) fn latest_exists(&self) -> bool {
+    pub fn latest_exists(&self) -> bool {
         self.inner.latest_exists.load(Ordering::Acquire)
     }
 
@@ -355,26 +355,26 @@ impl WriterEngine {
     // In the UI, label this button: Re-Transcribe latest (recording)
     // If this is none, that means either writing hasn't finished, or there are no recordings.
     // This is not necessarily an error.
-    pub(super) fn try_get_latest(&self) -> Option<PathBuf> {
+    pub fn try_get_latest(&self) -> Option<PathBuf> {
         self.inner.try_get_latest()
     }
 
     // NOTE: if this is causing noticeable UI jank with the lock contention,
     // return an option and respond accordingly in the UI.
-    pub(super) fn get_num_completed(&self) -> usize {
+    pub fn get_num_completed(&self) -> usize {
         self.inner.get_num_completed()
     }
 
-    pub(super) fn get_recording_path(&self, file_name: Arc<str>) -> Option<PathBuf> {
+    pub fn get_recording_path(&self, file_name: Arc<str>) -> Option<PathBuf> {
         self.inner.get_recording_path(file_name)
     }
 
     // Use this to disable a clear cache button in the UI thread.
-    pub(super) fn is_clearing(&self) -> bool {
+    pub fn is_clearing(&self) -> bool {
         self.inner.is_clearing()
     }
 
-    pub(super) fn clear_cache(&self) {
+    pub fn clear_cache(&self) {
         // TODO: if guarding against grandma clicks isn't necessary, remove this mechanism.
         if self.inner.is_clearing() {
             return;

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use strum::IntoEnumIterator;
 
 #[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) struct RecordingPane {
+pub struct RecordingPane {
     #[serde(skip)]
     #[serde(default)]
     recordings_buffer: Vec<(Arc<str>, CompletedRecordingJobs)>,

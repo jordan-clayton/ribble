@@ -1,7 +1,7 @@
 use std::f32::consts::PI;
 
 // Basic DC Block filter (discrete-time IIR filter).
-pub(crate) struct DCBlock {
+pub struct DCBlock {
     prev_input: f32,
     prev_output: f32,
     r: f32,
@@ -15,7 +15,7 @@ impl DCBlock {
     // This is a cheap approximation in case the sample rate isn't provided
     const DEFAULT_R_CONSTANT: f32 = 0.995;
 
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             prev_input: 0f32,
             prev_output: 0f32,
@@ -24,12 +24,12 @@ impl DCBlock {
             sample_rate: 1f32,
         }
     }
-    pub(crate) fn with_cutoff_frequency(mut self, cutoff_frequency: f32) -> Self {
+    pub fn with_cutoff_frequency(mut self, cutoff_frequency: f32) -> Self {
         self.cutoff_frequency = cutoff_frequency;
         self.compute_r()
     }
 
-    pub(crate) fn with_sample_rate(mut self, sample_rate: f32) -> Self {
+    pub fn with_sample_rate(mut self, sample_rate: f32) -> Self {
         self.sample_rate = sample_rate;
         self.compute_r()
     }
@@ -57,7 +57,7 @@ impl DCBlock {
 
     // DC Block filter recursion
     // y(n) = x(n) - x(n - 1) + R * y(n - 1)
-    pub(crate) fn process(&mut self, input: f32) -> f32 {
+    pub fn process(&mut self, input: f32) -> f32 {
         let y = input - self.prev_input + self.r * self.prev_output;
         self.prev_input = input;
         self.prev_output = y;

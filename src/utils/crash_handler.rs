@@ -3,7 +3,7 @@ use crash_handler::{make_crash_event, CrashContext, CrashEventResult, CrashHandl
 
 // NOTE: this could be a completely generic function -> if that's required, return a Result<CrashHandler> instead
 // and coerce it at the call site.
-pub(crate) fn set_up_desktop_crash_handler() -> Result<CrashHandler, RibbleError> {
+pub fn set_up_desktop_crash_handler() -> Result<CrashHandler, RibbleError> {
     let handler = unsafe {
         CrashHandler::attach(make_crash_event(crash_popup))?
     };

@@ -5,7 +5,7 @@ use crate::ui::panes::{PaneView, PANE_INNER_MARGIN};
 use irox_egui_extras::progressbar::ProgressBar;
 
 #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ProgressPane {
+pub struct ProgressPane {
     #[serde(default)]
     #[serde(skip)]
     current_jobs: Vec<Progress>,

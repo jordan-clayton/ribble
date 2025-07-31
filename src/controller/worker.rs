@@ -77,13 +77,13 @@ impl WorkerInner {
     }
 }
 
-pub(super) struct WorkerEngine {
+pub struct WorkerEngine {
     _inner: Arc<WorkerInner>,
     work_thread: Option<JoinHandle<()>>,
 }
 
 impl WorkerEngine {
-    pub(super) fn new(incoming_request: Receiver<WorkRequest>, bus: &Bus) -> Result<Self, RibbleError> {
+    pub fn new(incoming_request: Receiver<WorkRequest>, bus: &Bus) -> Result<Self, RibbleError> {
         let inner = Arc::new(WorkerInner::new(incoming_request, bus));
         let thread_inner = Arc::clone(&inner);
 

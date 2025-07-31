@@ -7,7 +7,7 @@ use ribble_whisper::utils::{get_channel, Sender};
 use std::error::Error;
 use std::sync::Arc;
 
-pub(crate) enum AudioCaptureRequest {
+pub enum AudioCaptureRequest {
     Open(
         CaptureSpec,
         ArcChannelSink<f32>,
@@ -16,12 +16,12 @@ pub(crate) enum AudioCaptureRequest {
     Close(usize),
 }
 
-pub(crate) struct AudioBackendProxy {
+pub struct AudioBackendProxy {
     request_sender: Sender<AudioCaptureRequest>,
 }
 
 impl AudioBackendProxy {
-    pub(crate) fn new(request_sender: Sender<AudioCaptureRequest>) -> Self {
+    pub fn new(request_sender: Sender<AudioCaptureRequest>) -> Self {
         Self { request_sender }
     }
 }
@@ -76,13 +76,13 @@ impl AudioBackend<ArcChannelSink<f32>> for AudioBackendProxy {
 // To guarantee thread-safety, a copy of this capture should always exist on the main thread and
 // must only be dropped on the main thread.
 #[derive(Clone)]
-pub(crate) struct SharedSdl2Capture<S: SampleSink> {
+pub struct SharedSdl2Capture<S: SampleSink> {
     device_id: usize,
     inner: Arc<Sdl2Capture<S>>,
 }
 
 impl<S: SampleSink> SharedSdl2Capture<S> {
-    pub(crate) fn new(device_id: usize, sdl_capture: Arc<Sdl2Capture<S>>) -> Self {
+    pub fn new(device_id: usize, sdl_capture: Arc<Sdl2Capture<S>>) -> Self {
         Self {
             device_id,
             inner: sdl_capture,
@@ -91,7 +91,7 @@ impl<S: SampleSink> SharedSdl2Capture<S> {
 
     // NOTE: this can probably be removed --> the check in the UI operates on an Arc pointer
     // instead of a SharedCapture.
-    pub(crate) fn last_ref(&self) -> bool {
+    pub fn last_ref(&self) -> bool {
         Arc::strong_count(&self.inner) == 1
     }
 }

@@ -14,7 +14,7 @@ use strum::IntoEnumIterator;
 const LINK_ICON: &str = "🌐";
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub(in crate::ui) struct TranscriberPane {
+pub struct TranscriberPane {
     #[serde(default = "set_realtime")]
     realtime: bool,
     #[serde(skip)]

@@ -730,14 +730,14 @@ impl TranscriberEngineState {
     }
 }
 
-pub(super) struct TranscriberEngine {
+pub struct TranscriberEngine {
     inner: Arc<TranscriberEngineState>,
     work_request_sender: Sender<WorkRequest>,
 }
 
 impl TranscriberEngine {
     // These get passed in upon construction; they should be serialized separately.
-    pub(super) fn new(
+    pub fn new(
         transcription_configs: WhisperRealtimeConfigs,
         vad_configs: VadConfigs,
         feedback_type: OfflineTranscriberFeedback,
@@ -755,35 +755,35 @@ impl TranscriberEngine {
         }
     }
 
-    pub(super) fn transcriber_running(&self) -> bool {
+    pub fn transcriber_running(&self) -> bool {
         self.realtime_running() || self.offline_running()
     }
-    pub(super) fn realtime_running(&self) -> bool {
+    pub fn realtime_running(&self) -> bool {
         self.inner.realtime_running.load(Ordering::Acquire)
     }
-    pub(super) fn offline_running(&self) -> bool {
+    pub fn offline_running(&self) -> bool {
         self.inner.offline_running.load(Ordering::Acquire)
     }
 
-    pub(super) fn stop_realtime(&self) {
+    pub fn stop_realtime(&self) {
         self.inner.realtime_running.store(false, Ordering::Release);
     }
-    pub(super) fn stop_offline(&self) {
+    pub fn stop_offline(&self) {
         self.inner.offline_running.store(false, Ordering::Release);
     }
 
-    pub(super) fn read_transcription_configs(&self) -> Arc<WhisperRealtimeConfigs> {
+    pub fn read_transcription_configs(&self) -> Arc<WhisperRealtimeConfigs> {
         self.inner.transcription_configs.load_full()
     }
-    pub(super) fn read_vad_configs(&self) -> Arc<VadConfigs> {
+    pub fn read_vad_configs(&self) -> Arc<VadConfigs> {
         self.inner.vad_configs.load_full()
     }
-    pub(super) fn read_offline_transcriber_feedback(&self) -> OfflineTranscriberFeedback {
+    pub fn read_offline_transcriber_feedback(&self) -> OfflineTranscriberFeedback {
         self.inner
             .offline_transcriber_feedback
             .load(Ordering::Acquire)
     }
-    pub(super) fn write_offline_transcriber_feedback(
+    pub fn write_offline_transcriber_feedback(
         &self,
         new_feedback: OfflineTranscriberFeedback,
     ) {
@@ -792,17 +792,17 @@ impl TranscriberEngine {
             .store(new_feedback, Ordering::Release);
     }
 
-    pub(super) fn write_transcription_configs(&self, configs: WhisperRealtimeConfigs) {
+    pub fn write_transcription_configs(&self, configs: WhisperRealtimeConfigs) {
         self.inner.transcription_configs.store(Arc::new(configs));
     }
-    pub(super) fn write_vad_configs(&self, vad_configs: VadConfigs) {
+    pub fn write_vad_configs(&self, vad_configs: VadConfigs) {
         self.inner.vad_configs.store(Arc::new(vad_configs));
     }
 
-    pub(super) fn read_transcription_snapshot(&self) -> Arc<TranscriptionSnapshot> {
+    pub fn read_transcription_snapshot(&self) -> Arc<TranscriptionSnapshot> {
         self.inner.current_snapshot.load_full()
     }
-    pub(super) fn read_latest_control_phrase(&self) -> Arc<WhisperControlPhrase> {
+    pub fn read_latest_control_phrase(&self) -> Arc<WhisperControlPhrase> {
         self.inner.current_control_phrase.load_full()
     }
 
@@ -811,18 +811,18 @@ impl TranscriberEngine {
         self.inner.current_audio_file_path.swap(new_path);
     }
 
-    pub(super) fn set_current_audio_file_path(&self, path: PathBuf) {
+    pub fn set_current_audio_file_path(&self, path: PathBuf) {
         self.update_current_audio_file_path(Some(path));
     }
-    pub(super) fn clear_current_audio_file_path(&self) {
+    pub fn clear_current_audio_file_path(&self) {
         self.update_current_audio_file_path(None);
     }
 
-    pub(super) fn read_current_audio_file_path(&self) -> Arc<Option<PathBuf>> {
+    pub fn read_current_audio_file_path(&self) -> Arc<Option<PathBuf>> {
         self.inner.current_audio_file_path.load_full()
     }
 
-    pub(super) fn start_realtime_transcription<M, A>(
+    pub fn start_realtime_transcription<M, A>(
         &self,
         audio_backend: Arc<A>,
         shared_model_retriever: Arc<M>,
@@ -845,7 +845,7 @@ impl TranscriberEngine {
         }
     }
 
-    pub(super) fn start_offline_transcription<M>(&self, shared_model_retriever: Arc<M>)
+    pub fn start_offline_transcription<M>(&self, shared_model_retriever: Arc<M>)
     where
         M: ModelRetriever + Send + Sync + 'static,
     {
@@ -868,7 +868,7 @@ impl TranscriberEngine {
         }
     }
 
-    pub(super) fn save_transcription(&self, out_path: PathBuf) {
+    pub fn save_transcription(&self, out_path: PathBuf) {
         let thread_inner = Arc::clone(&self.inner);
         let worker = std::thread::spawn(move || thread_inner.save_transcription(out_path));
 

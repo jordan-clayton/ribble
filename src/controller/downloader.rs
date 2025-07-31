@@ -181,13 +181,13 @@ impl DownloadEngineState {
     }
 }
 
-pub(super) struct DownloadEngine {
+pub struct DownloadEngine {
     inner: Arc<DownloadEngineState>,
     work_thread: Option<JoinHandle<()>>,
 }
 
 impl DownloadEngine {
-    pub(super) fn new(incoming_jobs: Receiver<DownloadRequest>, bus: &Bus) -> Self {
+    pub fn new(incoming_jobs: Receiver<DownloadRequest>, bus: &Bus) -> Self {
         let inner = Arc::new(DownloadEngineState::new(incoming_jobs, bus));
         let thread_inner = Arc::clone(&inner);
 
@@ -218,7 +218,7 @@ impl DownloadEngine {
     }
 
     // FileDownload is a cheap clone (mostly copy); this should be harmlesss to call in the UI.
-    pub(super) fn try_get_current_downloads(&self, copy_buffer: &mut Vec<(usize, FileDownload)>) {
+    pub fn try_get_current_downloads(&self, copy_buffer: &mut Vec<(usize, FileDownload)>) {
         if let Some(guard) = self.inner.file_downloads.try_read() {
             copy_buffer.clear();
             // Filter out aborted downloads and return a cloned list.
@@ -231,7 +231,7 @@ impl DownloadEngine {
         }
     }
 
-    pub(super) fn try_get_amortized_download_progress(&self) -> Option<AmortizedDownloadProgress> {
+    pub fn try_get_amortized_download_progress(&self) -> Option<AmortizedDownloadProgress> {
         if let Some(jobs) = self.inner.file_downloads.try_read() {
             // This will coerce into NoJobs if the accumulator ends up (0, 0) (i.e. no jobs).
             let download_progress: AmortizedDownloadProgress = jobs
@@ -256,7 +256,7 @@ impl DownloadEngine {
     }
 
     // NOTE: Metadata removal is handled internally; this only sets the flag to stop the download.
-    pub(super) fn abort_download(&self, download_id: usize) {
+    pub fn abort_download(&self, download_id: usize) {
         self.inner.abort_download(download_id);
     }
 }

@@ -90,14 +90,14 @@ impl ConsoleEngineState {
 // console messages are retained.
 // NOTE: if it becomes important to retain the entire history of the program for logging purposes,
 // implement a double-buffer strategy to retain popped states.
-pub(super) struct ConsoleEngine {
+pub struct ConsoleEngine {
     inner: Arc<ConsoleEngineState>,
     work_request_sender: Sender<WorkRequest>,
     work_thread: Option<JoinHandle<()>>,
 }
 
 impl ConsoleEngine {
-    pub(super) fn new(
+    pub fn new(
         incoming_messages: Receiver<ConsoleMessage>,
         capacity: usize,
         bus: &Bus,
@@ -131,7 +131,7 @@ impl ConsoleEngine {
 
     // Implementing Clone for ConsoleMessage would get expensive; it's cheaper to just use
     // shared pointers
-    pub(super) fn try_get_current_messages(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
+    pub fn try_get_current_messages(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
         if let Some(buffer) = self.inner.queue.try_read() {
             copy_buffer.clear();
             copy_buffer.extend(buffer.iter().cloned())
@@ -140,7 +140,7 @@ impl ConsoleEngine {
 
     // Since resizing can block, this dispatches a very short-lived thread to perform the resize in
     // the background.
-    pub(super) fn resize(&self, new_size: usize) {
+    pub fn resize(&self, new_size: usize) {
         let thread_inner = Arc::clone(&self.inner);
         let work = std::thread::spawn(move || {
             thread_inner.resize(new_size);

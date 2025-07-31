@@ -25,7 +25,7 @@ const SMOOTHING_CONSTANT: f32 = 8.0;
 
 // RETURN TO THIS AFTER PROFILING FOR MEMORY.
 #[derive(Default, serde::Serialize, serde::Deserialize)]
-pub(crate) struct VisualizerPane {
+pub struct VisualizerPane {
     #[serde(skip)]
     #[serde(default)]
     visualizer_buckets: [f32; NUM_VISUALIZER_BUCKETS],
@@ -214,25 +214,16 @@ impl PaneView for VisualizerPane {
     }
 }
 
-#[cfg(not(feature = "bencher"))]
-fn smoothing(target: &[f32], current: &mut [f32], dt: f32) {
+pub fn smoothing(target: &[f32], current: &mut [f32], dt: f32) {
     assert_eq!(target.len(), current.len());
     for i in 0..target.len() {
         current[i] = current[i] + (target[i] - current[i]) * SMOOTHING_CONSTANT * dt;
     }
 }
-
-#[cfg(feature = "bencher")]
-pub(crate) fn smoothing(target: &[f32], current: &mut [f32], dt: f32) {
-    assert_eq!(target.len(), current.len());
-    for i in 0..target.len() {
-        current[i] = current[i] + (target[i] - current[i]) * SMOOTHING_CONSTANT * dt;
-    }
+pub trait VisualizerPaneTester {
+    fn get_buckets(&mut self) -> &mut [f32; NUM_VISUALIZER_BUCKETS];
+    fn smoothing(&mut self, dt: f32);
 }
-
-#[cfg(all(feature = "bencher", test))]
-use crate::benches::VisualizerPaneTester;
-#[cfg(all(feature = "bencher", test))]
 impl VisualizerPaneTester for VisualizerPane {
     fn get_buckets(&mut self) -> &mut [f32; NUM_VISUALIZER_BUCKETS] {
         &mut self.visualizer_buckets

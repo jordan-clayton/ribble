@@ -1,4 +1,4 @@
-use egui::{Response, Sense, Ui, Widget, WidgetInfo, WidgetType, lerp, pos2, vec2};
+use egui::{lerp, pos2, vec2, Response, Sense, Ui, Widget, WidgetInfo, WidgetType};
 
 // This is lifted directly from the egui demo lib: https://github.com/emilk/egui/blob/master/crates/egui_demo_lib/src/demo/toggle_switch.rs.
 fn draw_toggle(ui: &mut Ui, on: &mut bool) -> Response {
@@ -35,6 +35,6 @@ fn draw_toggle(ui: &mut Ui, on: &mut bool) -> Response {
     response
 }
 
-pub(in crate::ui) fn toggle(on: &mut bool) -> impl Widget + '_ {
+pub fn toggle(on: &mut bool) -> impl Widget + '_ {
     move |ui: &mut Ui| draw_toggle(ui, on)
 }

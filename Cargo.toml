@@ -3,6 +3,14 @@ name = "ribble"
 version = "0.1.2"
 edition = "2024"
 
+[[bin]]
+name = "ribble"
+path = "src/main.rs"
+
+[lib]
+name = "ribble"
+path = "src/lib.rs"
+
 # TODO: this might be able to be renamed if/when Cargo Packager has been removed from the project
 # Opt-level 3 by default
 [profile.packaging]
@@ -85,11 +93,8 @@ metal = ["ribble_whisper/metal"]
 openblas = ["ribble_whisper/openblas"]
 # This is linux-only, for ROCm/hipblas support
 hipblas = ["ribble_whisper/hipblas"]
-bencher = []
 
 
 [[bench]]
-path = "src/benches/visualizer_pane_benchmark.rs"
 name = "visualizer_pane_benchmark"
 harness = false
-required-features = ["bencher"]

@@ -6,7 +6,7 @@ use crate::utils::preferences::RibbleAppTheme;
 use strum::IntoEnumIterator;
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-pub(crate) struct UserPreferencesPane {
+pub struct UserPreferencesPane {
     #[serde(skip)]
     #[serde(default)]
     num_console_messages: Option<usize>,

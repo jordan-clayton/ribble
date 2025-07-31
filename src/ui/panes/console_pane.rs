@@ -7,7 +7,7 @@ use std::sync::Arc;
 // TODO: TEST THIS.
 const SPACING_COEFF: f32 = 1.5;
 #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ConsolePane {
+pub struct ConsolePane {
     // NOTE: These are shared ConsoleMessages (held in the ConsoleEngine).
     // It's cheaper to clone an Arc, versus String clones.
     #[serde(skip)]

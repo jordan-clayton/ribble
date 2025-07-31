@@ -43,7 +43,7 @@ const RTINF: u128 = 0;
     AsRefStr,
     IntoStaticStr,
 )]
-pub(crate) enum RealtimeTimeout {
+pub enum RealtimeTimeout {
     #[strum(serialize = "15 Min")]
     Rt15Min,
     #[strum(serialize = "30 Min")]
@@ -103,7 +103,7 @@ impl From<u128> for RealtimeTimeout {
     AsRefStr,
     IntoStaticStr,
 )]
-pub(crate) enum AudioSampleLen {
+pub enum AudioSampleLen {
     // 3s
     Small,
     // 5s
@@ -153,7 +153,7 @@ impl From<usize> for AudioSampleLen {
     AsRefStr,
     IntoStaticStr,
 )]
-pub(crate) enum VadSampleLen {
+pub enum VadSampleLen {
     #[default]
     Small,
     Medium,

@@ -6,7 +6,7 @@ use std::path::Path;
 use strum::IntoEnumIterator;
 
 #[derive(Debug)]
-pub(crate) enum VersionError {
+pub enum VersionError {
     ParseIntError(ParseIntError),
     InvalidFormat,
 }
@@ -30,7 +30,7 @@ impl Display for VersionError {
 
 impl Error for VersionError {}
 
-pub(crate) trait Version: Display + Default {
+pub trait Version: Display + Default {
     fn major(&self) -> usize;
     fn minor(&self) -> usize;
     fn patch(&self) -> usize;
@@ -44,7 +44,7 @@ pub(crate) trait Version: Display + Default {
     fn into_semver_string(self) -> String;
 }
 #[derive(Debug, Clone, Copy, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct RibbleVersion {
+pub struct RibbleVersion {
     major: usize,
     minor: usize,
     patch: usize,
@@ -53,7 +53,7 @@ pub(crate) struct RibbleVersion {
 }
 
 impl RibbleVersion {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             major: 0,
             minor: 0,
@@ -62,19 +62,19 @@ impl RibbleVersion {
         }
     }
 
-    pub(crate) fn set_major(mut self, major: usize) -> Self {
+    pub fn set_major(mut self, major: usize) -> Self {
         self.major = major;
         self
     }
-    pub(crate) fn set_minor(mut self, minor: usize) -> Self {
+    pub fn set_minor(mut self, minor: usize) -> Self {
         self.minor = minor;
         self
     }
-    pub(crate) fn set_patch(mut self, patch: usize) -> Self {
+    pub fn set_patch(mut self, patch: usize) -> Self {
         self.patch = patch;
         self
     }
-    pub(crate) fn set_min_compatible(mut self, min_compatible: Self) -> Self {
+    pub fn set_min_compatible(mut self, min_compatible: Self) -> Self {
         self.min_compatible = min_compatible.into();
         self
     }
@@ -181,7 +181,7 @@ impl Default for RibbleVersion {
 // NOTE: remember to make a note of this in the instructions.
 // NOTE TWICE: this is not the prettiest/most efficient, but it gets the job done and it only ever
 // really runs once (at the moment), so it's fine.
-pub(crate) fn migrate_model_filenames(model_directory: &Path) -> Result<(), std::io::Error> {
+pub fn migrate_model_filenames(model_directory: &Path) -> Result<(), std::io::Error> {
     for default_model_type in DefaultModelType::iter() {
         let test_path = model_directory.join(default_model_type.old_file_name());
         if test_path.is_file() {
@@ -206,7 +206,7 @@ const OLD_STATE_FILE_NAME: &str = "data.ron";
 
 // If it becomes important to know whether this actually removed the file, change the
 // return type to something that can communicate that.
-pub(crate) fn clear_old_ribble_state(data_directory: &Path) -> Result<(), std::io::Error> {
+pub fn clear_old_ribble_state(data_directory: &Path) -> Result<(), std::io::Error> {
     match std::fs::remove_file(data_directory.join(OLD_STATE_FILE_NAME)) {
         Ok(_) => Ok(()),
         Err(e) => {

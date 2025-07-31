@@ -1,18 +1,15 @@
-mod recording_pane;
-pub(in crate::ui) mod ribble_pane;
-mod transcriber_pane;
+pub mod recording_pane;
+pub mod ribble_pane;
+pub mod transcriber_pane;
 
-mod console_pane;
-mod downloads_pane;
+pub mod console_pane;
+pub mod downloads_pane;
 
-pub(in crate::ui) mod pane_list;
-mod progress_pane;
-mod transcription_pane;
-mod user_preferences_pane;
-#[cfg(not(feature = "bencher"))]
-mod visualizer_pane;
-#[cfg(feature = "bencher")]
-pub(crate) mod visualizer_pane;
+pub mod pane_list;
+pub mod progress_pane;
+pub mod transcription_pane;
+pub mod user_preferences_pane;
+pub mod visualizer_pane;
 
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::panes::ribble_pane::{PaneView, RibblePane, RibblePaneId};
@@ -32,7 +29,7 @@ const FOCUS_ANIMATION_DURATION: f32 = 1.0;
 // This may change in the future.
 const PANE_INNER_MARGIN: f32 = 8.0;
 
-pub(in crate::ui) struct RibbleTree {
+pub struct RibbleTree {
     data_directory: PathBuf,
     tree: Tree<RibblePane>,
     behavior: RibbleTreeBehavior,
@@ -44,7 +41,7 @@ pub(in crate::ui) struct RibbleTree {
 impl RibbleTree {
     const TREE_FILE: &'static str = "ribble_layout.ron";
     // TODO: this probably doesn't need to be a result and can just be Self
-    pub(in crate::ui) fn new(
+    pub fn new(
         data_directory: &Path,
         controller: RibbleController,
     ) -> Self {
@@ -63,7 +60,7 @@ impl RibbleTree {
         tree.check_insert_non_closable_panes();
         tree
     }
-    pub(in crate::ui) fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
         // Do a once-over of any tabs which should be closed.
         self.check_remove_old_tabs();
         // Add any new panes to the tree before painting.
@@ -91,7 +88,7 @@ impl RibbleTree {
     // are in the tree.
     // NOTE: This shouldn't get too expensive, but it's most likely not the best thing to call -often-
     // Also, it has to be static to be called at construction time, unless using a builder...
-    pub(in crate::ui) fn check_insert_non_closable_panes(&mut self) {
+    pub fn check_insert_non_closable_panes(&mut self) {
         // NOTE: this method should never be called on an empty tree.
         // Since this is only called (right now) at construction time, assume the tree has a root node.
         debug_assert!(!self.tree.is_empty(), "Tree is empty.");
@@ -111,7 +108,7 @@ impl RibbleTree {
         }
     }
 
-    pub(in crate::ui) fn add_new_pane(&mut self, pane_id: RibblePaneId) {
+    pub fn add_new_pane(&mut self, pane_id: RibblePaneId) {
         self.behavior.add_new_pane(pane_id);
     }
 
@@ -192,7 +189,7 @@ impl RibbleTree {
         }
     }
 
-    pub(in crate::ui) fn reset_layout(&mut self) {
+    pub fn reset_layout(&mut self) {
         self.tree = Self::default_tree();
         self.behavior = RibbleTreeBehavior::from_tree(self.behavior.controller.clone(), &self.tree);
     }
@@ -227,7 +224,7 @@ impl RibbleTree {
         Ok(())
     }
 
-    pub(in crate::ui) fn tree_serializer(&self) -> TreeSerializer {
+    pub fn tree_serializer(&self) -> TreeSerializer {
         let canonicalized = self.data_directory.join(Self::TREE_FILE);
         TreeSerializer { out_file_path: canonicalized, tree: self.tree.clone() }
     }
@@ -296,7 +293,7 @@ impl Drop for RibbleTree {
 }
 
 // Proxy object for serializing the app tree.
-pub(in crate::ui) struct TreeSerializer {
+pub struct TreeSerializer {
     out_file_path: PathBuf,
     tree: Tree<RibblePane>,
 }
@@ -307,7 +304,7 @@ impl TreeSerializer {
     // that implies a major error/panic has happened.
 
     // NOTE: this -could- be better served with a tombstone.
-    pub(in crate::ui) fn serialize(&self) {
+    pub fn serialize(&self) {
         if !self.tree.is_empty() {
             match std::fs::File::create(self.out_file_path.as_path()) {
                 Ok(tree_file) => {
@@ -335,7 +332,7 @@ impl TreeSerializer {
     }
 }
 
-pub(in crate::ui) struct RibbleTreeBehavior {
+pub struct RibbleTreeBehavior {
     controller: RibbleController,
     opened_tabs: HashMap<RibblePaneId, TileId>,
     simplification_options: SimplificationOptions,
@@ -353,7 +350,7 @@ impl RibbleTreeBehavior {
     const GAP_WIDTH: f32 = 2.0;
     const FOCUS_STROKE_WIDTH: f32 = 2.0;
     // This is in seconds
-    pub(in crate::ui) fn new(controller: RibbleController) -> Self {
+    pub fn new(controller: RibbleController) -> Self {
         Self {
             controller,
             // Allocate for at least 1 of each tab.
@@ -371,7 +368,7 @@ impl RibbleTreeBehavior {
         }
     }
 
-    pub(in crate::ui) fn from_tree(
+    pub fn from_tree(
         controller: RibbleController,
         tree: &Tree<RibblePane>,
     ) -> Self {
@@ -407,7 +404,7 @@ impl RibbleTreeBehavior {
         }
     }
 
-    pub(in crate::ui) fn add_new_pane(&mut self, pane_id: RibblePaneId) {
+    pub fn add_new_pane(&mut self, pane_id: RibblePaneId) {
         self.add_child = Some(pane_id);
     }
 }

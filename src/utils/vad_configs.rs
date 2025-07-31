@@ -1,20 +1,20 @@
 use crate::utils::errors::RibbleError;
 use ribble_whisper::audio::pcm::PcmS16Convertible;
 use ribble_whisper::audio::recorder::RecorderSample;
-use ribble_whisper::transcriber::WHISPER_SAMPLE_RATE;
 use ribble_whisper::transcriber::vad::{
-    DEFAULT_SILERO_CHUNK_SIZE, Earshot, OFFLINE_VOICE_PROBABILITY_THRESHOLD, Resettable,
-    SILERO_VOICE_PROBABILITY_THRESHOLD, Silero, SileroBuilder, VAD,
-    WEBRTC_VOICE_PROBABILITY_THRESHOLD, WebRtc, WebRtcBuilder, WebRtcFilterAggressiveness,
-    WebRtcFrameLengthMillis, WebRtcSampleRate,
+    Earshot, Resettable, Silero, SileroBuilder,
+    WebRtc, WebRtcBuilder, WebRtcFilterAggressiveness, WebRtcFrameLengthMillis,
+    WebRtcSampleRate, DEFAULT_SILERO_CHUNK_SIZE, OFFLINE_VOICE_PROBABILITY_THRESHOLD, SILERO_VOICE_PROBABILITY_THRESHOLD,
+    VAD, WEBRTC_VOICE_PROBABILITY_THRESHOLD,
 };
+use ribble_whisper::transcriber::WHISPER_SAMPLE_RATE;
 use strum::{AsRefStr, Display, EnumIter, IntoStaticStr};
 
 // NOTE: this should probably be kept/modified separately for Offline/Real-time configurations.
 // Use a toggle in the UI to swap between Real-time VAD and Offline-Vad
 // Offline can turn this off.
 #[derive(Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct VadConfigs {
+pub struct VadConfigs {
     vad_type: VadType,
     frame_size: VadFrameSize,
     strictness: VadStrictness,
@@ -23,7 +23,7 @@ pub(crate) struct VadConfigs {
 
 impl VadConfigs {
     const STRICTEST_PROBABILITY: f32 = 0.85f32;
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             vad_type: VadType::Auto,
             frame_size: VadFrameSize::Auto,
@@ -32,37 +32,37 @@ impl VadConfigs {
         }
     }
 
-    pub(crate) fn with_vad_type(mut self, vad_type: VadType) -> Self {
+    pub fn with_vad_type(mut self, vad_type: VadType) -> Self {
         self.vad_type = vad_type;
         self
     }
 
-    pub(crate) fn with_frame_size(mut self, frame_size: VadFrameSize) -> Self {
+    pub fn with_frame_size(mut self, frame_size: VadFrameSize) -> Self {
         self.frame_size = frame_size;
         self
     }
 
-    pub(crate) fn with_strictness(mut self, strictness: VadStrictness) -> Self {
+    pub fn with_strictness(mut self, strictness: VadStrictness) -> Self {
         self.strictness = strictness;
         self
     }
-    pub(crate) fn with_use_vad_offline(mut self, use_vad: bool) -> Self {
+    pub fn with_use_vad_offline(mut self, use_vad: bool) -> Self {
         self.use_vad_offline = use_vad;
         self
     }
 
-    pub(crate) fn vad_type(&self) -> VadType {
+    pub fn vad_type(&self) -> VadType {
         self.vad_type
     }
 
-    pub(crate) fn frame_size(&self) -> VadFrameSize {
+    pub fn frame_size(&self) -> VadFrameSize {
         self.frame_size
     }
-    pub(crate) fn strictness(&self) -> VadStrictness {
+    pub fn strictness(&self) -> VadStrictness {
         self.strictness
     }
 
-    pub(crate) fn use_vad_offline(&self) -> bool {
+    pub fn use_vad_offline(&self) -> bool {
         self.use_vad_offline
     }
 
@@ -102,7 +102,7 @@ impl VadConfigs {
         (frame_size, aggressiveness, probability)
     }
 
-    pub(crate) fn build_vad(&self) -> Result<RibbleVAD, RibbleError> {
+    pub fn build_vad(&self) -> Result<RibbleVAD, RibbleError> {
         match self.vad_type() {
             VadType::Auto | VadType::Silero => {
                 // Larger sizes may introduce latency and 512 is perfectly sufficient
@@ -172,7 +172,7 @@ impl Default for VadConfigs {
     AsRefStr,
     Display,
 )]
-pub(crate) enum VadType {
+pub enum VadType {
     Auto,
     Silero,
     WebRtc,
@@ -180,7 +180,7 @@ pub(crate) enum VadType {
 }
 
 impl VadType {
-    pub(crate) fn tooltip(&self) -> &'static str {
+    pub fn tooltip(&self) -> &'static str {
         match self {
             VadType::Auto => "Use the default algorithm.",
             VadType::Silero => {
@@ -204,7 +204,7 @@ impl VadType {
     AsRefStr,
     Display,
 )]
-pub(crate) enum VadFrameSize {
+pub enum VadFrameSize {
     Auto,
     Small,
     Medium,
@@ -223,14 +223,14 @@ pub(crate) enum VadFrameSize {
     AsRefStr,
     Display,
 )]
-pub(crate) enum VadStrictness {
+pub enum VadStrictness {
     Auto,
     Flexible,
     Medium,
     Strict,
 }
 
-pub(crate) enum RibbleVAD {
+pub enum RibbleVAD {
     Silero(Silero),
     WebRtc(WebRtc),
     Earshot(Earshot),

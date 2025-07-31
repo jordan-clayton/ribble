@@ -16,7 +16,7 @@ use strum::{AsRefStr, Display, EnumIter, EnumString};
     AsRefStr,
     Display,
 )]
-pub(crate) enum RibbleAppTheme {
+pub enum RibbleAppTheme {
     #[default]
     System,
     Light,
@@ -32,7 +32,7 @@ impl RibbleAppTheme {
     // viewport.
     // Rather than taking in an egui::context, it's easiest to just get the input state in the paint
     // loop.
-    pub(crate) fn visuals(&self) -> Option<egui::Visuals> {
+    pub fn visuals(&self) -> Option<egui::Visuals> {
         match self {
             RibbleAppTheme::System => None,
             RibbleAppTheme::Light => Some(egui::Visuals::light()),
@@ -67,7 +67,7 @@ impl RibbleAppTheme {
         }
     }
 
-    pub(crate) fn app_theme(&self) -> Option<catppuccin_egui::Theme> {
+    pub fn app_theme(&self) -> Option<catppuccin_egui::Theme> {
         match self {
             RibbleAppTheme::System => None,
             RibbleAppTheme::Light => Some(catppuccin_egui::LATTE),
@@ -79,7 +79,7 @@ impl RibbleAppTheme {
         }
     }
 
-    pub(crate) fn gradient(&self) -> Option<Gradient> {
+    pub fn gradient(&self) -> Option<Gradient> {
         self.app_theme().and_then(|theme| {
             let color_stops = [
                 theme.mauve,
@@ -108,38 +108,38 @@ impl RibbleAppTheme {
         })
     }
 
-    pub(crate) fn color_interpolator(&self) -> Option<ColorInterpolator> {
+    pub fn color_interpolator(&self) -> Option<ColorInterpolator> {
         self.gradient().and_then(|grad| Some(grad.interpolator()))
     }
 }
 
 #[derive(Copy, Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) struct UserPreferences {
+pub struct UserPreferences {
     console_message_size: usize,
     system_theme: RibbleAppTheme,
 }
 
 impl UserPreferences {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             console_message_size: 0,
             system_theme: Default::default(),
         }
     }
 
-    pub(crate) fn with_console_message_size(mut self, new_size: usize) -> Self {
+    pub fn with_console_message_size(mut self, new_size: usize) -> Self {
         self.console_message_size = new_size.max(MIN_NUM_CONSOLE_MESSAGES);
         self
     }
-    pub(crate) fn with_system_theme(mut self, new_theme: RibbleAppTheme) -> Self {
+    pub fn with_system_theme(mut self, new_theme: RibbleAppTheme) -> Self {
         self.system_theme = new_theme;
         self
     }
 
-    pub(crate) fn console_message_size(&self) -> usize {
+    pub fn console_message_size(&self) -> usize {
         self.console_message_size
     }
-    pub(crate) fn system_theme(&self) -> RibbleAppTheme {
+    pub fn system_theme(&self) -> RibbleAppTheme {
         self.system_theme
     }
 }

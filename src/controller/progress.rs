@@ -52,7 +52,7 @@ impl ProgressEngineState {
     }
 }
 
-pub(super) struct ProgressEngine {
+pub struct ProgressEngine {
     inner: Arc<ProgressEngineState>,
     work_thread: Option<JoinHandle<()>>,
 }
@@ -61,7 +61,7 @@ impl ProgressEngine {
     // Require capacity at construction time.
     // This will dynamically resize according to its needs
     // It's fine to send 0 as an initial capacity; it'll just suffer some initial allocation overhead.
-    pub(super) fn new(
+    pub fn new(
         initial_capacity: usize,
         message_receiver: Receiver<ProgressMessage>,
     ) -> Self {
@@ -106,14 +106,14 @@ impl ProgressEngine {
         Self { inner, work_thread }
     }
 
-    pub(super) fn try_get_current_jobs(&self, copy_buffer: &mut Vec<Progress>) {
+    pub fn try_get_current_jobs(&self, copy_buffer: &mut Vec<Progress>) {
         if let Some(jobs) = self.inner.current_jobs.try_read() {
             copy_buffer.clear();
             copy_buffer.extend(jobs.iter().map(|(_, progress)| progress.clone()))
         }
     }
 
-    pub(super) fn try_get_amortized_progress(&self) -> Option<AmortizedProgress> {
+    pub fn try_get_amortized_progress(&self) -> Option<AmortizedProgress> {
         if let Some(jobs) = self.inner.current_jobs.try_read() {
             if jobs.is_empty() {
                 Some(AmortizedProgress::NoJobs)

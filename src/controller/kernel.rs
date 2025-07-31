@@ -29,7 +29,7 @@ use std::sync::Arc;
 // NOTE: At the moment, it's a lot easier to just work with the concrete proxy.
 // Until generics are absolutely required for testing/swapping different audio backends,
 // avoid using them here.
-pub(super) struct Kernel {
+pub struct Kernel {
     data_directory: PathBuf,
     user_preferences: ArcSwap<UserPreferences>,
     // NOTE: pass this -in- to the RecorderEngine/TranscriberEngine as arguments
@@ -55,7 +55,7 @@ impl Kernel {
 
     // NOTE: this needs to take in the audio capture request sender from the app (main thread)
     // because of SDL invariants.
-    pub(super) fn new(
+    pub fn new(
         data_directory: &Path,
         audio_backend: AudioBackendProxy,
     ) -> Result<Self, RibbleError> {
@@ -147,11 +147,11 @@ impl Kernel {
         })
     }
     // USER PREFERENCES
-    pub(super) fn read_user_preferences(&self) -> Arc<UserPreferences> {
+    pub fn read_user_preferences(&self) -> Arc<UserPreferences> {
         self.user_preferences.load_full()
     }
 
-    pub(super) fn write_user_preferences(&self, new_prefs: UserPreferences) {
+    pub fn write_user_preferences(&self, new_prefs: UserPreferences) {
         // Atomic Swap the new in for the old
         let old_prefs = *self.user_preferences.swap(Arc::new(new_prefs));
 
@@ -162,157 +162,157 @@ impl Kernel {
         }
     }
 
-    pub(super) fn get_app_theme(&self) -> Option<catppuccin_egui::Theme> {
+    pub fn get_app_theme(&self) -> Option<catppuccin_egui::Theme> {
         self.user_preferences.load().system_theme().app_theme()
     }
 
-    pub(super) fn get_system_visuals(&self) -> Option<egui::Visuals> {
+    pub fn get_system_visuals(&self) -> Option<egui::Visuals> {
         self.user_preferences.load().system_theme().visuals()
     }
 
-    pub(super) fn get_system_gradient(&self) -> Option<egui_colorgradient::Gradient> {
+    pub fn get_system_gradient(&self) -> Option<egui_colorgradient::Gradient> {
         self.user_preferences.load().system_theme().gradient()
     }
 
     // TODO: perhaps these methods should be trait methods if the controller needs to be testable.
     // MODEL MANAGEMENT
-    pub(super) fn download_model(&self, url: &str) {
+    pub fn download_model(&self, url: &str) {
         self.model_bank.download_new_model(url);
     }
-    pub(super) fn copy_new_model_to_bank(&self, file_path: PathBuf) {
+    pub fn copy_new_model_to_bank(&self, file_path: PathBuf) {
         self.model_bank.copy_model_to_bank(file_path);
     }
 
-    pub(super) fn get_model_directory(&self) -> &Path {
+    pub fn get_model_directory(&self) -> &Path {
         self.model_bank.model_directory()
     }
 
     // (ID, File name)
-    pub(super) fn try_read_model_list(&self, copy_buffer: &mut Vec<(ModelId, ModelFile)>) {
+    pub fn try_read_model_list(&self, copy_buffer: &mut Vec<(ModelId, ModelFile)>) {
         self.model_bank.try_read_model_list(copy_buffer);
     }
 
     // TRANSCRIBER
-    pub(super) fn read_transcription_configs(&self) -> Arc<WhisperRealtimeConfigs> {
+    pub fn read_transcription_configs(&self) -> Arc<WhisperRealtimeConfigs> {
         self.transcriber_engine.read_transcription_configs()
     }
-    pub(super) fn write_transcription_configs(&self, new_configs: WhisperRealtimeConfigs) {
+    pub fn write_transcription_configs(&self, new_configs: WhisperRealtimeConfigs) {
         self.transcriber_engine
             .write_transcription_configs(new_configs);
     }
-    pub(super) fn read_vad_configs(&self) -> Arc<VadConfigs> {
+    pub fn read_vad_configs(&self) -> Arc<VadConfigs> {
         self.transcriber_engine.read_vad_configs()
     }
-    pub(super) fn write_vad_configs(&self, new_configs: VadConfigs) {
+    pub fn write_vad_configs(&self, new_configs: VadConfigs) {
         self.transcriber_engine.write_vad_configs(new_configs);
     }
-    pub(super) fn read_offline_transcriber_feedback(&self) -> OfflineTranscriberFeedback {
+    pub fn read_offline_transcriber_feedback(&self) -> OfflineTranscriberFeedback {
         self.transcriber_engine.read_offline_transcriber_feedback()
     }
-    pub(super) fn write_offline_transcriber_feedback(
+    pub fn write_offline_transcriber_feedback(
         &self,
         new_feedback: OfflineTranscriberFeedback,
     ) {
         self.transcriber_engine
             .write_offline_transcriber_feedback(new_feedback);
     }
-    pub(super) fn realtime_running(&self) -> bool {
+    pub fn realtime_running(&self) -> bool {
         self.transcriber_engine.realtime_running()
     }
-    pub(super) fn offline_running(&self) -> bool {
+    pub fn offline_running(&self) -> bool {
         self.transcriber_engine.offline_running()
     }
-    pub(super) fn transcriber_running(&self) -> bool {
+    pub fn transcriber_running(&self) -> bool {
         self.transcriber_engine.transcriber_running()
     }
 
-    pub(super) fn stop_realtime(&self) {
+    pub fn stop_realtime(&self) {
         self.transcriber_engine.stop_realtime()
     }
-    pub(super) fn stop_offline(&self) {
+    pub fn stop_offline(&self) {
         self.transcriber_engine.stop_offline()
     }
-    pub(super) fn read_transcription_snapshot(&self) -> Arc<TranscriptionSnapshot> {
+    pub fn read_transcription_snapshot(&self) -> Arc<TranscriptionSnapshot> {
         self.transcriber_engine.read_transcription_snapshot()
     }
-    pub(super) fn read_latest_control_phrase(&self) -> Arc<WhisperControlPhrase> {
+    pub fn read_latest_control_phrase(&self) -> Arc<WhisperControlPhrase> {
         self.transcriber_engine.read_latest_control_phrase()
     }
 
-    pub(super) fn read_current_audio_file_path(&self) -> Arc<Option<PathBuf>> {
+    pub fn read_current_audio_file_path(&self) -> Arc<Option<PathBuf>> {
         self.transcriber_engine.read_current_audio_file_path()
     }
 
-    pub(super) fn start_realtime_transcription(&self) {
+    pub fn start_realtime_transcription(&self) {
         let bank = Arc::clone(&self.model_bank);
         let backend = Arc::clone(&self.audio_backend);
         self.transcriber_engine
             .start_realtime_transcription(backend, bank);
     }
 
-    pub(super) fn set_audio_file_path(&self, path: PathBuf) {
+    pub fn set_audio_file_path(&self, path: PathBuf) {
         self.transcriber_engine.set_current_audio_file_path(path);
     }
-    pub(super) fn clear_audio_file_path(&self) {
+    pub fn clear_audio_file_path(&self) {
         self.transcriber_engine.clear_current_audio_file_path();
     }
 
     // NOTE: The WriterEngine will update its own state if its recording cache is empty.
     // NOTE TWICE: This does not guarantee there won't be a file issue if the recording is missing.
-    pub(super) fn try_retranscribe_latest(&self) {
+    pub fn try_retranscribe_latest(&self) {
         if let Some(path) = self.try_get_latest_recording() {
             self.set_audio_file_path(path);
             self.start_realtime_transcription();
         }
     }
 
-    pub(super) fn start_offline_transcription(&self) {
+    pub fn start_offline_transcription(&self) {
         let bank = Arc::clone(&self.model_bank);
         self.transcriber_engine.start_offline_transcription(bank);
     }
 
-    pub(super) fn save_transcription(&self, out_path: PathBuf) {
+    pub fn save_transcription(&self, out_path: PathBuf) {
         self.transcriber_engine.save_transcription(out_path);
     }
 
     // RECORDER
-    pub(super) fn recorder_running(&self) -> bool {
+    pub fn recorder_running(&self) -> bool {
         self.recorder_engine.recorder_running()
     }
 
-    pub(super) fn read_recorder_configs(&self) -> Arc<RibbleRecordingConfigs> {
+    pub fn read_recorder_configs(&self) -> Arc<RibbleRecordingConfigs> {
         self.recorder_engine.read_recorder_configs()
     }
-    pub(super) fn write_recorder_configs(&self, new_configs: RibbleRecordingConfigs) {
+    pub fn write_recorder_configs(&self, new_configs: RibbleRecordingConfigs) {
         self.recorder_engine.write_recorder_configs(new_configs);
     }
 
-    pub(super) fn start_recording(&self) {
+    pub fn start_recording(&self) {
         let backend = Arc::clone(&self.audio_backend);
         self.recorder_engine.start_recording(backend);
     }
-    pub(super) fn stop_recording(&self) {
+    pub fn stop_recording(&self) {
         self.recorder_engine.stop_recording();
     }
 
     // WRITER (RECORDINGS + Export)
-    pub(super) fn is_clearing_recordings(&self) -> bool {
+    pub fn is_clearing_recordings(&self) -> bool {
         self.writer_engine.is_clearing()
     }
-    pub(super) fn clear_recording_cache(&self) {
+    pub fn clear_recording_cache(&self) {
         self.writer_engine.clear_cache()
     }
-    pub(super) fn latest_recording_exists(&self) -> bool {
+    pub fn latest_recording_exists(&self) -> bool {
         self.writer_engine.latest_exists()
     }
-    pub(super) fn try_get_latest_recording(&self) -> Option<PathBuf> {
+    pub fn try_get_latest_recording(&self) -> Option<PathBuf> {
         self.writer_engine.try_get_latest()
     }
 
-    pub(super) fn get_num_recordings(&self) -> usize {
+    pub fn get_num_recordings(&self) -> usize {
         self.writer_engine.get_num_completed()
     }
-    pub(super) fn try_get_completed_recordings(
+    pub fn try_get_completed_recordings(
         &self,
         copy_buffer: &mut Vec<(Arc<str>, CompletedRecordingJobs)>,
     ) {
@@ -320,12 +320,12 @@ impl Kernel {
     }
 
     // NOTE: this consumes a shared string -> clone higher up and consume it
-    pub(super) fn try_get_recording_path(&self, file_name: Arc<str>) -> Option<PathBuf> {
+    pub fn try_get_recording_path(&self, file_name: Arc<str>) -> Option<PathBuf> {
         self.writer_engine.get_recording_path(file_name)
     }
 
     // NOTE: recording_file_name is internal -- It's the left-half of the (String, CompletedRecordingJobs) tuple.
-    pub(super) fn export_recording(
+    pub fn export_recording(
         &self,
         out_path: PathBuf,
         recording_file_name: Arc<str>,
@@ -336,40 +336,40 @@ impl Kernel {
     }
 
     // CONSOLE
-    pub(super) fn try_get_current_messages(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
+    pub fn try_get_current_messages(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
         self.console_engine.try_get_current_messages(copy_buffer);
     }
-    pub(super) fn resize_console_message_buffer(&self, new_size: usize) {
+    pub fn resize_console_message_buffer(&self, new_size: usize) {
         self.console_engine.resize(new_size)
     }
 
     // PROGRESS
-    pub(super) fn try_get_current_jobs(&self, copy_buffer: &mut Vec<Progress>) {
+    pub fn try_get_current_jobs(&self, copy_buffer: &mut Vec<Progress>) {
         self.progress_engine.try_get_current_jobs(copy_buffer);
     }
 
-    pub(super) fn try_get_amortized_jobs(&self) -> Option<AmortizedProgress> {
+    pub fn try_get_amortized_jobs(&self) -> Option<AmortizedProgress> {
         self.progress_engine.try_get_amortized_progress()
     }
 
     // DOWNLOADER
-    pub(super) fn try_get_current_downloads(&self, copy_buffer: &mut Vec<(usize, FileDownload)>) {
+    pub fn try_get_current_downloads(&self, copy_buffer: &mut Vec<(usize, FileDownload)>) {
         self.download_engine.try_get_current_downloads(copy_buffer);
     }
 
-    pub(super) fn try_get_amortized_download_progress(&self) -> Option<AmortizedDownloadProgress> {
+    pub fn try_get_amortized_download_progress(&self) -> Option<AmortizedDownloadProgress> {
         self.download_engine.try_get_amortized_download_progress()
     }
 
-    pub(super) fn abort_download(&self, download_id: usize) {
+    pub fn abort_download(&self, download_id: usize) {
         self.download_engine.abort_download(download_id);
     }
 
     // VISUALIZER
-    pub(super) fn set_visualizer_visibility(&self, is_visible: bool) {
+    pub fn set_visualizer_visibility(&self, is_visible: bool) {
         self.visualizer_engine.set_visualizer_visibility(is_visible);
     }
-    pub(super) fn try_read_visualization_buffer(
+    pub fn try_read_visualization_buffer(
         &self,
         copy_buffer: &mut [f32; NUM_VISUALIZER_BUCKETS],
     ) {
@@ -377,18 +377,18 @@ impl Kernel {
             .try_read_visualization_buffer(copy_buffer);
     }
 
-    pub(super) fn get_visualizer_analysis_type(&self) -> AnalysisType {
+    pub fn get_visualizer_analysis_type(&self) -> AnalysisType {
         self.visualizer_engine.get_visualizer_analysis_type()
     }
-    pub(super) fn set_visualizer_analysis_type(&self, new_type: AnalysisType) {
+    pub fn set_visualizer_analysis_type(&self, new_type: AnalysisType) {
         self.visualizer_engine
             .set_visualizer_analysis_type(new_type);
     }
-    pub(super) fn rotate_visualizer_type(&self, direction: RotationDirection) {
+    pub fn rotate_visualizer_type(&self, direction: RotationDirection) {
         self.visualizer_engine.rotate_visualizer_type(direction);
     }
 
-    pub(super) fn serialize_user_data(&self) {
+    pub fn serialize_user_data(&self) {
         let transcriber_configs = *self.transcriber_engine.read_transcription_configs();
         let offline_transcriber_feedback =
             self.transcriber_engine.read_offline_transcriber_feedback();

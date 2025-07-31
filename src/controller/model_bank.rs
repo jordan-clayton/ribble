@@ -250,7 +250,7 @@ impl RibbleModelBankState {
     }
 }
 
-pub(crate) struct RibbleModelBank {
+pub struct RibbleModelBank {
     inner: Arc<RibbleModelBankState>,
     work_sender: Sender<WorkRequest>,
     download_sender: Sender<DownloadRequest>,
@@ -262,7 +262,7 @@ impl RibbleModelBank {
     // NOTE: this expects a fully canonicalized path.
     // This is handled higher up in the kernel implementation, but other users must uphold this
     // expectation.
-    pub(crate) fn new(model_directory: &Path, bus: &Bus) -> Result<Self, RibbleError> {
+    pub fn new(model_directory: &Path, bus: &Bus) -> Result<Self, RibbleError> {
         let (event_sender, event_receiver) = get_channel(SMALL_UTILITY_QUEUE_SIZE);
         let inner = Arc::new(RibbleModelBankState::new(model_directory, event_receiver)?);
         let mut debouncer = new_debouncer(
@@ -334,11 +334,11 @@ impl RibbleModelBank {
         })
     }
 
-    pub(crate) fn model_directory(&self) -> &Path {
+    pub fn model_directory(&self) -> &Path {
         self.inner.model_directory()
     }
 
-    pub(crate) fn contains_model(&self, model_id: ModelId) -> bool {
+    pub fn contains_model(&self, model_id: ModelId) -> bool {
         self.inner.contains_model(model_id)
     }
 
@@ -347,7 +347,7 @@ impl RibbleModelBank {
     // watcher thread -> it's best to leave model management up to the user if they're already
     // swapping directories.
 
-    pub(crate) fn download_new_model(&self, url: &str) {
+    pub fn download_new_model(&self, url: &str) {
         let model_directory = self.inner.model_directory();
         let download_request = DownloadRequest::new_job(url, model_directory);
         if let Err(e) = self.download_sender.try_send(download_request) {
@@ -362,7 +362,7 @@ impl RibbleModelBank {
     }
 
     // This will make a work request to copy the file over.
-    pub(crate) fn copy_model_to_bank(&self, model_file_path: PathBuf) {
+    pub fn copy_model_to_bank(&self, model_file_path: PathBuf) {
         let model_directory = self.inner.model_directory().to_path_buf();
         let worker = std::thread::spawn(move || {
             if !model_file_path.is_file() {
@@ -415,7 +415,7 @@ impl RibbleModelBank {
         }
     }
 
-    pub(crate) fn try_read_model_list(&self, copy_buffer: &mut Vec<(ModelId, ModelFile)>) {
+    pub fn try_read_model_list(&self, copy_buffer: &mut Vec<(ModelId, ModelFile)>) {
         if let Some(guard) = self.inner.model_map.try_read() {
             copy_buffer.clear();
             copy_buffer.extend(guard.iter().map(|(k, v)| (*k, v.clone())));

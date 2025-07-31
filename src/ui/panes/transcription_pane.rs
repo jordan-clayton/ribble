@@ -4,7 +4,7 @@ use crate::ui::panes::{PaneView, PANE_INNER_MARGIN};
 use egui_notify::Toast;
 
 #[derive(Copy, Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct TranscriptionPane {}
+pub struct TranscriptionPane {}
 
 // Clipboard: https://unicodeplus.com/U+1F4CB
 const COPY_ICON: &str = "📋";

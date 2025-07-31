@@ -22,7 +22,7 @@ fn set_base_directory() -> PathBuf {
 }
 
 #[derive(Clone)]
-pub(crate) struct RibbleController {
+pub struct RibbleController {
     kernel: Arc<Kernel>,
     base_dir: Arc<PathBuf>,
     // NOTE: Since the controller has to be used and operated by views in the gui,
@@ -35,7 +35,7 @@ impl RibbleController {
     const RECOMMENDED_MAX_WHISPER_THREADS: usize = 8;
     // NOTE: The data_directory needs to be absolute -> there's a guard for this in the
     // kernel, and it will return Err() if the path is relative.
-    pub(crate) fn new(
+    pub fn new(
         data_directory: &Path,
         audio_backend: AudioBackendProxy,
         toasts_sender: Sender<egui_notify::Toast>,
@@ -54,12 +54,12 @@ impl RibbleController {
         })
     }
 
-    pub(crate) fn base_dir(&self) -> &Path {
+    pub fn base_dir(&self) -> &Path {
         self.base_dir.as_path()
     }
 
     // Only try_send the toast -> this shouldn't ever really block
-    pub(crate) fn send_toast(&self, toast: egui_notify::Toast) {
+    pub fn send_toast(&self, toast: egui_notify::Toast) {
         if let Err(e) = self.toasts_sender.try_send(toast) {
             log::warn!("Failed to send toast to UI, channel closed or too small.\n\
             Error: {}\n\
@@ -67,38 +67,38 @@ impl RibbleController {
         }
     }
 
-    pub(crate) fn serialize_user_data(&self) {
+    pub fn serialize_user_data(&self) {
         self.kernel.serialize_user_data();
     }
 
-    pub(crate) fn max_whisper_threads(&self) -> usize {
+    pub fn max_whisper_threads(&self) -> usize {
         self.max_whisper_threads
     }
 
-    pub(crate) fn read_user_preferences(&self) -> Arc<UserPreferences> {
+    pub fn read_user_preferences(&self) -> Arc<UserPreferences> {
         self.kernel.read_user_preferences()
     }
 
-    pub(crate) fn write_user_preferences(&self, new_prefs: UserPreferences) {
+    pub fn write_user_preferences(&self, new_prefs: UserPreferences) {
         self.kernel.write_user_preferences(new_prefs);
     }
 
-    pub(crate) fn get_app_theme(&self) -> Option<catppuccin_egui::Theme> {
+    pub fn get_app_theme(&self) -> Option<catppuccin_egui::Theme> {
         self.kernel.get_app_theme()
     }
 
-    pub(crate) fn get_system_visuals(&self) -> Option<egui::Visuals> {
+    pub fn get_system_visuals(&self) -> Option<egui::Visuals> {
         self.kernel.get_system_visuals()
     }
 
     // NOTE: this will allocate and should not be called every frame,
     // Either use an internal setter, or swap on transition.
-    pub(crate) fn get_system_gradient(&self) -> Option<egui_colorgradient::Gradient> {
+    pub fn get_system_gradient(&self) -> Option<egui_colorgradient::Gradient> {
         self.kernel.get_system_gradient()
     }
 
     // MODEL MANAGEMENT
-    pub(crate) fn download_model(&self, url: &str) {
+    pub fn download_model(&self, url: &str) {
         self.kernel.download_model(url);
     }
     // Consume the PathBuf instead of taking a path by reference
@@ -106,151 +106,151 @@ impl RibbleController {
     // needs to be at least one allocation.
     // Since obtaining a dynamic path involves an allocation, might as well just take it instead of
     // re-allocating.
-    pub(crate) fn copy_new_model(&self, file_path: PathBuf) {
+    pub fn copy_new_model(&self, file_path: PathBuf) {
         self.kernel.copy_new_model_to_bank(file_path);
     }
 
     // (ID, File name)
-    pub(crate) fn try_read_model_list(&self, copy_buffer: &mut Vec<(ModelId, ModelFile)>) {
+    pub fn try_read_model_list(&self, copy_buffer: &mut Vec<(ModelId, ModelFile)>) {
         self.kernel.try_read_model_list(copy_buffer);
     }
 
-    pub(crate) fn get_model_directory(&self) -> &Path {
+    pub fn get_model_directory(&self) -> &Path {
         self.kernel.get_model_directory()
     }
 
     // TRANSCRIBER
-    pub(crate) fn read_transcription_configs(&self) -> Arc<WhisperRealtimeConfigs> {
+    pub fn read_transcription_configs(&self) -> Arc<WhisperRealtimeConfigs> {
         self.kernel.read_transcription_configs()
     }
-    pub(crate) fn write_transcription_configs(&self, new_configs: WhisperRealtimeConfigs) {
+    pub fn write_transcription_configs(&self, new_configs: WhisperRealtimeConfigs) {
         self.kernel.write_transcription_configs(new_configs);
     }
-    pub(crate) fn read_vad_configs(&self) -> Arc<VadConfigs> {
+    pub fn read_vad_configs(&self) -> Arc<VadConfigs> {
         self.kernel.read_vad_configs()
     }
-    pub(crate) fn write_vad_configs(&self, new_configs: VadConfigs) {
+    pub fn write_vad_configs(&self, new_configs: VadConfigs) {
         self.kernel.write_vad_configs(new_configs);
     }
-    pub(crate) fn read_offline_transcriber_feedback(&self) -> OfflineTranscriberFeedback {
+    pub fn read_offline_transcriber_feedback(&self) -> OfflineTranscriberFeedback {
         self.kernel.read_offline_transcriber_feedback()
     }
-    pub(crate) fn write_offline_transcriber_feedback(
+    pub fn write_offline_transcriber_feedback(
         &self,
         new_feedback: OfflineTranscriberFeedback,
     ) {
         self.kernel.write_offline_transcriber_feedback(new_feedback);
     }
-    pub(crate) fn realtime_running(&self) -> bool {
+    pub fn realtime_running(&self) -> bool {
         self.kernel.realtime_running()
     }
-    pub(crate) fn offline_running(&self) -> bool {
+    pub fn offline_running(&self) -> bool {
         self.kernel.offline_running()
     }
-    pub(crate) fn transcriber_running(&self) -> bool {
+    pub fn transcriber_running(&self) -> bool {
         self.kernel.transcriber_running()
     }
 
-    pub(crate) fn stop_realtime(&self) {
+    pub fn stop_realtime(&self) {
         self.kernel.stop_realtime()
     }
-    pub(crate) fn stop_offline(&self) {
+    pub fn stop_offline(&self) {
         self.kernel.stop_realtime()
     }
 
     // It's easiest from the transcription windows to just kill both.
-    pub(crate) fn stop_transcription(&self) {
+    pub fn stop_transcription(&self) {
         self.kernel.stop_realtime();
         self.kernel.stop_offline();
     }
 
-    pub(crate) fn read_transcription_snapshot(&self) -> Arc<TranscriptionSnapshot> {
+    pub fn read_transcription_snapshot(&self) -> Arc<TranscriptionSnapshot> {
         self.kernel.read_transcription_snapshot()
     }
-    pub(crate) fn read_latest_control_phrase(&self) -> Arc<WhisperControlPhrase> {
+    pub fn read_latest_control_phrase(&self) -> Arc<WhisperControlPhrase> {
         self.kernel.read_latest_control_phrase()
     }
 
-    pub(crate) fn read_current_audio_file_path(&self) -> Arc<Option<PathBuf>> {
+    pub fn read_current_audio_file_path(&self) -> Arc<Option<PathBuf>> {
         self.kernel.read_current_audio_file_path()
     }
 
-    pub(crate) fn start_realtime_transcription(&self) {
+    pub fn start_realtime_transcription(&self) {
         self.kernel.start_realtime_transcription();
     }
 
-    pub(crate) fn set_audio_file_path(&self, path: PathBuf) {
+    pub fn set_audio_file_path(&self, path: PathBuf) {
         self.kernel.set_audio_file_path(path);
     }
-    pub(crate) fn clear_audio_file_path(&self) {
+    pub fn clear_audio_file_path(&self) {
         self.kernel.clear_audio_file_path();
     }
 
-    pub(crate) fn start_offline_transcription(&self) {
+    pub fn start_offline_transcription(&self) {
         self.kernel.start_offline_transcription();
     }
 
-    pub(crate) fn try_retranscribe_latest(&self) {
+    pub fn try_retranscribe_latest(&self) {
         self.kernel.try_retranscribe_latest();
     }
 
-    pub(crate) fn save_transcription(&self, out_path: PathBuf) {
+    pub fn save_transcription(&self, out_path: PathBuf) {
         self.kernel.save_transcription(out_path);
     }
 
     // RECORDER
-    pub(crate) fn recorder_running(&self) -> bool {
+    pub fn recorder_running(&self) -> bool {
         self.kernel.recorder_running()
     }
 
-    pub(crate) fn read_recorder_configs(&self) -> Arc<RibbleRecordingConfigs> {
+    pub fn read_recorder_configs(&self) -> Arc<RibbleRecordingConfigs> {
         self.kernel.read_recorder_configs()
     }
-    pub(crate) fn write_recorder_configs(&self, new_configs: RibbleRecordingConfigs) {
+    pub fn write_recorder_configs(&self, new_configs: RibbleRecordingConfigs) {
         self.kernel.write_recorder_configs(new_configs);
     }
 
-    pub(crate) fn start_recording(&self) {
+    pub fn start_recording(&self) {
         self.kernel.start_recording();
     }
 
-    pub(crate) fn stop_recording(&self) {
+    pub fn stop_recording(&self) {
         self.kernel.stop_recording();
     }
 
     // WRITER (RECORDINGS + Export)
-    pub(crate) fn is_clearing_recordings(&self) -> bool {
+    pub fn is_clearing_recordings(&self) -> bool {
         self.kernel.is_clearing_recordings()
     }
-    pub(crate) fn clear_recording_cache(&self) {
+    pub fn clear_recording_cache(&self) {
         self.kernel.clear_recording_cache()
     }
-    pub(crate) fn try_get_latest_recording(&self) -> Option<PathBuf> {
+    pub fn try_get_latest_recording(&self) -> Option<PathBuf> {
         self.kernel.try_get_latest_recording()
     }
 
     // NOTE: if lock-contention is ever an issue (if this method even gets used),
     // swap to a try_get and respond accordingly in the UI.
-    pub(crate) fn get_num_recordings(&self) -> usize {
+    pub fn get_num_recordings(&self) -> usize {
         self.kernel.get_num_recordings()
     }
 
-    pub(crate) fn latest_recording_exists(&self) -> bool {
+    pub fn latest_recording_exists(&self) -> bool {
         self.kernel.latest_recording_exists()
     }
-    pub(crate) fn try_get_completed_recordings(
+    pub fn try_get_completed_recordings(
         &self,
         copy_buffer: &mut Vec<(Arc<str>, CompletedRecordingJobs)>,
     ) {
         self.kernel.try_get_completed_recordings(copy_buffer)
     }
 
-    pub(crate) fn try_get_recording_path(&self, file_name: Arc<str>) -> Option<PathBuf> {
+    pub fn try_get_recording_path(&self, file_name: Arc<str>) -> Option<PathBuf> {
         self.kernel.try_get_recording_path(file_name)
     }
 
     // NOTE: recording_file_name is internal -- It's the left-half of the (Arc<str>, CompletedRecordingJobs) tuple.
-    pub(crate) fn export_recording(
+    pub fn export_recording(
         &self,
         out_path: PathBuf,
         recording_file_name: Arc<str>,
@@ -261,7 +261,7 @@ impl RibbleController {
     }
 
     // CONSOLE
-    pub(crate) fn try_get_current_messages(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
+    pub fn try_get_current_messages(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
         self.kernel.try_get_current_messages(copy_buffer);
     }
 
@@ -270,53 +270,53 @@ impl RibbleController {
     // writing on a drag-finished event.
     // There is a tiny, tiny chance that the short-queue gets slammed -> if so, increase the size,
     // or handle priority better/classify jobs better.
-    pub(crate) fn resize_console_message_buffer(&self, new_size: usize) {
+    pub fn resize_console_message_buffer(&self, new_size: usize) {
         self.kernel.resize_console_message_buffer(new_size);
     }
 
     // PROGRESS
-    pub(crate) fn try_get_current_jobs(&self, copy_buffer: &mut Vec<Progress>) {
+    pub fn try_get_current_jobs(&self, copy_buffer: &mut Vec<Progress>) {
         self.kernel.try_get_current_jobs(copy_buffer);
     }
 
-    pub(crate) fn try_get_amortized_progress(&self) -> Option<AmortizedProgress> {
+    pub fn try_get_amortized_progress(&self) -> Option<AmortizedProgress> {
         self.kernel.try_get_amortized_jobs()
     }
 
     // DOWNLOADER
 
-    pub(crate) fn try_get_current_downloads(&self, copy_buffer: &mut Vec<(usize, FileDownload)>) {
+    pub fn try_get_current_downloads(&self, copy_buffer: &mut Vec<(usize, FileDownload)>) {
         self.kernel.try_get_current_downloads(copy_buffer);
     }
 
-    pub(crate) fn try_get_amortized_download_progress(&self) -> Option<AmortizedDownloadProgress> {
+    pub fn try_get_amortized_download_progress(&self) -> Option<AmortizedDownloadProgress> {
         self.kernel.try_get_amortized_download_progress()
     }
 
-    pub(crate) fn abort_download(&self, download_id: usize) {
+    pub fn abort_download(&self, download_id: usize) {
         self.kernel.abort_download(download_id);
     }
 
     // VISUALIZER
-    pub(crate) fn set_visualizer_visibility(&self, is_visible: bool) {
+    pub fn set_visualizer_visibility(&self, is_visible: bool) {
         self.kernel.set_visualizer_visibility(is_visible);
     }
-    pub(crate) fn try_read_visualization_buffer(
+    pub fn try_read_visualization_buffer(
         &self,
         copy_buffer: &mut [f32; NUM_VISUALIZER_BUCKETS],
     ) {
         self.kernel.try_read_visualization_buffer(copy_buffer);
     }
 
-    pub(crate) fn get_visualizer_analysis_type(&self) -> AnalysisType {
+    pub fn get_visualizer_analysis_type(&self) -> AnalysisType {
         self.kernel.get_visualizer_analysis_type()
     }
 
-    pub(crate) fn set_visualizer_analysis_type(&self, new_type: AnalysisType) {
+    pub fn set_visualizer_analysis_type(&self, new_type: AnalysisType) {
         self.kernel.set_visualizer_analysis_type(new_type);
     }
 
-    pub(crate) fn rotate_visualizer_type(&self, direction: RotationDirection) {
+    pub fn rotate_visualizer_type(&self, direction: RotationDirection) {
         self.kernel.rotate_visualizer_type(direction);
     }
 }

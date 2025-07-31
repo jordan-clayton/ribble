@@ -6,7 +6,7 @@ use irox_egui_extras::progressbar::ProgressBar;
 use unit_prefix::NumberPrefix;
 
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
-pub(in crate::ui) struct DownloadsPane {
+pub struct DownloadsPane {
     #[serde(skip)]
     #[serde(default)]
     current_downloads: Vec<(usize, FileDownload)>,

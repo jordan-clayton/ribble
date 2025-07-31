@@ -367,7 +367,7 @@ fn closest_point_on_perimeter(rect: Rect, mouse_pos: Pos2) -> Pos2 {
     Pos2::new(closest_x, closest_y)
 }
 
-pub(in crate::ui) fn soundbar<'a>(
+pub fn soundbar<'a>(
     rect: Rect,
     buckets: &'a [f32; NUM_VISUALIZER_BUCKETS],
     color_interpolator: &'a ColorInterpolator,

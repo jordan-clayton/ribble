@@ -67,6 +67,6 @@ fn draw_progress_pie(ui: &mut Ui, current: f32, total_size: f32) -> Response {
     response
 }
 
-pub(in crate::ui) fn pie_progress(current: f32, total_size: f32) -> impl Widget {
+pub fn pie_progress(current: f32, total_size: f32) -> impl Widget {
     move |ui: &mut Ui| draw_progress_pie(ui, current, total_size)
 }

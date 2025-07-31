@@ -2,7 +2,7 @@ use ribble_whisper::utils::errors::RibbleWhisperError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub(crate) enum RibbleError {
+pub enum RibbleError {
     // RibbleWhisper has its own to_string impls.
     #[error("Ribble Whisper: {0}")]
     RibbleWhisper(#[from] RibbleWhisperError),

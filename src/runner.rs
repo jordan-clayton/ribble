@@ -37,7 +37,7 @@ static MIGRATION_VERSION: OnceLock<RibbleVersion> = OnceLock::new();
 // old paths don't need to be maintained, or move to a different Versioning mechanism.
 const OLD_MODEL_STUB: &str = "models";
 
-pub(crate) struct RibbleRunner<'a> {
+pub struct RibbleRunner<'a> {
     version: RibbleVersion,
     // NOTE: this -could- have just a path reference, perhaps that might be better.
     data_directory: PathBuf,
@@ -54,7 +54,7 @@ impl RibbleRunner<'_> {
     const MAX_LOG_FILES: usize = 7;
     const LOG_FILE_NAME: &'static str = "ribble_log";
 
-    pub(crate) fn new() -> Result<Self, RibbleError> {
+    pub fn new() -> Result<Self, RibbleError> {
         // Set up the project directory
         let proj_dirs = ProjectDirs::from(QUALIFIER, ORGANIZATION, APP_ID).ok_or(
             RibbleError::Core("Failed to open project directory.".to_string()),
@@ -150,7 +150,7 @@ impl RibbleRunner<'_> {
     }
 
     // NOTE: Calling run will consume the runner -> the version will get serialized on drop.
-    pub(crate) fn run(mut self) -> Result<(), RibbleError> {
+    pub fn run(mut self) -> Result<(), RibbleError> {
         log::info!("Starting Ribble.");
         let window_options = self
             .window_options

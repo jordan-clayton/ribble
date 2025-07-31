@@ -1,14 +1,14 @@
 use ribble_whisper::audio::pcm::IntoPcmS16;
 
-pub(crate) trait IntoPcmF32 {
+pub trait IntoPcmF32 {
     fn into_pcm_f32(self) -> f32;
 }
 
-pub(crate) trait FromPcmF32 {
+pub trait FromPcmF32 {
     fn from_pcm_f32(sample: f32) -> Self;
 }
 
-pub(crate) trait PcmF32Convertible: IntoPcmF32 + FromPcmF32 {}
+pub trait PcmF32Convertible: IntoPcmF32 + FromPcmF32 {}
 
 impl IntoPcmF32 for f32 {
     fn into_pcm_f32(self) -> f32 {

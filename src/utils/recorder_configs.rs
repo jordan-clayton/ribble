@@ -22,14 +22,14 @@ use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
     AsRefStr,
     IntoStaticStr,
 )]
-pub(crate) enum RibbleRecordingExportFormat {
+pub enum RibbleRecordingExportFormat {
     #[default]
     F32,
     I16,
 }
 
 impl RibbleRecordingExportFormat {
-    pub(crate) fn tooltip(&self) -> &str {
+    pub fn tooltip(&self) -> &str {
         match self {
             RibbleRecordingExportFormat::F32 => {
                 "32-bit floating point format. Highest dynamic range but large file size."
@@ -39,7 +39,7 @@ impl RibbleRecordingExportFormat {
         }
     }
 
-    pub(crate) fn bits_per_sample(&self) -> u16 {
+    pub fn bits_per_sample(&self) -> u16 {
         match self {
             RibbleRecordingExportFormat::F32 => 32,
             RibbleRecordingExportFormat::I16 => 16,
@@ -79,7 +79,7 @@ impl From<RibbleRecordingExportFormat> for hound::SampleFormat {
     AsRefStr,
     IntoStaticStr,
 )]
-pub(crate) enum RibbleChannels {
+pub enum RibbleChannels {
     #[default]
     Auto,
     Mono,
@@ -87,7 +87,7 @@ pub(crate) enum RibbleChannels {
 }
 
 impl RibbleChannels {
-    pub(crate) fn into_num_channels(self) -> Option<u8> {
+    pub fn into_num_channels(self) -> Option<u8> {
         match self {
             RibbleChannels::Auto => None,
             RibbleChannels::Mono => Some(1),
@@ -126,7 +126,7 @@ impl From<RibbleChannels> for Option<u8> {
     AsRefStr,
     IntoStaticStr,
 )]
-pub(crate) enum RibbleSampleRate {
+pub enum RibbleSampleRate {
     #[default]
     Auto,
     Low,
@@ -136,7 +136,7 @@ pub(crate) enum RibbleSampleRate {
 }
 
 impl RibbleSampleRate {
-    pub(crate) fn into_sample_rate(self) -> Option<usize> {
+    pub fn into_sample_rate(self) -> Option<usize> {
         match self {
             RibbleSampleRate::Auto => None,
             RibbleSampleRate::Low => Some(8000),
@@ -189,7 +189,7 @@ pub enum RibblePeriod {
 }
 
 impl RibblePeriod {
-    pub(crate) fn into_period(self) -> Option<usize> {
+    pub fn into_period(self) -> Option<usize> {
         match self {
             RibblePeriod::Auto => None,
             RibblePeriod::Small => Some(512),
@@ -219,18 +219,18 @@ impl From<RibblePeriod> for Option<usize> {
 }
 
 #[derive(Default, Copy, Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct RibbleRecordingConfigs {
+pub struct RibbleRecordingConfigs {
     sample_rate: RibbleSampleRate,
     channel_configs: RibbleChannels,
     period: RibblePeriod,
 }
 
 impl RibbleRecordingConfigs {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
-    pub(crate) fn from_mic_capture<M: MicCapture>(capture: &M) -> Self {
+    pub fn from_mic_capture<M: MicCapture>(capture: &M) -> Self {
         let sample_rate = Some(capture.sample_rate()).into();
         let channel_configs = Some(capture.channels()).into();
         let period = Some(capture.buffer_size()).into();
@@ -242,30 +242,30 @@ impl RibbleRecordingConfigs {
         }
     }
 
-    pub(crate) fn with_sample_rate(mut self, sample_rate: RibbleSampleRate) -> Self {
+    pub fn with_sample_rate(mut self, sample_rate: RibbleSampleRate) -> Self {
         self.sample_rate = sample_rate;
         self
     }
-    pub(crate) fn with_num_channels(mut self, channel_configs: RibbleChannels) -> Self {
+    pub fn with_num_channels(mut self, channel_configs: RibbleChannels) -> Self {
         self.channel_configs = channel_configs;
         self
     }
-    pub(crate) fn with_period(mut self, period: RibblePeriod) -> Self {
+    pub fn with_period(mut self, period: RibblePeriod) -> Self {
         self.period = period;
         self
     }
 
-    pub(crate) fn sample_rate(&self) -> RibbleSampleRate {
+    pub fn sample_rate(&self) -> RibbleSampleRate {
         self.sample_rate
     }
-    pub(crate) fn num_channels(&self) -> RibbleChannels {
+    pub fn num_channels(&self) -> RibbleChannels {
         self.channel_configs
     }
-    pub(crate) fn period(&self) -> RibblePeriod {
+    pub fn period(&self) -> RibblePeriod {
         self.period
     }
 
-    pub(crate) fn into_wav_spec(
+    pub fn into_wav_spec(
         self,
         format: RibbleRecordingExportFormat,
     ) -> Result<hound::WavSpec, RibbleError> {
