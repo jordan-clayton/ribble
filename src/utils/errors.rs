@@ -28,5 +28,7 @@ pub(crate) enum RibbleError {
     Logger(#[from] flexi_logger::FlexiLoggerError),
     #[error("Crash-Handler: {0}")]
     CrashHandler(#[from] crash_handler::Error),
+    #[error("Conversion Error: {0}")]
+    ConversionError(&'static str),
 }
 

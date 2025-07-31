@@ -1,9 +1,11 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::ConsoleMessage;
 use crate::ui::panes::ribble_pane::RibblePaneId;
-use crate::ui::panes::PaneView;
+use crate::ui::panes::{PaneView, PANE_INNER_MARGIN};
 use std::sync::Arc;
 
+// TODO: TEST THIS.
+const SPACING_COEFF: f32 = 1.5;
 #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ConsolePane {
     // NOTE: These are shared ConsoleMessages (held in the ConsoleEngine).
@@ -34,40 +36,51 @@ impl PaneView for ConsolePane {
         let pane_id = egui::Id::new("console_pane");
         let resp = ui
             .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
-            // This cursor needs to be on the "bg -> not quite sure how to resolve this just yet"
             .on_hover_cursor(egui::CursorIcon::Grab);
-        let bg_col = ui.visuals().extreme_bg_color;
 
-        ui.heading("Console:");
-        egui::Frame::default().fill(bg_col).show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .stick_to_bottom(true)
-                // Fill space -inside- the scroll area.
-                .auto_shrink([false; 2])
-                .show(ui, |ui| {
-                    ui.with_layout(
-                        egui::Layout::top_down(egui::Align::LEFT).with_cross_justify(true),
-                        |ui| {
-                            for msg in self.message_buffer.iter() {
-                                ui.label(msg.to_console_text(ui.visuals()));
-                            }
-                        },
-                    );
-                });
+        let console_bg_color = ui.visuals().extreme_bg_color;
+        let panel_col = ui.visuals().panel_fill;
+
+        // NOTE: test this.
+        // I'm leaning towards an explicit margin that exposes the panel color.
+        // The alternative is to wrap frames (outer = color, (inner = margin)) with explicit margins
+        // to paint across the entire box.
+        egui::Frame::default().fill(panel_col).inner_margin(PANE_INNER_MARGIN).show(ui, |ui| {
+            ui.heading("Console:");
+            egui::Frame::default().fill(console_bg_color).show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .stick_to_bottom(true)
+                    // Fill space -inside- the scroll area.
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        // This -should- take up all available space.
+                        ui.with_layout(
+                            egui::Layout::top_down(egui::Align::LEFT).with_cross_justify(true),
+                            |ui| {
+
+                                // Set the spacing between messages to be a little bit larger.
+                                let mut item_spacing = ui.spacing().item_spacing;
+                                item_spacing.y *= SPACING_COEFF;
+                                ui.style_mut().spacing.item_spacing = item_spacing;
+
+                                for msg in self.message_buffer.iter() {
+                                    ui.label(msg.to_console_text(ui.visuals()));
+                                }
+                            },
+                        );
+                    });
+            });
         });
-
 
         // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
         // will just nop.
         resp.context_menu(|ui| {
-            ui.selectable_value(should_close, self.is_pane_closable(), "Close tab.");
+            ui.selectable_value(should_close, self.is_pane_closable(), "Close tab");
         });
-
-
         resp
     }
 
     fn is_pane_closable(&self) -> bool {
-        true
+        self.pane_id().is_closable()
     }
 }

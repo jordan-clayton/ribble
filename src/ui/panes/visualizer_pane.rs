@@ -1,7 +1,7 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{AnalysisType, RotationDirection, NUM_VISUALIZER_BUCKETS};
 use crate::ui::panes::ribble_pane::RibblePaneId;
-use crate::ui::panes::PaneView;
+use crate::ui::panes::{PaneView, PANE_INNER_MARGIN};
 use crate::ui::widgets::soundbar::soundbar;
 use crate::utils::preferences::RibbleAppTheme;
 use egui_colorgradient::ColorInterpolator;
@@ -10,6 +10,20 @@ use strum::IntoEnumIterator;
 
 const SMOOTHING_CONSTANT: f32 = 8.0;
 
+// TODO: DETERMINE WHAT TO DO RE ENUM SIZE
+// - Currently, VisualizerPane is 296-800 bytes because the slices are being stored on the stack.
+// - This will, most definitely be faster, but RibblePanes then become 296 bytes by default,
+//   Which seems a little wasteful for some which are ZST or much smaller.
+// - Since VisualizerPane -has- to be mutable and there should be no locking in the UI, the options are as follows:
+//      - Do nothing and accept that all panes are 296 bytes.
+//      - Use vectors instead of fixed sized slices (can then make the visualizer resolution tweakable)
+
+// I'm not 100% sure what to do here. Stack allocated buffers will be quicker and -very- cache friendly
+// This should be more efficient.
+// If I move to vectors, the size is ~80-90 bytes, so this will significantly save on memory,
+// but add (maybe) noticeable indirection costs.
+
+// RETURN TO THIS AFTER PROFILING FOR MEMORY.
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct VisualizerPane {
     #[serde(skip)]
@@ -124,8 +138,8 @@ impl PaneView for VisualizerPane {
 
         let bg_col = ui.style().visuals.extreme_bg_color;
 
-        egui::Frame::default().fill(bg_col).show(ui, |ui| {
-            ui.heading(visualizer_type.as_ref());
+        egui::Frame::default().inner_margin(PANE_INNER_MARGIN).fill(bg_col).show(ui, |ui| {
+            ui.heading(format!("{visualizer_type}:"));
             ui.put(pane_max_rect, |ui: &mut egui::Ui| {
                 let color_interpolator = self
                     .color_interpolator
@@ -184,15 +198,16 @@ impl PaneView for VisualizerPane {
 
             ui.separator();
             // For closing the pane.
-            ui.selectable_value(should_close, self.is_pane_closable(), "Close tab.");
+            ui.selectable_value(should_close, self.is_pane_closable(), "Close pane");
         });
 
         resp
     }
 
     fn is_pane_closable(&self) -> bool {
-        true
+        self.pane_id().is_closable()
     }
+    // NOTE: this only gets called on close, so it must be that the pane is closable.
     fn on_pane_close(&mut self, controller: RibbleController) -> bool {
         controller.set_visualizer_visibility(false);
         true

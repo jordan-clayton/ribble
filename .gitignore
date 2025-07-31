@@ -4,3 +4,4 @@
 /dist
 /release_builds
 Cargo.lock
+/testing_script.rs

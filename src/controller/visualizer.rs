@@ -2,8 +2,6 @@ use crate::controller::{AnalysisType, AtomicAnalysisType, RotationDirection, Vis
 use crate::utils::errors::RibbleError;
 use crossbeam::channel::Receiver;
 use parking_lot::RwLock;
-use realfft::num_complex::{Complex, ComplexFloat};
-use realfft::num_traits::Zero;
 use realfft::RealFftPlanner;
 use std::error::Error;
 use std::f32::consts::PI;
@@ -313,14 +311,15 @@ impl VisualizerEngine {
             // visualizer Analysis type.
 
             while let Ok(packet) = thread_inner.incoming_samples.recv() {
-                // If the visualizer isn't open, just skip over the sample and don't do the
-                // computation.
-                if !thread_inner.visualizer_running.load(Ordering::Acquire) {
-                    continue;
-                }
-
                 match packet {
                     VisualizerPacket::VisualizerSample { sample, sample_rate } => {
+
+                        // If the visualizer isn't open, just skip over the sample and don't do the
+                        // computation.
+                        if !thread_inner.visualizer_running.load(Ordering::Acquire) {
+                            continue;
+                        }
+
                         // Instead of returning the error to finish the thread, just log it.
                         // There may be errors across each visualization analysis, so the loop should
                         // remain.

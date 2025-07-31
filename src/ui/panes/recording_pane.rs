@@ -290,13 +290,13 @@ impl PaneView for RecordingPane {
         // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
         // will just nop.
         resp.context_menu(|ui| {
-            ui.selectable_value(should_close, self.is_pane_closable(), "Close tab.");
+            ui.selectable_value(should_close, self.is_pane_closable(), "Close tab");
         });
 
         resp
     }
 
     fn is_pane_closable(&self) -> bool {
-        true
+        self.pane_id().is_closable()
     }
 }

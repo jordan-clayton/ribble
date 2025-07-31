@@ -97,8 +97,9 @@ impl Ribble {
         let backend_proxy = AudioBackendProxy::new(request_sender);
         // Deserialize/default construct the controller.
         let controller = RibbleController::new(data_directory, backend_proxy, toasts_sender)?;
+
         // Deserialize/default construct the app tree -> this has its own default layout.
-        let tree = RibbleTree::new(data_directory, controller.clone())?;
+        let tree = RibbleTree::new(data_directory, controller.clone());
 
         // Get the system visuals stored in user_prefs
         let system_visuals = match controller.get_system_visuals() {
@@ -190,8 +191,11 @@ impl Ribble {
     // TODO: DETERMINE WHETHER OR NOT TO LET egui DO THIS, OR IMPLEMENT DIRTY WRITES.
     fn serialize_app_state(&mut self) {
         self.check_join_last_save();
-
         let controller = self.controller.clone();
+
+        // Run a pass over the tree to make sure all non-closable panes are still in view.
+        self.tree.check_insert_non_closable_panes();
+
         // NOTE: this is a proxy object that avoids cloning the entire tree/behavior.
         // It's not as cheap as cloning the controller and uses CoW.
         let tree_serializer = self.tree.tree_serializer();
@@ -275,16 +279,16 @@ impl eframe::App for Ribble {
             .resizable(false)
             .min_height(0.0)
             .show(ctx, |ui| {
-
-                // This might actually best be achieved with 2 columns?
-                // One is left-to-right, and the other is right to left.
-
                 ui.horizontal(|ui| {
                     ui.columns_const(|[col1, col2]| {
                         // Recording icon + status message
                         col1.vertical_centered_justified(|ui| {
+                            // This code needs to be duplicated or be a tuple-closure
+                            // -> The calculation needs to be relative to the columns.
+                            let header_height = ui.spacing().interact_size.y * TOP_BAR_HEIGHT_COEFF;
+                            let header_width = ui.max_rect().width();
                             // Allocate a top "toolbar"-sized toolbar.
-                            let desired_size = egui::vec2(ui.max_rect().width(), ui.spacing().interact_size.y * TOP_BAR_HEIGHT_COEFF);
+                            let desired_size = egui::Vec2::new(header_width, header_height);
                             let layout =
                                 egui::Layout::left_to_right(egui::Align::Center);
                             ui.allocate_ui_with_layout(desired_size, layout, |ui| {
@@ -332,12 +336,14 @@ impl eframe::App for Ribble {
                         });
                         // Control buttons.
                         col2.vertical_centered_justified(|ui| {
-
+                            let header_height = ui.spacing().interact_size.y * TOP_BAR_HEIGHT_COEFF;
+                            let header_width = ui.max_rect().width();
                             // Allocate a top "toolbar"-sized toolbar.
-                            let desired_size = egui::vec2(ui.max_rect().width(), ui.spacing().interact_size.y * TOP_BAR_HEIGHT_COEFF);
+                            let desired_size = egui::Vec2::new(header_width, header_height);
                             let layout =
                                 egui::Layout::right_to_left(egui::Align::Center);
 
+                            // Allocate a top "toolbar"-sized toolbar.
                             ui.allocate_ui_with_layout(desired_size, layout, |ui| {
                                 // UH, this does not seem to be respected by egui 0.32.0
                                 // Until this bug gets resolved, this needs to use a richtext object instead
@@ -348,12 +354,16 @@ impl eframe::App for Ribble {
                                 //     egui::FontId::new(TOP_BAR_BUTTON_SIZE, eframe::epaint::FontFamily::Proportional),
                                 // );
 
+                                // NOTE NOTE NOTE: if memory allocation churn becomes an issue, this is low-hanging fruit to cache
+                                // (or just set it back when the error is fixed).
+
                                 let settings_button = egui::RichText::new(HAMBURGER).size(TOP_BAR_BUTTON_SIZE);
 
                                 // Far right hamburger button.
                                 ui.menu_button(settings_button, |ui| {
                                     ui.menu_button("Window", |ui| {
-                                        for pane in ClosableRibbleViewPane::iter() {
+                                        for pane in ClosableRibbleViewPane::iter()
+                                            .filter(|p| !matches!(*p, ClosableRibbleViewPane::UserPreferences)) {
                                             if ui.button(pane.as_ref()).clicked() {
                                                 self.tree.add_new_pane(pane.into());
                                                 ui.ctx().request_repaint();
@@ -388,13 +398,14 @@ impl eframe::App for Ribble {
                                         current,
                                         total_size,
                                     } => {
+                                        // TODO: this needs to be tested -> It is not known whether or not the drawing behaves as written.
                                         let resp = ui.add(pie_progress(current as f32, total_size as f32));
                                         ui.ctx().request_repaint();
                                         resp
                                     }
                                 }.on_hover_ui(|ui| {
                                     ui.style_mut().interaction.selectable_labels = true;
-                                    ui.label("Downloads");
+                                    ui.label("Show downloads");
                                 });
 
                                 if download_button.clicked() {
@@ -492,7 +503,12 @@ impl eframe::App for Ribble {
                 });
             });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        // Remove any and all margins -> these will (are?) handled by the panes themselves
+        // TODO: update this comment once that's implemented.
+        let mut frame = egui::Frame::central_panel(ctx.style().as_ref());
+        frame.inner_margin = egui::Margin::ZERO;
+
+        egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
             if self.theme_animator.anim_id.is_none() {
                 self.theme_animator.create_id(ui);
             } else {
@@ -503,7 +519,11 @@ impl eframe::App for Ribble {
             if start_transition {
                 self.theme_animator.start();
             }
-
+            // TODO: RE: egui_tiles --
+            // The panel split doesn't have a lot of contrast and is difficult to see
+            // especially on dark backgrounds.
+            // This needs to be addressed: consider using some sort of extreme fg color or
+            // the outline color
             self.tree.ui(ui);
         });
 
@@ -517,6 +537,8 @@ impl eframe::App for Ribble {
     // And each individual resource also serializes itself on shutdown.
 
     // This is causing some weird issues -> it's failing to initialize the Storage
+    // I'm -not- quite sure how to approach replicating this just yet ->
+    // This app is non-send/sync, so it's a little tricky to do the threading -> look into this.
     fn save(&mut self, _storage: &mut dyn Storage) {
         self.serialize_app_state();
     }

@@ -878,6 +878,6 @@ impl PaneView for TranscriberPane {
     }
 
     fn is_pane_closable(&self) -> bool {
-        false
+        self.pane_id().is_closable()
     }
 }
