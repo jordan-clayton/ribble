@@ -85,3 +85,11 @@ metal = ["ribble_whisper/metal"]
 openblas = ["ribble_whisper/openblas"]
 # This is linux-only, for ROCm/hipblas support
 hipblas = ["ribble_whisper/hipblas"]
+bencher = []
+
+
+[[bench]]
+path = "src/benches/visualizer_pane_benchmark.rs"
+name = "visualizer_pane_benchmark"
+harness = false
+required-features = ["bencher"]

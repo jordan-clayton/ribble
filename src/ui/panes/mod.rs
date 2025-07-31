@@ -4,11 +4,15 @@ mod transcriber_pane;
 
 mod console_pane;
 mod downloads_pane;
+
 pub(in crate::ui) mod pane_list;
 mod progress_pane;
 mod transcription_pane;
 mod user_preferences_pane;
+#[cfg(not(feature = "bencher"))]
 mod visualizer_pane;
+#[cfg(feature = "bencher")]
+pub(crate) mod visualizer_pane;
 
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::panes::ribble_pane::{PaneView, RibblePane, RibblePaneId};

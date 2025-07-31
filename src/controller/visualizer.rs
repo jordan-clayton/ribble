@@ -297,10 +297,21 @@ fn compute_welch_frames(sample_len: f32, overlap_ratio: f32) -> (usize, usize) {
 
 // TODO: kernel-exposed methods for updating sample rate/buffer size
 // For precomputing an FFTplanner state that can be ArcSwapped
+// TODO: Reduce the visibility back down to super once benches are done.
+
+#[cfg(not(feature = "bencher"))]
 pub(super) struct VisualizerEngine {
     inner: Arc<VisualizerEngineState>,
     work_thread: Option<JoinHandle<()>>,
 }
+
+#[cfg(feature = "bencher")]
+pub(crate) struct VisualizerEngine {
+    inner: Arc<VisualizerEngineState>,
+    work_thread: Option<JoinHandle<()>>,
+}
+
+#[cfg(not(feature = "bencher"))]
 impl VisualizerEngine {
     pub(super) fn new(incoming_samples: Receiver<VisualizerPacket>) -> Self {
         let inner = Arc::new(VisualizerEngineState::new(incoming_samples));
@@ -389,5 +400,87 @@ impl Drop for VisualizerEngine {
             );
             log::info!("VisualizerEngine work thread joined.");
         }
+    }
+}
+
+
+// NOTE: THIS IS GROSS, BUT THIS BENCHING THING IS UNLIKELY TO STICK AROUND
+// TODO: look at deleting the code once profiling is finished.
+#[cfg(feature = "bencher")]
+impl VisualizerEngine {
+    pub(crate) fn new(incoming_samples: Receiver<VisualizerPacket>) -> Self {
+        let inner = Arc::new(VisualizerEngineState::new(incoming_samples));
+        let thread_inner = Arc::clone(&inner);
+
+        let work_thread = Some(thread::spawn(move || {
+            // When this receives new audio, perform Audio analysis calculations based on the current
+            // visualizer Analysis type.
+
+            while let Ok(packet) = thread_inner.incoming_samples.recv() {
+                match packet {
+                    VisualizerPacket::VisualizerSample { sample, sample_rate } => {
+
+                        // If the visualizer isn't open, just skip over the sample and don't do the
+                        // computation.
+                        if !thread_inner.visualizer_running.load(Ordering::Acquire) {
+                            continue;
+                        }
+
+                        // Instead of returning the error to finish the thread, just log it.
+                        // There may be errors across each visualization analysis, so the loop should
+                        // remain.
+                        if let Err(e) = thread_inner.run_analysis(&sample, sample_rate) {
+                            log::warn!(
+                        "Failed to run visual analysis.\nType: {}, Error: {e}, Error Source: {:#?}",
+                        thread_inner.analysis_type.load(Ordering::Acquire),
+                        e.source()
+                    );
+                        }
+                    }
+                    VisualizerPacket::Shutdown => break,
+                }
+            }
+        }));
+
+        Self { inner, work_thread }
+    }
+
+    pub(crate) fn set_visualizer_visibility(&self, is_visible: bool) {
+        self.inner
+            .visualizer_running
+            .store(is_visible, Ordering::Release);
+    }
+
+    // TODO: look at removing this --> I don't think the rest of the application needs to know if the visualizer is currently running.
+    pub(crate) fn visualizer_running(&self) -> bool {
+        self.inner.visualizer_running.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn try_read_visualization_buffer(
+        &self,
+        copy_buffer: &mut [f32; NUM_VISUALIZER_BUCKETS],
+    ) {
+        if let Some(buffer) = self.inner.buffer.try_read() {
+            copy_buffer.copy_from_slice(buffer.deref())
+        }
+    }
+    pub(crate) fn get_visualizer_analysis_type(&self) -> AnalysisType {
+        self.inner.analysis_type.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn set_visualizer_analysis_type(&self, new_type: AnalysisType) {
+        self.inner.analysis_type.store(new_type, Ordering::Release);
+    }
+
+    // There's no real contention here; rotations are rare,
+    // and this isn't RMW critical, so this can be load -> rotate -> store.
+    pub(crate) fn rotate_visualizer_type(&self, direction: RotationDirection) {
+        self.inner.analysis_type.store(
+            self.inner
+                .analysis_type
+                .load(Ordering::Acquire)
+                .rotate(direction),
+            Ordering::Release,
+        )
     }
 }

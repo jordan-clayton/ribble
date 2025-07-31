@@ -21,7 +21,11 @@ mod progress;
 mod recorder;
 pub(crate) mod ribble_controller;
 mod transcriber;
+#[cfg(not(feature = "bencher"))]
 mod visualizer;
+#[cfg(feature = "bencher")]
+pub(crate) mod visualizer;
+
 mod worker;
 mod writer;
 
@@ -614,7 +618,18 @@ impl WriteRequest {
     }
 }
 
+#[cfg(not(feature = "bencher"))]
 pub(in crate::controller) enum VisualizerPacket {
+    VisualizerSample {
+        sample: Arc<[f32]>,
+        sample_rate: f64,
+    },
+    Shutdown,
+}
+
+
+#[cfg(feature = "bencher")]
+pub(crate) enum VisualizerPacket {
     VisualizerSample {
         sample: Arc<[f32]>,
         sample_rate: f64,
