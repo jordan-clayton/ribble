@@ -29,6 +29,10 @@ pub mod writer;
 // TODO: perhaps make this a "resolution" parameter.
 // It's also more than likely fine to double this, if not quadruple.
 // TODO: test performance with higher resolutions.
+
+
+// Size 32: ~20 (Array)-22 (Vec) ns
+// Size 64: ~35 (Array)- 40 (Vec) ns
 pub const NUM_VISUALIZER_BUCKETS: usize = 32;
 
 pub const UTILITY_QUEUE_SIZE: usize = 32;

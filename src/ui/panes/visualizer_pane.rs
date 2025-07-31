@@ -24,13 +24,13 @@ const SMOOTHING_CONSTANT: f32 = 8.0;
 // but add (maybe) noticeable indirection costs.
 
 // RETURN TO THIS AFTER PROFILING FOR MEMORY.
-#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct VisualizerPane {
     #[serde(skip)]
-    #[serde(default)]
+    #[serde(default = "make_buffer")]
     visualizer_buckets: [f32; NUM_VISUALIZER_BUCKETS],
     #[serde(skip)]
-    #[serde(default)]
+    #[serde(default = "make_buffer")]
     presentation_buckets: [f32; NUM_VISUALIZER_BUCKETS],
     // NOTE: this is the only view that's using the color_interpolator
     // If that changes, moved to a shared module in the kernel or otherwise and access via the
@@ -45,6 +45,24 @@ pub struct VisualizerPane {
     #[serde(default)]
     has_focus: bool,
 }
+
+impl Default for VisualizerPane {
+    fn default() -> Self {
+        Self {
+            visualizer_buckets: make_buffer(),
+            presentation_buckets: make_buffer(),
+            color_interpolator: None,
+            current_theme: Default::default(),
+            has_focus: false,
+        }
+    }
+}
+
+// Since [f32; 64] doesn't implement default, this has to exist on the benching branch while I test things.
+fn make_buffer() -> [f32; NUM_VISUALIZER_BUCKETS] {
+    [0.0; NUM_VISUALIZER_BUCKETS]
+}
+
 
 impl Clone for VisualizerPane {
     fn clone(&self) -> Self {
