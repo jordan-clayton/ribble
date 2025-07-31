@@ -31,6 +31,9 @@ use ribble_whisper::utils::{get_channel, Receiver};
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 
+// TODO: implement a debug menu from which to test some stuff out:
+// e.g. Panics, progress, downloads, etc.
+
 // TODO: FIND AN APPROPRIATE SPOT FOR GUI/STYLING CONSTANTS
 // Icon constants
 const HAMBURGER: &str = "☰";
