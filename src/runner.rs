@@ -128,8 +128,7 @@ impl RibbleRunner<'_> {
 
         // Construct the app
         // Give a copy of the data dir to the eframe window (for other persistence)
-        // TODO -> since serialization is handled internally on drop, it mightn't be necessary to set the persistence path.
-        // Look into this.
+        // TODO: swap this out, this needs to be a file-path.
         let window_options = build_window(data_directory.clone());
 
         let app_path = data_directory.clone();

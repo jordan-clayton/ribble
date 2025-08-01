@@ -2,6 +2,7 @@ use crate::controller::ribble_controller::RibbleController;
 use crate::controller::Progress;
 use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::ui::panes::{PaneView, PANE_INNER_MARGIN};
+use crate::ui::GRID_ROW_SPACING_COEFF;
 use irox_egui_extras::progressbar::ProgressBar;
 
 #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
@@ -58,6 +59,7 @@ impl PaneView for ProgressPane {
                     egui::Grid::new("progress_grid")
                         .num_columns(1)
                         .min_col_width(grid_width)
+                        .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
                         .striped(true)
                         .show(ui, |ui| {
                             // NOTE: this will need to be tested -> it is most likely to work though.

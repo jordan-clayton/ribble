@@ -31,22 +31,20 @@ fn crash_popup(crash_context: &CrashContext) -> CrashEventResult {
         let addr = sig_info.ssi_addr;
 
         // "Human-Readable" Signal
-        let error_string = match sig_no {
-            SIGABRT => "SIGABRT",
-            SIGBUS => "SIGBUS",
-            SIGFPE => "SIGFPE",
-            SIGILL => "SIGILL",
+        let error_description = match sig_no {
+            SIGABRT => format!("Signal: SIGABRT. Abnormal process termination (from address: {addr:#04X})"),
+            SIGBUS => format!("Signal: SIGBUS. Bus error (bad memory access at: {addr:#04X})"),
+            SIGFPE => format!("Signal: SIGFPE. Arithmetic error. (fault address: {addr:#04X})"),
+            SIGILL => format!("Signal: SIGILL. Illegal instruction. (fault address: {addr:#04X}"),
             // Ignore SIGTRAP -> breakpoints will set this off, and it should just return
             // There's nothing to alert.
             SIGTRAP => return CrashEventResult::Handled(true),
-            SIGSEGV => "SIGSEGV",
+            SIGSEGV => format!("Signal: SIGSEGV. Address not mapped to object (fault address: {addr:#04X})"),
 
             // Consider all other signals "handled."
             // The main concern here is (GPU) segfaults.
             _ => return CrashEventResult::Handled(true),
         };
-
-        let error_description = format!("{error_string} at {:X}", addr);
 
         // Show a quick and dirty OS dialog warning about the exception.
         rfd::MessageDialog::new()
@@ -67,7 +65,6 @@ fn crash_popup(crash_context: &CrashContext) -> CrashEventResult {
 
         // For EXC_BAD_ACCESS, the subcode is the address.
         let mut exception_subcode = exception_info.subcode;
-
 
         let error_string = match kind {
             BAD_ACCESS => "BAD_ACCESS",
@@ -90,11 +87,11 @@ fn crash_popup(crash_context: &CrashContext) -> CrashEventResult {
         let error_description = match exception_subcode {
             Some(subcode) => {
                 format!("{error_string} in process: {pid}\n\
-            Code: {:X}\n Subcode: {:X}", exception_code, subcode)
+            Code: {exception_code:#04X}\n Subcode: {subcode:#04X}")
             }
             None => {
                 format!("{error_string} in process:{pid}\n\
-            Code: {:X}", exception_code)
+            Code: {exception_code:#04X}")
             }
         };
 
@@ -131,7 +128,7 @@ fn crash_popup(crash_context: &CrashContext) -> CrashEventResult {
             (*record).ExceptionAddress
         };
 
-        let error_description = format!("{error_string} at {:p}", address);
+        let error_description = format!("{error_string} at {address:#04X}", address);
         rfd::MessageDialog::new()
             .set_title("Unhandled Exception!")
             .set_description(error_description)

@@ -1,8 +1,9 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{CompletedRecordingJobs, ModelFile, OfflineTranscriberFeedback};
 use crate::ui::panes::ribble_pane::RibblePaneId;
-use crate::ui::panes::PaneView;
+use crate::ui::panes::{PaneView, PANE_INNER_MARGIN};
 use crate::ui::widgets::toggle_switch::toggle;
+use crate::ui::GRID_ROW_SPACING_COEFF;
 use crate::utils::realtime_settings::{AudioSampleLen, RealtimeTimeout, VadSampleLen};
 use crate::utils::vad_configs::{VadFrameSize, VadStrictness, VadType};
 use ribble_whisper::whisper::configs::Language;
@@ -12,6 +13,7 @@ use strum::IntoEnumIterator;
 
 // Icon button for opening a link to huggingface/a readme explainer
 const LINK_ICON: &str = "🌐";
+// TODO: link icon size, should be around 16 pt.
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(in crate::ui) struct TranscriberPane {
@@ -98,12 +100,16 @@ impl PaneView for TranscriberPane {
         let resp = ui.interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::Grab);
 
+        let pane_col = ui.visuals().panel_fill;
+
         // MAIN PANEL FRAME
-        egui::Frame::default().show(ui, |ui| {
+        egui::Frame::default().fill(pane_col).inner_margin(PANE_INNER_MARGIN).show(ui, |ui| {
             // TODO: cop the trick used in the main app to get this to align properly.
             let header_height = egui::TextStyle::Heading.resolve(ui.style()).size;
             let header_width = ui.max_rect().width();
             let desired_size = egui::Vec2::new(header_width, header_height);
+            // TODO: this -does- not work.
+            // Instead, follow app.rs and use the columns trick.
             let layout = egui::Layout::left_to_right(egui::Align::Center).with_main_justify(true).with_main_wrap(true);
 
             ui.allocate_ui_with_layout(
@@ -119,7 +125,7 @@ impl PaneView for TranscriberPane {
             );
 
             let button_spacing = ui.spacing().button_padding.y;
-            egui::ScrollArea::both().show(ui, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
                 // FUNCTIONS
                 if self.realtime {
                     // RUNNER BUTTONS: START + STOP + Re-Transcribe
@@ -187,15 +193,19 @@ impl PaneView for TranscriberPane {
                     ui.heading("Audio File");
                     ui.vertical_centered_justified(|ui| {
                         // AUDIO FILE
-                        egui::Grid::new("audio_file").num_columns(2).striped(true).show(ui, |ui| {
-                            ui.label("Current audio file:");
-                            ui.horizontal(|ui| {
-                                ui.label(format!("{current_file:#?}"));
-                                if ui.button("Clear").clicked() {
-                                    controller.clear_audio_file_path();
-                                }
+                        egui::Grid::new("audio_file")
+                            .num_columns(2)
+                            .striped(true)
+                            .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
+                            .show(ui, |ui| {
+                                ui.label("Current audio file:");
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("{current_file:#?}"));
+                                    if ui.button("Clear").clicked() {
+                                        controller.clear_audio_file_path();
+                                    }
+                                });
                             });
-                        });
 
                         // TODO: determine whether to add button spacing between the grid or not.
                         ui.add_space(button_spacing);
@@ -226,24 +236,28 @@ impl PaneView for TranscriberPane {
 
                     ui.heading("Feedback Mode");
                     // FEEDBACK MODE -> possibly hide this, but it seems important to have accessible.
-                    egui::Grid::new("offline_feedback").num_columns(2).striped(true).show(ui, |ui| {
-                        let mut offline_feedback = controller.read_offline_transcriber_feedback();
-                        ui.label("Feedback mode.").on_hover_ui(|ui| {
-                            ui.style_mut().interaction.selectable_labels = true;
-                            ui.label("Set the feedback mode for file transcription.\n\
+                    egui::Grid::new("offline_feedback")
+                        .num_columns(2)
+                        .striped(true)
+                        .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
+                        .show(ui, |ui| {
+                            let mut offline_feedback = controller.read_offline_transcriber_feedback();
+                            ui.label("Feedback mode.").on_hover_ui(|ui| {
+                                ui.style_mut().interaction.selectable_labels = true;
+                                ui.label("Set the feedback mode for file transcription.\n\
                             Progressive: Enables live updates. Significantly degrades performance.\n\
                             Minimal: Disables live updates. Significant increases performance.");
-                        });
-                        egui::ComboBox::from_id_salt("feedback_mode_combobox")
-                            .selected_text(offline_feedback.as_ref()).show_ui(ui, |ui| {
-                            for feedback_mode in OfflineTranscriberFeedback::iter() {
-                                if ui.selectable_value(&mut offline_feedback, feedback_mode, feedback_mode.as_ref()).clicked() {
-                                    controller.write_offline_transcriber_feedback(offline_feedback);
+                            });
+                            egui::ComboBox::from_id_salt("feedback_mode_combobox")
+                                .selected_text(offline_feedback.as_ref()).show_ui(ui, |ui| {
+                                for feedback_mode in OfflineTranscriberFeedback::iter() {
+                                    if ui.selectable_value(&mut offline_feedback, feedback_mode, feedback_mode.as_ref()).clicked() {
+                                        controller.write_offline_transcriber_feedback(offline_feedback);
+                                    }
                                 }
-                            }
+                            });
+                            ui.end_row();
                         });
-                        ui.end_row();
-                    });
                 }
 
                 ui.add_space(button_spacing);
@@ -254,318 +268,302 @@ impl PaneView for TranscriberPane {
                 // Disable the configs interaction if the main runner is running
                 ui.collapsing("Transcription Configs", |ui| {
                     ui.add_enabled_ui(!audio_worker_running, |ui| {
-                        // NOTE: THIS IS A LITTLE FRAGILE -> This should reflect the number of rows in the grid
-                        // Realtime has +3 extra features
+                        egui::Grid::new("transcription_configs_grid")
+                            .num_columns(2)
+                            .striped(true)
+                            .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
+                            .show(ui, |ui| {
+                                // ROW: MODEL
+                                ui.label("Model:");
+                                // NOTE: this might be too many buttons, test and see.
+                                ui.horizontal_wrapped(|ui| {
+                                    // Try-Get the model list from the controller.
+                                    controller.try_read_model_list(&mut self.model_list);
+                                    // Get a clone of the model_id to modify
+                                    let mut model_id = *configs.model_id();
 
-                        // Also, the wrapping might cause things to get a little crusty -> test
-                        // this out.
-                        let row_height = ui.spacing().interact_size.y;
-                        let total_rows = if self.realtime {
-                            12
-                        } else {
-                            9
-                        };
-                        egui::ScrollArea::vertical().show_rows(
-                            ui,
-                            row_height,
-                            total_rows,
-                            |ui, row_range| {
-                                egui::Grid::new("realtime_configs_grid")
-                                    .num_columns(2)
-                                    .striped(true)
-                                    .start_row(row_range.start)
-                                    .show(ui, |ui| {
-                                        // ROW: MODEL
-                                        ui.label("Model:");
-                                        // NOTE: this might be too many buttons, test and see.
-                                        ui.horizontal_wrapped(|ui| {
-                                            // Try-Get the model list from the controller.
-                                            controller.try_read_model_list(&mut self.model_list);
-                                            // Get a clone of the model_id to modify
-                                            let mut model_id = *configs.model_id();
+                                    let model_id_combobox = match current_model {
+                                        Some((_, file)) => {
+                                            match file {
+                                                ModelFile::Packed(idx) => {
+                                                    egui::ComboBox::from_id_salt("model_id_combobox")
+                                                        .selected_text(ModelFile::PACKED_NAMES[idx])
+                                                }
+                                                ModelFile::File(name) => {
+                                                    egui::ComboBox::from_id_salt("model_id_combobox")
+                                                        .selected_text(name.as_ref())
+                                                }
+                                            }
+                                        }
+                                        None => {
+                                            egui::ComboBox::from_id_salt("model_id_combobox")
+                                                .selected_text("Select a model.")
+                                        }
+                                    };
 
-                                            let model_id_combobox = match current_model {
-                                                Some((_, file)) => {
-                                                    match file {
-                                                        ModelFile::Packed(idx) => {
-                                                            egui::ComboBox::from_id_salt("model_id_combobox")
-                                                                .selected_text(ModelFile::PACKED_NAMES[idx])
-                                                        }
-                                                        ModelFile::File(name) => {
-                                                            egui::ComboBox::from_id_salt("model_id_combobox")
-                                                                .selected_text(name.as_ref())
-                                                        }
+                                    model_id_combobox.show_ui(ui, |ui| {
+                                        for (m_id, model_file) in self.model_list.iter() {
+                                            match model_file {
+                                                ModelFile::Packed(idx) => {
+                                                    if ui.selectable_value(&mut model_id, Some(*m_id), ModelFile::PACKED_NAMES[*idx])
+                                                        .clicked() {
+                                                        let new_configs = configs.with_model_id(model_id);
+                                                        controller.write_transcription_configs(new_configs);
                                                     }
                                                 }
-                                                None => {
-                                                    egui::ComboBox::from_id_salt("model_id_combobox")
-                                                        .selected_text("Select a model.")
+                                                ModelFile::File(file_name) => {
+                                                    if ui.selectable_value(&mut model_id, Some(*m_id), file_name.as_ref())
+                                                        .clicked() {
+                                                        let new_configs = configs.with_model_id(model_id);
+                                                        controller.write_transcription_configs(new_configs);
+                                                    }
                                                 }
                                             };
-
-                                            model_id_combobox.show_ui(ui, |ui| {
-                                                for (m_id, model_file) in self.model_list.iter() {
-                                                    match model_file {
-                                                        ModelFile::Packed(idx) => {
-                                                            if ui.selectable_value(&mut model_id, Some(*m_id), ModelFile::PACKED_NAMES[*idx])
-                                                                .clicked() {
-                                                                let new_configs = configs.with_model_id(model_id);
-                                                                controller.write_transcription_configs(new_configs);
-                                                            }
-                                                        }
-                                                        ModelFile::File(file_name) => {
-                                                            if ui.selectable_value(&mut model_id, Some(*m_id), file_name.as_ref())
-                                                                .clicked() {
-                                                                let new_configs = configs.with_model_id(model_id);
-                                                                controller.write_transcription_configs(new_configs);
-                                                            }
-                                                        }
-                                                    };
-                                                }
-                                            });
-
-                                            if ui.button("Open Model").clicked() {
-                                                let file_dialog = rfd::FileDialog::new()
-                                                    .add_filter("ggml-model", &[".bin"])
-                                                    .set_directory(controller.base_dir());
-
-                                                // If there is path, it is a ".bin".
-                                                // At the moment, there's no integrity checking
-                                                // mechanisms
-                                                if let Some(path) = file_dialog.pick_file() {
-                                                    controller.copy_new_model(path);
-                                                }
-                                            }
-                                            if ui.button("Download Model").clicked() {
-                                                self.download_modal = true;
-                                            }
-                                        });
-                                        ui.end_row();
-
-                                        // ROW: OPEN MODEL FOLDER
-                                        ui.label("Models Folder");
-                                        if ui.button("Open Models Folder").clicked() {
-                                            let model_directory = controller.get_model_directory();
-                                            // Try and open it in the default file explorer.
-                                            // There's a debouncer in the model-bank that will
-                                            // keep the list mostly up to date.
-                                            let _ = opener::reveal(model_directory);
                                         }
-                                        ui.end_row();
+                                    });
 
-                                        // ROW: NUM THREADS
-                                        let mut n_threads = configs.n_threads();
-                                        let thread_range = 1..=controller.max_whisper_threads();
-                                        ui.label("No. threads:").on_hover_ui(|ui| {
-                                            ui.style_mut().interaction.selectable_labels = true;
-                                            ui.label("Set the number of threads to allocate to whisper. Recommended: 7.");
-                                        });
-                                        // TODO: if this gets too janky, consider using caching and dirty-writes.
-                                        if ui.add(egui::Slider::new(&mut n_threads, thread_range).integer()).is_pointer_button_down_on() {
-                                            let new_configs = configs.with_n_threads(n_threads);
-                                            controller.write_transcription_configs(new_configs)
+                                    if ui.button("Open Model").clicked() {
+                                        let file_dialog = rfd::FileDialog::new()
+                                            .add_filter("ggml-model", &[".bin"])
+                                            .set_directory(controller.base_dir());
+
+                                        // If there is path, it is a ".bin".
+                                        // At the moment, there's no integrity checking
+                                        // mechanisms
+                                        if let Some(path) = file_dialog.pick_file() {
+                                            controller.copy_new_model(path);
                                         }
-                                        ui.end_row();
+                                    }
+                                    if ui.button("Download Model").clicked() {
+                                        self.download_modal = true;
+                                    }
+                                });
+                                ui.end_row();
 
-                                        // NOTE: if it becomes imperative to expose past prompt tokens,
-                                        // do so around here, but it shouldn't be relevant.
-                                        // ROW: SET TRANSLATE
-                                        ui.label("Translate (En):").on_hover_ui(|ui| {
-                                            ui.style_mut().interaction.selectable_labels = true;
-                                            ui.label("Translate the transcription (English only).");
-                                        });
-                                        let mut translate = configs.translate();
-                                        if ui.add(egui::Checkbox::without_text(&mut translate)).clicked() {
-                                            let new_configs = configs.set_translate(translate);
-                                            controller.write_transcription_configs(new_configs)
-                                        }
-                                        ui.end_row();
+                                // ROW: OPEN MODEL FOLDER
+                                ui.label("Models Folder");
+                                if ui.button("Open Models Folder").clicked() {
+                                    let model_directory = controller.get_model_directory();
+                                    // Try and open it in the default file explorer.
+                                    // There's a debouncer in the model-bank that will
+                                    // keep the list mostly up to date.
+                                    let _ = opener::reveal(model_directory);
+                                }
+                                ui.end_row();
 
-                                        // ROW: LANGUAGE
-                                        ui.label("Language:").on_hover_ui(|ui| {
-                                            ui.style_mut().interaction.selectable_labels = true;
-                                            ui.label("Set the input audio language.\n\
+                                // ROW: NUM THREADS
+                                let mut n_threads = configs.n_threads();
+                                let thread_range = 1..=controller.max_whisper_threads();
+                                ui.label("No. threads:").on_hover_ui(|ui| {
+                                    ui.style_mut().interaction.selectable_labels = true;
+                                    ui.label("Set the number of threads to allocate to whisper. Recommended: 7.");
+                                });
+                                // TODO: if this gets too janky, consider using caching and dirty-writes.
+                                // TODO: Absolutely work this out differently with caching/dirty-writes.
+                                // This is not going to play nicely/as expected.
+                                if ui.add(egui::Slider::new(&mut n_threads, thread_range).integer()).is_pointer_button_down_on() {
+                                    let new_configs = configs.with_n_threads(n_threads);
+                                    controller.write_transcription_configs(new_configs)
+                                }
+                                ui.end_row();
+
+                                // NOTE: if it becomes imperative to expose past prompt tokens,
+                                // do so around here, but it shouldn't be relevant.
+                                // ROW: SET TRANSLATE
+                                ui.label("Translate (En):").on_hover_ui(|ui| {
+                                    ui.style_mut().interaction.selectable_labels = true;
+                                    ui.label("Translate the transcription (English only).");
+                                });
+                                let mut translate = configs.translate();
+                                if ui.add(egui::Checkbox::without_text(&mut translate)).clicked() {
+                                    let new_configs = configs.set_translate(translate);
+                                    controller.write_transcription_configs(new_configs)
+                                }
+                                ui.end_row();
+
+                                // ROW: LANGUAGE
+                                ui.label("Language:").on_hover_ui(|ui| {
+                                    ui.style_mut().interaction.selectable_labels = true;
+                                    ui.label("Set the input audio language.\n\
                                             Set to Auto for automatic language-detection.");
-                                        });
+                                });
 
-                                        // NOTE TO SELF: implement Language::default() in Ribble-Whisper;
-                                        // It's fine for now: Default = None = Auto anyway.
-                                        let mut language = configs.language().unwrap_or(Language::Auto);
-                                        egui::ComboBox::from_id_salt("select_language_combobox")
-                                            .selected_text(language.as_ref()).show_ui(ui, |ui| {
-                                            for lang in Language::iter() {
-                                                if ui.selectable_value(&mut language, lang, lang.as_ref()).clicked() {
-                                                    let new_configs = configs.with_language(Some(language));
+                                // NOTE TO SELF: implement Language::default() in Ribble-Whisper;
+                                // It's fine for now: Default = None = Auto anyway.
+                                let mut language = configs.language().unwrap_or(Language::Auto);
+                                egui::ComboBox::from_id_salt("select_language_combobox")
+                                    .selected_text(language.as_ref()).show_ui(ui, |ui| {
+                                    for lang in Language::iter() {
+                                        if ui.selectable_value(&mut language, lang, lang.as_ref()).clicked() {
+                                            let new_configs = configs.with_language(Some(language));
+                                            controller.write_transcription_configs(new_configs);
+                                        }
+                                    }
+                                });
+                                ui.end_row();
+
+                                // ROW: SET GPU
+                                ui.label("Hardware Acceleration:").on_hover_ui(|ui| {
+                                    ui.style_mut().interaction.selectable_labels = true;
+                                    ui.label("Toggles transcription hardware acceleration via the GPU.\n\
+                                            Real-time transcription may not be feasible without hardware acceleration.");
+                                });
+                                let mut using_gpu = configs.using_gpu();
+                                if ui.add(egui::Checkbox::without_text(&mut using_gpu)).clicked() {
+                                    let new_configs = configs.set_gpu(using_gpu);
+                                    controller.write_transcription_configs(new_configs);
+                                }
+                                ui.end_row();
+
+                                // ROW: USE NO CONTEXT
+                                ui.label("Use Context:").on_hover_ui(|ui| {
+                                    ui.style_mut().interaction.selectable_labels = true;
+                                    ui.label("Use previous context to inform transcription.\n\
+                                            Improves accuracy but may introduce real-time artefacts.");
+                                });
+
+                                let mut using_context = !configs.using_no_context();
+                                if ui.add(egui::Checkbox::without_text(&mut using_context)).clicked() {
+                                    let new_configs = configs.set_use_no_context(!using_context);
+                                    controller.write_transcription_configs(new_configs);
+                                }
+                                ui.end_row();
+
+                                // ROW: SET FLASH ATTENTION
+                                ui.label("Use Flash Attention:").on_hover_ui(|ui| {
+                                    ui.style_mut().interaction.selectable_labels = true;
+                                    ui.label("Toggles Flash Attention (if supported).\n\
+                                            Significantly increases performance.");
+                                });
+
+                                let mut using_flash_attention = configs.using_flash_attention();
+                                if ui.add(egui::Checkbox::without_text(&mut using_flash_attention)).clicked() {
+                                    let new_configs = configs.set_flash_attention(using_flash_attention);
+                                    controller.write_transcription_configs(new_configs);
+                                }
+                                ui.end_row();
+
+                                // -- REALTIME specific configs.
+                                if self.realtime {
+                                    // ROW: REALTIME TIMEOUT -> PREDEFINE (NONE, 15 MIN, 30 MIN, 1HR, 2HR)
+                                    let mut realtime_timeout: RealtimeTimeout = configs.realtime_timeout().into();
+
+                                    // NOTE: when the app gets constructed with default
+                                    // settings, the time should be 3600 ms = 1 hr, so this
+                                    // should always map 1:1 with the enum members.
+                                    #[cfg(debug_assertions)]
+                                    {
+                                        let test_timeout: u128 = realtime_timeout.into();
+                                        assert_eq!(test_timeout, configs.realtime_timeout());
+                                    }
+                                    ui.label("Timeout:").on_hover_ui(|ui| {
+                                        ui.style_mut().interaction.selectable_labels = true;
+                                        ui.label("Set the timeout for real-time transcription.\n\
+                                                Set to infinite for continuous sessions, but note that performance may degrade.");
+                                    });
+
+                                    let rt_timeout_id = egui::Id::new("realtime_timeout_id");
+
+                                    egui::ComboBox::from_id_salt(rt_timeout_id)
+                                        .selected_text(realtime_timeout.as_ref())
+                                        .show_ui(ui, |ui| {
+                                            for timeout_len in RealtimeTimeout::iter() {
+                                                if ui.selectable_value(&mut realtime_timeout, timeout_len, timeout_len.as_ref())
+                                                    .clicked() {
+                                                    let new_timeout: u128 = realtime_timeout.into();
+                                                    let new_configs = configs.with_realtime_timeout(new_timeout);
                                                     controller.write_transcription_configs(new_configs);
                                                 }
                                             }
                                         });
-                                        ui.end_row();
+                                    ui.end_row();
 
-                                        // ROW: SET GPU
-                                        ui.label("Hardware Acceleration:").on_hover_ui(|ui| {
-                                            ui.style_mut().interaction.selectable_labels = true;
-                                            ui.label("Toggles transcription hardware acceleration via the GPU.\n\
-                                            Real-time transcription may not be feasible without hardware acceleration.");
-                                        });
-                                        let mut using_gpu = configs.using_gpu();
-                                        if ui.add(egui::Checkbox::without_text(&mut using_gpu)).clicked() {
-                                            let new_configs = configs.set_gpu(using_gpu);
-                                            controller.write_transcription_configs(new_configs);
-                                        }
-                                        ui.end_row();
+                                    // ROW: SAMPLE LEN
+                                    let mut audio_sample_len: AudioSampleLen = configs.audio_sample_len_ms().into();
 
-                                        // ROW: USE NO CONTEXT
-                                        ui.label("Use Context:").on_hover_ui(|ui| {
-                                            ui.style_mut().interaction.selectable_labels = true;
-                                            ui.label("Use previous context to inform transcription.\n\
-                                            Improves accuracy but may introduce real-time artefacts.");
-                                        });
+                                    // As with realtime-timeout above, the following should
+                                    // always have a clean 1:1 mapping between configs and
+                                    // enum members.
+                                    #[cfg(debug_assertions)]
+                                    {
+                                        let test_len: usize = audio_sample_len.into();
+                                        assert_eq!(test_len, configs.audio_sample_len_ms());
+                                    }
 
-                                        let mut using_context = !configs.using_no_context();
-                                        if ui.add(egui::Checkbox::without_text(&mut using_context)).clicked() {
-                                            let new_configs = configs.set_use_no_context(!using_context);
-                                            controller.write_transcription_configs(new_configs);
-                                        }
-                                        ui.end_row();
-
-                                        // ROW: SET FLASH ATTENTION
-                                        ui.label("Use Flash Attention:").on_hover_ui(|ui| {
-                                            ui.style_mut().interaction.selectable_labels = true;
-                                            ui.label("Toggles Flash Attention (if supported).\n\
-                                            Significantly increases performance.");
-                                        });
-
-                                        let mut using_flash_attention = configs.using_flash_attention();
-                                        if ui.add(egui::Checkbox::without_text(&mut using_flash_attention)).clicked() {
-                                            let new_configs = configs.set_flash_attention(using_flash_attention);
-                                            controller.write_transcription_configs(new_configs);
-                                        }
-                                        ui.end_row();
-
-                                        // -- REALTIME specific configs.
-                                        if self.realtime {
-                                            // ROW: REALTIME TIMEOUT -> PREDEFINE (NONE, 15 MIN, 30 MIN, 1HR, 2HR)
-                                            let mut realtime_timeout: RealtimeTimeout = configs.realtime_timeout().into();
-
-                                            // NOTE: when the app gets constructed with default
-                                            // settings, the time should be 3600 ms = 1 hr, so this
-                                            // should always map 1:1 with the enum members.
-                                            #[cfg(debug_assertions)]
-                                            {
-                                                let test_timeout: u128 = realtime_timeout.into();
-                                                assert_eq!(test_timeout, configs.realtime_timeout());
-                                            }
-                                            ui.label("Timeout:").on_hover_ui(|ui| {
-                                                ui.style_mut().interaction.selectable_labels = true;
-                                                ui.label("Set the timeout for real-time transcription.\n\
-                                                Set to infinite for continuous sessions, but note that performance may degrade.");
-                                            });
-
-                                            let rt_timeout_id = egui::Id::new("realtime_timeout_id");
-
-                                            egui::ComboBox::from_id_salt(rt_timeout_id)
-                                                .selected_text(realtime_timeout.as_ref())
-                                                .show_ui(ui, |ui| {
-                                                    for timeout_len in RealtimeTimeout::iter() {
-                                                        if ui.selectable_value(&mut realtime_timeout, timeout_len, timeout_len.as_ref())
-                                                            .clicked() {
-                                                            let new_timeout: u128 = realtime_timeout.into();
-                                                            let new_configs = configs.with_realtime_timeout(new_timeout);
-                                                            controller.write_transcription_configs(new_configs);
-                                                        }
-                                                    }
-                                                });
-                                            ui.end_row();
-
-                                            // ROW: SAMPLE LEN
-                                            let mut audio_sample_len: AudioSampleLen = configs.audio_sample_len_ms().into();
-
-                                            // As with realtime-timeout above, the following should
-                                            // always have a clean 1:1 mapping between configs and
-                                            // enum members.
-                                            #[cfg(debug_assertions)]
-                                            {
-                                                let test_len: usize = audio_sample_len.into();
-                                                assert_eq!(test_len, configs.audio_sample_len_ms());
-                                            }
-
-                                            ui.label("Audio Sample size:").on_hover_ui(|ui| {
-                                                ui.style_mut().interaction.selectable_labels = true;
-                                                ui.label("Sets the audio sampling buffer size.\n\
+                                    ui.label("Audio Sample size:").on_hover_ui(|ui| {
+                                        ui.style_mut().interaction.selectable_labels = true;
+                                        ui.label("Sets the audio sampling buffer size.\n\
                                                 Smaller sizes: lower latency, lower accuracy, higher power draw.\n\
                                                 Larger sizes: higher latency, higher accuracy, lower power draw.");
-                                            });
-
-                                            let a_sample_id = egui::Id::new("audio_sample_len");
-
-                                            egui::ComboBox::from_id_salt(a_sample_id)
-                                                .selected_text(audio_sample_len.as_ref())
-                                                .show_ui(ui, |ui| {
-                                                    for sample_len in AudioSampleLen::iter() {
-                                                        if ui.selectable_value(&mut audio_sample_len, sample_len, sample_len.as_ref())
-                                                            .clicked() {
-                                                            let new_audio_ms: usize = audio_sample_len.into();
-                                                            let new_configs = configs.with_audio_sample_len(new_audio_ms);
-                                                            controller.write_transcription_configs(new_configs);
-                                                        }
-                                                    }
-                                                });
-                                            ui.end_row();
-
-                                            // ROW: VAD SAMPLE LEN
-                                            let mut vad_sample_len: VadSampleLen = configs.vad_sample_len().into();
-                                            // As with the previous assertions, the enum-usize
-                                            // mapping should be 1:1, since ribble_whisper's
-                                            // defaults map to at least 1 enum member.
-                                            // This is just a sanity check that will fail on a
-                                            // clean start if that assumption is false.
-                                            #[cfg(debug_assertions)]
-                                            {
-                                                let test_len: usize = vad_sample_len.into();
-                                                assert_eq!(test_len, configs.vad_sample_len());
-                                            }
-
-                                            ui.label("VAD Sample size:").on_hover_ui(|ui| {
-                                                ui.style_mut().interaction.selectable_labels = true;
-                                                ui.label("Sets the voice-activity sampling buffer size.\n\
-                                                Smaller sizes: lower latency, lower accuracy, higher power draw.\n\
-                                                Larger sizes: higher latency, higher accuracy, lower power draw.");
-                                            });
-
-                                            egui::ComboBox::from_id_salt("vad_sample_len_combobox")
-                                                .selected_text(vad_sample_len.as_ref())
-                                                .show_ui(ui, |ui| {
-                                                    for sample_len in VadSampleLen::iter() {
-                                                        if ui.selectable_value(&mut vad_sample_len, sample_len, sample_len.as_ref())
-                                                            .clicked() {
-                                                            let new_vad_ms: usize = vad_sample_len.into();
-                                                            let new_configs = configs.with_vad_sample_len(new_vad_ms);
-                                                            controller.write_transcription_configs(new_configs);
-                                                        }
-                                                    }
-                                                });
-
-                                            ui.end_row();
-                                        }
-
-                                        // ROW: RESET TO DEFAULTS.
-                                        ui.label("Reset settings:");
-                                        if ui.button("Reset").clicked() {
-                                            // Since real-time configs expose some more parameters,
-                                            // Only reset the whisper configs if resetting from offline mode.
-                                            let new_configs = if self.realtime {
-                                                Default::default()
-                                            } else {
-                                                configs.with_whisper_configs(Default::default())
-                                            };
-
-                                            controller.write_transcription_configs(new_configs);
-                                        }
-                                        ui.end_row();
                                     });
-                            },
-                        );
+
+                                    let a_sample_id = egui::Id::new("audio_sample_len");
+
+                                    egui::ComboBox::from_id_salt(a_sample_id)
+                                        .selected_text(audio_sample_len.as_ref())
+                                        .show_ui(ui, |ui| {
+                                            for sample_len in AudioSampleLen::iter() {
+                                                if ui.selectable_value(&mut audio_sample_len, sample_len, sample_len.as_ref())
+                                                    .clicked() {
+                                                    let new_audio_ms: usize = audio_sample_len.into();
+                                                    let new_configs = configs.with_audio_sample_len(new_audio_ms);
+                                                    controller.write_transcription_configs(new_configs);
+                                                }
+                                            }
+                                        });
+                                    ui.end_row();
+
+                                    // ROW: VAD SAMPLE LEN
+                                    let mut vad_sample_len: VadSampleLen = configs.vad_sample_len().into();
+                                    // As with the previous assertions, the enum-usize
+                                    // mapping should be 1:1, since ribble_whisper's
+                                    // defaults map to at least 1 enum member.
+                                    // This is just a sanity check that will fail on a
+                                    // clean start if that assumption is false.
+                                    #[cfg(debug_assertions)]
+                                    {
+                                        let test_len: usize = vad_sample_len.into();
+                                        assert_eq!(test_len, configs.vad_sample_len());
+                                    }
+
+                                    ui.label("VAD Sample size:").on_hover_ui(|ui| {
+                                        ui.style_mut().interaction.selectable_labels = true;
+                                        ui.label("Sets the voice-activity sampling buffer size.\n\
+                                                Smaller sizes: lower latency, lower accuracy, higher power draw.\n\
+                                                Larger sizes: higher latency, higher accuracy, lower power draw.");
+                                    });
+
+                                    egui::ComboBox::from_id_salt("vad_sample_len_combobox")
+                                        .selected_text(vad_sample_len.as_ref())
+                                        .show_ui(ui, |ui| {
+                                            for sample_len in VadSampleLen::iter() {
+                                                if ui.selectable_value(&mut vad_sample_len, sample_len, sample_len.as_ref())
+                                                    .clicked() {
+                                                    let new_vad_ms: usize = vad_sample_len.into();
+                                                    let new_configs = configs.with_vad_sample_len(new_vad_ms);
+                                                    controller.write_transcription_configs(new_configs);
+                                                }
+                                            }
+                                        });
+
+                                    ui.end_row();
+                                }
+
+                                // ROW: RESET TO DEFAULTS.
+                                ui.label("Reset settings:");
+                                if ui.button("Reset").clicked() {
+                                    // Since real-time configs expose some more parameters,
+                                    // Only reset the whisper configs if resetting from offline mode.
+                                    let new_configs = if self.realtime {
+                                        Default::default()
+                                    } else {
+                                        configs.with_whisper_configs(Default::default())
+                                    };
+
+                                    controller.write_transcription_configs(new_configs);
+                                }
+                                ui.end_row();
+                            });
                     });
                 });
 
@@ -576,6 +574,8 @@ impl PaneView for TranscriberPane {
                     ui.add_enabled_ui(!audio_worker_running, |ui| {
                         egui::Grid::new("vad_configs_grid").striped(true)
                             .num_columns(2)
+                            .striped(true)
+                            .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
                             .show(ui, |ui| {
                                 // VAD TYPE
                                 ui.label("VAD algorithm:").on_hover_ui(|ui| {
@@ -697,83 +697,87 @@ impl PaneView for TranscriberPane {
 
                 // If it's possible to know the size in advance, use show-rows.
                 egui::ScrollArea::both().show(ui, |ui| {
-                    egui::Grid::new("transcriber recording_list_grid").num_columns(1).striped(true).show(ui, |ui| {
-                        let len = self.recordings_buffer.len();
-                        for (i, (file_name, recording)) in self.recordings_buffer.iter().enumerate() {
-                            let heading_text = format!("Recording: {}", len - i);
+                    egui::Grid::new("transcriber recording_list_grid")
+                        .num_columns(1)
+                        .striped(true)
+                        .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
+                        .show(ui, |ui| {
+                            let len = self.recordings_buffer.len();
+                            for (i, (file_name, recording)) in self.recordings_buffer.iter().enumerate() {
+                                let heading_text = format!("Recording: {}", len - i);
 
-                            // TODO: if this is expensive/not all that valuable, just do the duration.
-                            // NOTE: atm this code is identical to the recording modal
-                            // If this diverges, keep the code here.
-                            // Otherwise, look at factoring into a common function.
-                            let body_text = {
-                                let secs = recording.total_duration().as_secs();
-                                let seconds = secs % 60;
-                                let minutes = (secs / 60) % 60;
-                                let hours = (secs / 60) / 60;
+                                // TODO: if this is expensive/not all that valuable, just do the duration.
+                                // NOTE: atm this code is identical to the recording modal
+                                // If this diverges, keep the code here.
+                                // Otherwise, look at factoring into a common function.
+                                let body_text = {
+                                    let secs = recording.total_duration().as_secs();
+                                    let seconds = secs % 60;
+                                    let minutes = (secs / 60) % 60;
+                                    let hours = (secs / 60) / 60;
 
-                                // This is in bytes.
-                                let file_size_estimate = recording.file_size_estimate();
-                                let size_text = match unit_prefix::NumberPrefix::binary(file_size_estimate as f32) {
-                                    unit_prefix::NumberPrefix::Standalone(number) => format!("{number:.0} B"),
-                                    unit_prefix::NumberPrefix::Prefixed(prefix, number) => format!("{number:.2} {prefix}B"),
+                                    // This is in bytes.
+                                    let file_size_estimate = recording.file_size_estimate();
+                                    let size_text = match unit_prefix::NumberPrefix::binary(file_size_estimate as f32) {
+                                        unit_prefix::NumberPrefix::Standalone(number) => format!("{number:.0} B"),
+                                        unit_prefix::NumberPrefix::Prefixed(prefix, number) => format!("{number:.2} {prefix}B"),
+                                    };
+
+                                    format!("Total time: {hours}:{minutes}:{seconds} | Approx size: {size_text}")
                                 };
 
-                                format!("Total time: {hours}:{minutes}:{seconds} | Approx size: {size_text}")
-                            };
+                                // NOTE: this might actually panic if called from more than one spot
+                                // Look into factoring out this modal.
+                                let tile_id = egui::Id::new(heading_text.as_str());
+                                let resp = ui.interact(ui.max_rect(), tile_id, egui::Sense::click());
+                                let visuals = ui.style().interact(&resp);
 
-                            // NOTE: this might actually panic if called from more than one spot
-                            // Look into factoring out this modal.
-                            let tile_id = egui::Id::new(heading_text.as_str());
-                            let resp = ui.interact(ui.max_rect(), tile_id, egui::Sense::click());
-                            let visuals = ui.style().interact(&resp);
-
-                            // TODO: TEST THIS OUT AND MAKE SURE THINGS WORK OUT
-                            // THE GOAL: highlight color + OUTLINE
-                            // NOTE: atm this code is identical to the recording modal
-                            // If this diverges, keep the code here.
-                            // Otherwise, look at factoring into a common function.
-                            egui::Frame::default().fill(visuals.bg_fill).stroke(visuals.fg_stroke).show(ui, |ui| {
-                                ui.vertical(|ui| {
-                                    ui.label(heading_text);
-                                    ui.small(body_text);
+                                // TODO: TEST THIS OUT AND MAKE SURE THINGS WORK OUT
+                                // THE GOAL: highlight color + OUTLINE
+                                // NOTE: atm this code is identical to the recording modal
+                                // If this diverges, keep the code here.
+                                // Otherwise, look at factoring into a common function.
+                                egui::Frame::default().fill(visuals.bg_fill).stroke(visuals.fg_stroke).show(ui, |ui| {
+                                    ui.vertical(|ui| {
+                                        ui.label(heading_text);
+                                        ui.small(body_text);
+                                    });
                                 });
-                            });
 
-                            if resp.clicked() {
-                                // Try to load the recording - an unsuccessful recording will just
-                                // get the updated list.
+                                if resp.clicked() {
+                                    // Try to load the recording - an unsuccessful recording will just
+                                    // get the updated list.
 
-                                // NOTE: controller.try_get_recording_path() will internally
-                                // prune out nonexistent paths -> it's possibly not necessary to set
-                                // up a debouncer just yet.
-                                //
-                                // If the file doesn't exist, this will return None
-                                if let Some(path) = controller.try_get_recording_path(Arc::clone(file_name)) {
-                                    // Close the modal
-                                    // Since this ui cursor doesn't have .close(), just set the ref
-                                    self.recording_modal = false;
-                                    // Set the audio
-                                    controller.set_audio_file_path(path);
-                                    // Swap to offline-mode for re-transcription
-
-                                    self.realtime = false;
-                                } else {
-                                    // The writer engine will prune out its nonexistent file-paths,
-                                    // so perhaps maybe a "toast" is sufficient here to say "sorry
-                                    // cannot find recording".
+                                    // NOTE: controller.try_get_recording_path() will internally
+                                    // prune out nonexistent paths -> it's possibly not necessary to set
+                                    // up a debouncer just yet.
                                     //
-                                    // Otherwise, a debouncer will be necessary to maintain the state
-                                    // of the directory.
+                                    // If the file doesn't exist, this will return None
+                                    if let Some(path) = controller.try_get_recording_path(Arc::clone(file_name)) {
+                                        // Close the modal
+                                        // Since this ui cursor doesn't have .close(), just set the ref
+                                        self.recording_modal = false;
+                                        // Set the audio
+                                        controller.set_audio_file_path(path);
+                                        // Swap to offline-mode for re-transcription
 
-                                    log::warn!("Temporary recording file missing: {file_name}");
-                                    let toast = egui_notify::Toast::warning("Failed to find saved recording.");
-                                    controller.send_toast(toast);
+                                        self.realtime = false;
+                                    } else {
+                                        // The writer engine will prune out its nonexistent file-paths,
+                                        // so perhaps maybe a "toast" is sufficient here to say "sorry
+                                        // cannot find recording".
+                                        //
+                                        // Otherwise, a debouncer will be necessary to maintain the state
+                                        // of the directory.
+
+                                        log::warn!("Temporary recording file missing: {file_name}");
+                                        let toast = egui_notify::Toast::warning("Failed to find saved recording.");
+                                        controller.send_toast(toast);
+                                    }
                                 }
+                                ui.end_row();
                             }
-                            ui.end_row();
-                        }
-                    });
+                        });
                 });
             });
 
@@ -800,6 +804,7 @@ impl PaneView for TranscriberPane {
                         egui::Grid::new("download_models_grid")
                             .num_columns(2)
                             .striped(true)
+                            .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
                             .show(ui, |ui| {
                                 ui.label("Url:");
                                 ui.horizontal(|ui| {
@@ -847,6 +852,7 @@ impl PaneView for TranscriberPane {
                             egui::Grid::new("default_models_grid")
                                 .num_columns(2)
                                 .striped(true)
+                                .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
                                 .show(ui, |ui| {
                                     for model_type in DefaultModelType::iter() {
                                         ui.label(model_type.as_ref());

@@ -44,6 +44,6 @@ fn draw_recording_icon(
 /// * color: Rgba, the recording icon color
 /// * animate: bool, oscillates the color on and off,
 /// * animation_duration: f32, the time of a full period (off-on-off) in seconds
-pub fn recording_icon(color: Rgba, animate: bool, animation_duration: f32) -> impl Widget {
+pub(in crate::ui) fn recording_icon(color: Rgba, animate: bool, animation_duration: f32) -> impl Widget {
     move |ui: &mut Ui| draw_recording_icon(ui, color, animate, animation_duration)
 }

@@ -41,33 +41,29 @@ impl PaneView for ConsolePane {
         let console_bg_color = ui.visuals().extreme_bg_color;
         let panel_col = ui.visuals().panel_fill;
 
-        // NOTE: test this.
+        // TODO: test this.
+        // Set up a debug menu item to fire messages to the console.
+
         // I'm leaning towards an explicit margin that exposes the panel color.
         // The alternative is to wrap frames (outer = color, (inner = margin)) with explicit margins
         // to paint across the entire box.
         egui::Frame::default().fill(panel_col).inner_margin(PANE_INNER_MARGIN).show(ui, |ui| {
             ui.heading("Console:");
             egui::Frame::default().fill(console_bg_color).show(ui, |ui| {
+                // NOTE: if swapping to a ScrollArea::both(), set the TextModeWrap in the label to Extend.
                 egui::ScrollArea::vertical()
                     .stick_to_bottom(true)
                     // Fill space -inside- the scroll area.
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
-                        // This -should- take up all available space.
-                        ui.with_layout(
-                            egui::Layout::top_down(egui::Align::LEFT).with_cross_justify(true),
-                            |ui| {
-
-                                // Set the spacing between messages to be a little bit larger.
-                                let mut item_spacing = ui.spacing().item_spacing;
-                                item_spacing.y *= SPACING_COEFF;
-                                ui.style_mut().spacing.item_spacing = item_spacing;
-
-                                for msg in self.message_buffer.iter() {
-                                    ui.label(msg.to_console_text(ui.visuals()));
-                                }
-                            },
-                        );
+                        // Set the spacing between messages to be a little bit larger.
+                        let mut item_spacing = ui.spacing().item_spacing;
+                        item_spacing.y *= SPACING_COEFF;
+                        ui.style_mut().spacing.item_spacing = item_spacing;
+                        // This should just... print things?
+                        for msg in self.message_buffer.iter() {
+                            ui.label(msg.to_console_text(ui.visuals()));
+                        }
                     });
             });
         });

@@ -1,7 +1,8 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::CompletedRecordingJobs;
 use crate::ui::panes::ribble_pane::RibblePaneId;
-use crate::ui::panes::PaneView;
+use crate::ui::panes::{PaneView, PANE_INNER_MARGIN};
+use crate::ui::GRID_ROW_SPACING_COEFF;
 use crate::utils::recorder_configs::{
     RibbleChannels, RibblePeriod, RibbleRecordingExportFormat, RibbleSampleRate,
 };
@@ -41,112 +42,133 @@ impl PaneView for RecordingPane {
         let recorder_running = controller.recorder_running();
         let audio_worker_running = recorder_running || controller.transcriber_running();
         let configs = *controller.read_recorder_configs();
-
+        let pane_col = ui.visuals().panel_fill;
 
         // TODO: this might not work just yet - test out and remove this todo if it's right.
         // Create a (hopefully) lower-priority pane-sized interaction hitbox
         let pane_id = egui::Id::new("recording_pane");
-        let resp = ui.interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag());
+        let resp = ui
+            .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::Grab);
 
-        ui.heading("Recording:");
-        egui::Frame::default().show(ui, |ui| {
-            let button_spacing = ui.spacing().button_padding.y;
-            ui.vertical_centered_justified(|ui| {
-                if ui
-                    .add_enabled(!audio_worker_running, egui::Button::new("Start recording"))
-                    .clicked()
-                {
-                    controller.start_recording();
-                }
-            });
-            ui.add_space(button_spacing);
+        egui::Frame::default()
+            .fill(pane_col)
+            .inner_margin(PANE_INNER_MARGIN)
+            .show(ui, |ui| {
+                ui.heading("Recording:");
+                let button_spacing = ui.spacing().button_padding.y;
+                ui.vertical_centered_justified(|ui| {
+                    if ui
+                        .add_enabled(!audio_worker_running, egui::Button::new("Start recording")).on_hover_cursor(egui::CursorIcon::Default)
+                        .clicked()
+                    {
+                        controller.start_recording();
+                    }
+                    ui.add_space(button_spacing);
 
-            if ui
-                .add_enabled(recorder_running, egui::Button::new("Stop"))
-                .clicked()
-            {
-                controller.stop_recording();
-            }
+                    if ui
+                        .add_enabled(recorder_running, egui::Button::new("Stop")).on_hover_cursor(egui::CursorIcon::Default)
+                        .clicked()
+                    {
+                        controller.stop_recording();
+                    }
 
-            ui.add_space(button_spacing);
-            ui.separator();
-            // This implies there is at least one recording that can be exported.
-            let latest_exists = controller.latest_recording_exists();
+                    ui.add_space(button_spacing);
+                    ui.separator();
 
-            if ui
-                .add_enabled(latest_exists, egui::Button::new("Export recording"))
-                .clicked()
-            {
-                self.recording_modal = true;
-            }
+                    // This implies there is at least one recording that can be exported.
+                    let latest_exists = controller.latest_recording_exists();
 
-            ui.add_space(button_spacing);
-            ui.separator();
-            ui.collapsing("Recording Configs", |ui| {
-                egui::Grid::new("recording_configs_grid")
-                    .num_columns(2)
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.label("Sample Rate:");
-                        let mut sample_rate = configs.sample_rate();
-                        egui::ComboBox::from_id_salt("sample_rate_combobox")
-                            .selected_text(sample_rate.as_ref())
-                            .show_ui(ui, |ui| {
-                                for rate in RibbleSampleRate::iter() {
-                                    if ui
-                                        .selectable_value(&mut sample_rate, rate, rate.as_ref())
-                                        .clicked()
-                                    {
-                                        let new_configs = configs.with_sample_rate(sample_rate);
-                                        controller.write_recorder_configs(new_configs);
-                                    }
-                                }
+                    if ui
+                        .add_enabled(latest_exists, egui::Button::new("Export recording")).on_hover_cursor(egui::CursorIcon::Default)
+                        .clicked()
+                    {
+                        self.recording_modal = true;
+                    }
+
+                    ui.add_space(button_spacing);
+                    ui.separator();
+
+                    let configs_dropdown = ui.collapsing("Recording Configs", |ui| {
+                        egui::Grid::new("recording_configs_grid")
+                            .num_columns(2)
+                            .striped(true)
+                            .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
+                            .show(ui, |ui| {
+                                ui.label("Sample Rate:");
+                                let mut sample_rate = configs.sample_rate();
+                                egui::ComboBox::from_id_salt("sample_rate_combobox")
+                                    .selected_text(sample_rate.as_ref())
+                                    .show_ui(ui, |ui| {
+                                        for rate in RibbleSampleRate::iter() {
+                                            if ui
+                                                .selectable_value(&mut sample_rate, rate, rate.as_ref())
+                                                .clicked()
+                                            {
+                                                let new_configs = configs.with_sample_rate(sample_rate);
+                                                controller.write_recorder_configs(new_configs);
+                                            }
+                                        }
+                                    }).response.on_hover_cursor(egui::CursorIcon::Default);
+
+                                ui.end_row();
+
+                                ui.label("Channels:");
+                                let mut channels = configs.num_channels();
+                                egui::ComboBox::from_id_salt("ribble_channels_combobox")
+                                    .selected_text(channels.as_ref())
+                                    .show_ui(ui, |ui| {
+                                        for ch_conf in RibbleChannels::iter() {
+                                            if ui
+                                                .selectable_value(
+                                                    &mut channels,
+                                                    ch_conf,
+                                                    ch_conf.as_ref(),
+                                                )
+                                                .clicked()
+                                            {
+                                                let new_configs = configs.with_num_channels(channels);
+                                                controller.write_recorder_configs(new_configs);
+                                            }
+                                        }
+                                    }).response.on_hover_cursor(egui::CursorIcon::Default);
+                                ui.end_row();
+
+                                ui.label("Buffer size:");
+                                let mut period = configs.period();
+                                egui::ComboBox::from_id_salt("buffer_size_combobox")
+                                    .selected_text(period.as_ref())
+                                    .show_ui(ui, |ui| {
+                                        for period_conf in RibblePeriod::iter() {
+                                            if ui
+                                                .selectable_value(
+                                                    &mut period,
+                                                    period_conf,
+                                                    period_conf.as_ref(),
+                                                )
+                                                .clicked()
+                                            {
+                                                let new_configs = configs.with_period(period);
+                                                controller.write_recorder_configs(new_configs);
+                                            }
+                                        }
+                                    }).response.on_hover_cursor(egui::CursorIcon::Default);
+
+                                ui.end_row();
                             });
-
-                        ui.end_row();
-
-                        ui.label("Channels:");
-                        let mut channels = configs.num_channels();
-                        egui::ComboBox::from_id_salt("ribble_channels_combobox")
-                            .selected_text(channels.as_ref())
-                            .show_ui(ui, |ui| {
-                                for ch_conf in RibbleChannels::iter() {
-                                    if ui
-                                        .selectable_value(&mut channels, ch_conf, ch_conf.as_ref())
-                                        .clicked()
-                                    {
-                                        let new_configs = configs.with_num_channels(channels);
-                                        controller.write_recorder_configs(new_configs);
-                                    }
-                                }
-                            });
-                        ui.end_row();
-
-                        ui.label("Buffer size:");
-                        let mut period = configs.period();
-                        egui::ComboBox::from_id_salt("buffer_size_combobox")
-                            .selected_text(period.as_ref())
-                            .show_ui(ui, |ui| {
-                                for period_conf in RibblePeriod::iter() {
-                                    if ui
-                                        .selectable_value(
-                                            &mut period,
-                                            period_conf,
-                                            period_conf.as_ref(),
-                                        )
-                                        .clicked()
-                                    {
-                                        let new_configs = configs.with_period(period);
-                                        controller.write_recorder_configs(new_configs);
-                                    }
-                                }
-                            });
-
-                        ui.end_row();
                     });
+                    configs_dropdown.header_response.on_hover_cursor(egui::CursorIcon::Default);
+                    configs_dropdown.body_response.map(|resp| resp.on_hover_cursor(egui::CursorIcon::Default));
+                });
             });
-        });
 
+
+        // TODO: test out the recording modal.
+        // ADD A DEBUG BUTTON to just pop open the modal.
+        // Perhaps add some dummy recordings.
+
+        // Once the shared layout code for tiles is correct, factor it out to the module level and
+        // just call it in the Transcriber modal.
         if self.recording_modal {
             let recording_id = egui::Id::new("recording_recordings_modal");
             let modal = egui::Modal::new(recording_id).show(ui.ctx(), |ui| {
@@ -161,6 +183,9 @@ impl PaneView for RecordingPane {
                 // NOTE: this is duplicated from the Transcriber view (similar modal)
                 // If this implementation diverges, then keep it here.
                 // Otherwise, look at making it a common function.
+
+                // NOTE: this does not lay out as intended.
+                // Use a columns with vertical centering.
                 ui.allocate_ui_with_layout(
                     desired_size,
                     egui::Layout::left_to_right(egui::Align::Center).with_main_justify(true),
@@ -176,6 +201,7 @@ impl PaneView for RecordingPane {
                 // 1 row grid: Export Format: Dropdown.
                 egui::Grid::new("export_format_grid")
                     .num_columns(2)
+                    .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
                     .striped(true)
                     .show(ui, |ui| {
                         ui.label("Export format");
@@ -203,6 +229,7 @@ impl PaneView for RecordingPane {
                 // identical changes if this doesn't get factored out.
                 egui::ScrollArea::both().show(ui, |ui| {
                     egui::Grid::new("recording recording_list_grid")
+                        .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
                         .num_columns(1)
                         .striped(true)
                         .show(ui, |ui| {
@@ -253,7 +280,7 @@ impl PaneView for RecordingPane {
                                     //
                                     // Invalid paths should at least pop a toast, but perhaps things
                                     // need to move to a debouncer.
-                                    if let Some(_) = controller.try_get_recording_path(Arc::clone(file_name)) {
+                                    if controller.try_get_recording_path(Arc::clone(file_name)).is_some() {
                                         // File dialog to save
 
                                         if let Some(out_path) = rfd::FileDialog::new()
@@ -285,7 +312,6 @@ impl PaneView for RecordingPane {
                 self.recording_modal = false;
             }
         }
-
 
         // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
         // will just nop.

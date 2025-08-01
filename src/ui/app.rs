@@ -116,6 +116,9 @@ impl Ribble {
         let theme_animator = ThemeAnimator::new(system_visuals.clone(), system_visuals.clone())
             .animation_time(THEME_TRANSITION_TIME);
 
+        // -Set- the actual system visuals so that they are persisted.
+        cc.egui_ctx.set_visuals(system_visuals);
+
         let current_devices = Slab::new();
 
         Ok(Self {
@@ -258,10 +261,9 @@ impl eframe::App for Ribble {
         // Check to see if the system theme has been changed (via user preferences).
         // If this should start the transition animation, swap the themes.
         let start_transition = if system_theme != self.theme_animator.theme_2 {
-            // If the old transition completed, swap the themes.
-            // Otherwise, the in-progress transition will just change its destination theme.
-            // TODO: this might look janky? Test to see whether this should just change the themes anyway.
-            if self.theme_animator.progress == 1.0 {
+            // If the transition is already going on (or has completed), swap theme 2 into theme
+            // 1 and set theme 2 to the new theme.
+            if self.theme_animator.progress <= 1.0 {
                 self.theme_animator.theme_1 = self.theme_animator.theme_2.clone();
             }
             self.theme_animator.theme_2 = system_theme;
@@ -378,10 +380,62 @@ impl eframe::App for Ribble {
                                         ui.ctx().request_repaint();
                                     }
 
+                                    // NOTE: To avoid allocating every frame, this is more of a "try to recover"
+                                    if self.tree.is_invalid() {
+                                        ui.separator();
+                                        if ui.button("Restore Layout").clicked() {
+                                            if !self.tree.recovery_tree_exists() {
+                                                let toast = Toast::warning("Layout file missing!");
+                                                self.controller.send_toast(toast)
+                                            }
+                                            // This will try to deserialize the layout and check to make sure it
+                                            // contains a copy of non-closable tabs.
+                                            // It will fall back to the default layout on a total failure.
+                                            self.tree.try_recover_layout();
+                                        }
+                                    }
+
+                                    ui.separator();
+                                    if ui.button("Reset layout").clicked() {
+                                        self.tree.reset_layout();
+                                        ui.ctx().request_repaint();
+                                    }
+
                                     ui.separator();
 
                                     if ui.button("Quit").clicked() {
                                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                                    }
+                                    #[cfg(debug_assertions)] {
+                                        ui.separator();
+                                        ui.menu_button("Debug menu", |ui| {
+                                            // TODO: buttons for testing purposes
+                                            // ONE: -> a dummy progress job
+                                            if ui.button("Test Progress").clicked() {
+                                                todo!("Test Progress");
+                                            }
+                                            // TWO: -> a dummy download (from self-hosted server)
+                                            if ui.button("Test Download").clicked() {
+                                                todo!("Test Download");
+                                            }
+
+                                            // For fuzzing the layout/tree and inducing fallback mechanisms
+                                            if ui.button("Induce panic").clicked() {
+                                                panic!("Panic triggered!");
+                                            }
+                                            // For testing the segfault handler.
+                                            if ui.button("Induce segfault").clicked() {
+                                                unsafe {
+                                                    std::ptr::null_mut::<i32>().write(42);
+                                                }
+                                            }
+                                            if ui.button("Clear Tree").clicked() {
+                                                self.tree.clear_tree();
+                                            }
+                                            if ui.button("Test Tree Recovery").clicked() {
+                                                self.tree.test_tree_recovery();
+                                            }
+                                        });
                                     }
                                 });
 
@@ -553,12 +607,3 @@ impl eframe::App for Ribble {
     }
 }
 
-// This is a fix to deal with surface0 being used for both widgets
-// and faint_bg_color. Sliders and checkboxes get lost when using
-// striped layouts.
-// NOTE: DON'T DELETE THIS JUST YET ->
-// This color issue may still be an issue that hasn't been resolved in catppuccin_egui;
-//
-// fn tweak_visuals(visuals: &mut Visuals, theme: Theme) {
-//     visuals.faint_bg_color = theme.mantle
-// }

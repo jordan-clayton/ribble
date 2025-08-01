@@ -1,4 +1,5 @@
 use crate::controller::{DEFAULT_NUM_CONSOLE_MESSAGES, MIN_NUM_CONSOLE_MESSAGES};
+use egui::Visuals;
 use egui_colorgradient::{ColorInterpolator, Gradient};
 use strum::{AsRefStr, Display, EnumIter, EnumString};
 
@@ -45,26 +46,34 @@ impl RibbleAppTheme {
             // TODO: fork catppuccin_egui and expose the method directly to cut down on
             // indirection.
             RibbleAppTheme::Latte => {
-                let mut style = egui::Style::default();
-                catppuccin_egui::set_style_theme(&mut style, catppuccin_egui::LATTE);
-                Some(style.visuals)
+                Self::tweak_catppuccin_visuals(catppuccin_egui::LATTE)
             }
             RibbleAppTheme::Frappe => {
-                let mut style = egui::Style::default();
-                catppuccin_egui::set_style_theme(&mut style, catppuccin_egui::FRAPPE);
-                Some(style.visuals)
+                Self::tweak_catppuccin_visuals(catppuccin_egui::FRAPPE)
             }
             RibbleAppTheme::Macchiato => {
-                let mut style = egui::Style::default();
-                catppuccin_egui::set_style_theme(&mut style, catppuccin_egui::MACCHIATO);
-                Some(style.visuals)
+                Self::tweak_catppuccin_visuals(catppuccin_egui::MACCHIATO)
             }
             RibbleAppTheme::Mocha => {
-                let mut style = egui::Style::default();
-                catppuccin_egui::set_style_theme(&mut style, catppuccin_egui::MOCHA);
-                Some(style.visuals)
+                Self::tweak_catppuccin_visuals(catppuccin_egui::MOCHA)
             }
         }
+    }
+
+    // There are some contrast issues with the faint-bg color.
+    fn tweak_catppuccin_visuals(theme: catppuccin_egui::Theme) -> Option<Visuals> {
+        let mut style = egui::Style::default();
+        catppuccin_egui::set_style_theme(&mut style, theme);
+        let mut visuals = style.visuals;
+        // This is for striping, but catppuccin uses surface0 for widget bgs.
+        // Mantle is a bit too dark, but will work in a pinch
+
+        // Blending between the two seems to be closest to egui default visuals.
+        let from: egui::Rgba = theme.base.into();
+        let to: egui::Rgba = theme.surface0.into();
+        let color: egui::Rgba = egui::lerp(from..=to, 0.5);
+        visuals.faint_bg_color = color.into();
+        Some(visuals)
     }
 
     pub(crate) fn app_theme(&self) -> Option<catppuccin_egui::Theme> {
@@ -80,7 +89,7 @@ impl RibbleAppTheme {
     }
 
     pub(crate) fn gradient(&self) -> Option<Gradient> {
-        self.app_theme().and_then(|theme| {
+        self.app_theme().map(|theme| {
             let color_stops = [
                 theme.mauve,
                 theme.pink,
@@ -103,13 +112,12 @@ impl RibbleAppTheme {
                 (stop, color)
             });
 
-            let gradient = Gradient::new(egui_colorgradient::InterpolationMethod::Linear, iter);
-            Some(gradient)
+            Gradient::new(egui_colorgradient::InterpolationMethod::Linear, iter)
         })
     }
 
     pub(crate) fn color_interpolator(&self) -> Option<ColorInterpolator> {
-        self.gradient().and_then(|grad| Some(grad.interpolator()))
+        self.gradient().map(|grad| grad.interpolator())
     }
 }
 

@@ -2,6 +2,7 @@ use crate::controller::ribble_controller::RibbleController;
 use crate::controller::FileDownload;
 use crate::ui::panes::ribble_pane::{PaneView, RibblePaneId};
 use crate::ui::panes::PANE_INNER_MARGIN;
+use crate::ui::GRID_ROW_SPACING_COEFF;
 use irox_egui_extras::progressbar::ProgressBar;
 use unit_prefix::NumberPrefix;
 
@@ -66,6 +67,7 @@ impl PaneView for DownloadsPane {
                     egui::Grid::new("downloads_grid")
                         .num_columns(2)
                         .striped(true)
+                        .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
                         .min_col_width(grid_width)
                         .show(ui, |ui| {
                             for (download_id, download) in self.current_downloads.iter() {

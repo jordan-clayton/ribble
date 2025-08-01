@@ -144,6 +144,7 @@ impl ConsoleEngine {
         let thread_inner = Arc::clone(&self.inner);
         let work = std::thread::spawn(move || {
             thread_inner.resize(new_size);
+            log::info!("Console message history resized to: {new_size}");
             Ok(RibbleMessage::BackgroundWork(Ok(())))
         });
 

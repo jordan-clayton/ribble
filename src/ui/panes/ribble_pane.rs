@@ -80,8 +80,7 @@ pub(in crate::ui) enum RibblePaneId {
 
 impl RibblePaneId {
     pub(in crate::ui) fn is_closable(&self) -> bool {
-        // TODO: refactor this once UserPreferences is back in ClosableRibbleViewPane
-        matches!(self, RibblePaneId::UserPreferences) || ClosableRibbleViewPane::try_from(*self).is_ok()
+        ClosableRibbleViewPane::try_from(*self).is_ok()
     }
 }
 

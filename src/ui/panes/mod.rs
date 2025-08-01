@@ -47,7 +47,7 @@ impl RibbleTree {
         let tree = Self::deserialize_tree(data_directory);
         let behavior = RibbleTreeBehavior::from_tree(controller, &tree);
 
-        let mut tree = Self {
+        let mut ribble_tree = Self {
             data_directory: data_directory.to_path_buf(),
             tree,
             behavior,
@@ -56,10 +56,24 @@ impl RibbleTree {
         };
 
         // Do a 1-pass to check that all non-closable tabs are in the tree
-        tree.check_insert_non_closable_panes();
-        tree
+        ribble_tree.check_insert_non_closable_panes();
+        ribble_tree
     }
+
+    pub(in crate::ui) fn is_invalid(&self) -> bool {
+        self.tree.is_empty()
+    }
+    pub(in crate::ui) fn recovery_tree_exists(&self) -> bool {
+        let canonicalized = self.data_directory.join(Self::TREE_FILE);
+        canonicalized.exists() && canonicalized.is_file()
+    }
+
     pub(in crate::ui) fn ui(&mut self, ui: &mut egui::Ui) {
+        // Try to recover the previous layout.
+        if self.tree.is_empty() {
+            self.try_recover_layout();
+        }
+
         // Do a once-over of any tabs which should be closed.
         self.check_remove_old_tabs();
         // Add any new panes to the tree before painting.
@@ -88,9 +102,14 @@ impl RibbleTree {
     // NOTE: This shouldn't get too expensive, but it's most likely not the best thing to call -often-
     // Also, it has to be static to be called at construction time, unless using a builder...
     pub(in crate::ui) fn check_insert_non_closable_panes(&mut self) {
-        // NOTE: this method should never be called on an empty tree.
-        // Since this is only called (right now) at construction time, assume the tree has a root node.
-        debug_assert!(!self.tree.is_empty(), "Tree is empty.");
+        // Check for an invalid tree - sometimes it can get lost if there's a panic in the UI code.
+        // Fall-back to a previously serialized version, and if that fails, just reset to defaults.
+        if self.tree.is_empty() {
+            // This will fall back to defaults if there's no root.
+            self.tree = Self::deserialize_tree(&self.data_directory);
+            self.behavior = RibbleTreeBehavior::from_tree(self.behavior.controller.clone(), &self.tree);
+        }
+
         // For all non-closable tabs, check to make sure they exist -somewhere- in the layout and
         // insert them if not.
         // Since it is possible for the opened_tabs and the tree to get out of sync, the tree is the authority
@@ -141,9 +160,9 @@ impl RibbleTree {
         }
 
         let ribble_id = self.behavior.add_child.take().unwrap();
+        // First, check that the tile is actually in the tree
         match self.behavior.opened_tabs.get(&ribble_id) {
             Some(pane_id) => {
-                // First, check that the tile is actually in the tree
                 let ribble_tile = self.tree.tiles.get(*pane_id);
                 // If it's in the tree, make sure the tile is a pane
                 if let Some(tile) = ribble_tile {
@@ -181,11 +200,29 @@ impl RibbleTree {
         match self.handle_missing_node(new_child) {
             Ok(_) => {}
             Err(_) => {
-                self.reset_layout();
+                // Try to deserialize things first.
+                self.tree = Self::deserialize_tree(&self.data_directory);
+                self.behavior = RibbleTreeBehavior::from_tree(self.behavior.controller.clone(), &self.tree);
+                self.check_insert_non_closable_panes();
+
+                // If the old layout had the tab in it (and has all valid panes)
+                if self.behavior.opened_tabs.contains_key(&ribble_id) {
+                    return;
+                }
+
                 let new_child = self.tree.tiles.insert_pane(ribble_id.into());
                 self.handle_missing_node(new_child).expect("Default layout should have a root node.");
             }
         }
+    }
+
+    pub(in crate::ui) fn try_recover_layout(&mut self) {
+        // This will reconstruct a default tree if the old tree is empty
+        self.tree = Self::deserialize_tree(&self.data_directory);
+        self.behavior = RibbleTreeBehavior::from_tree(self.behavior.controller.clone(), &self.tree);
+        // This will try to ensure the non-closable panes remain in the tree at all times.
+        // If, somehow, there is no root, this will fall back to the default layout.
+        self.check_insert_non_closable_panes();
     }
 
     pub(in crate::ui) fn reset_layout(&mut self) {
@@ -221,6 +258,22 @@ impl RibbleTree {
             }
         }
         Ok(())
+    }
+
+    #[cfg(debug_assertions)]
+    pub(in crate::ui) fn test_tree_recovery(&mut self) {
+        // So, this is a "nuke the tree" and induce a panic to re-create conditions which
+        // can sometimes cause the entire tree to bug out.
+        self.clear_tree();
+        // Deliberately panic with a null tree.
+        assert!(self.tree.is_empty());
+        self.tree.root.unwrap();
+    }
+
+    #[cfg(debug_assertions)]
+    pub(in crate::ui) fn clear_tree(&mut self) {
+        // This only clears the tree to try and catch an empty tree on the ui paint.
+        self.tree = Tree::empty("ribble_tree");
     }
 
     pub(in crate::ui) fn tree_serializer(&self) -> TreeSerializer {
@@ -279,8 +332,7 @@ impl RibbleTree {
             tiles.insert_horizontal_tile(children)
         };
 
-        let root = tiles.insert_tab_tile(vec![main_layout]);
-        Tree::new("ribble_tree", root, tiles)
+        Tree::new("ribble_tree", main_layout, tiles)
     }
 }
 
@@ -503,14 +555,9 @@ impl Behavior<RibblePane> for RibbleTreeBehavior {
         if let Some(tile) = tiles.get(tile_id) {
             match tile {
                 Tile::Pane(pane) => self.tab_title_for_pane(pane),
-                // NOTE: this could recursively travel the active child to get the "active-est"
-                // child, but that might blow the call stack.
-                // It's easiest here to just default to: "Ribble: ContainerKind, which should
-                // hopefully be enough to get the point across."
-                // It's expected that this will primarily happen when a new tab is pushed to the
-                // tree.
+                // For now, with tabs: set this up to be the App name + the number of children.
                 Tile::Container(container) => {
-                    format!("Ribble: {:?}", container.kind()).into()
+                    format!("Ribble: {}", container.num_children()).into()
                 }
             }
         } else {
