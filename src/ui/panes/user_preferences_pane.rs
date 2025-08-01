@@ -52,9 +52,6 @@ impl PaneView for UserPreferencesPane {
 
         let pane_color = ui.visuals().panel_fill;
 
-        // TODO: this should a mechanism to be able to reset the layout.
-        // -Not sure how this is going to happen just yet (try to avoid exposing the information to other tabs)
-        // -Possibly make an "invalidate caches" or "set-to-default" in the main screen drop-down button.
         egui::Frame::default().fill(pane_color).inner_margin(PANE_INNER_MARGIN).show(ui, |ui| {
             ui.heading("Settings:");
             egui::ScrollArea::vertical().show(ui, |ui| {

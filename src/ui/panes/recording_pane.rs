@@ -59,7 +59,8 @@ impl PaneView for RecordingPane {
                 let button_spacing = ui.spacing().button_padding.y;
                 ui.vertical_centered_justified(|ui| {
                     if ui
-                        .add_enabled(!audio_worker_running, egui::Button::new("Start recording")).on_hover_cursor(egui::CursorIcon::Default)
+                        .add_enabled(!audio_worker_running, egui::Button::new("Start recording"))
+                        .on_hover_cursor(egui::CursorIcon::Default)
                         .clicked()
                     {
                         controller.start_recording();
@@ -67,7 +68,8 @@ impl PaneView for RecordingPane {
                     ui.add_space(button_spacing);
 
                     if ui
-                        .add_enabled(recorder_running, egui::Button::new("Stop")).on_hover_cursor(egui::CursorIcon::Default)
+                        .add_enabled(recorder_running, egui::Button::new("Stop"))
+                        .on_hover_cursor(egui::CursorIcon::Default)
                         .clicked()
                     {
                         controller.stop_recording();
@@ -80,7 +82,8 @@ impl PaneView for RecordingPane {
                     let latest_exists = controller.latest_recording_exists();
 
                     if ui
-                        .add_enabled(latest_exists, egui::Button::new("Export recording")).on_hover_cursor(egui::CursorIcon::Default)
+                        .add_enabled(latest_exists, egui::Button::new("Export recording"))
+                        .on_hover_cursor(egui::CursorIcon::Default)
                         .clicked()
                     {
                         self.recording_modal = true;
@@ -97,19 +100,30 @@ impl PaneView for RecordingPane {
                             .show(ui, |ui| {
                                 ui.label("Sample Rate:");
                                 let mut sample_rate = configs.sample_rate();
-                                egui::ComboBox::from_id_salt("sample_rate_combobox")
-                                    .selected_text(sample_rate.as_ref())
-                                    .show_ui(ui, |ui| {
-                                        for rate in RibbleSampleRate::iter() {
-                                            if ui
-                                                .selectable_value(&mut sample_rate, rate, rate.as_ref())
-                                                .clicked()
-                                            {
-                                                let new_configs = configs.with_sample_rate(sample_rate);
-                                                controller.write_recorder_configs(new_configs);
+                                ui.horizontal(|ui| {
+                                    egui::ComboBox::from_id_salt("sample_rate_combobox")
+                                        .selected_text(sample_rate.as_ref())
+                                        .show_ui(ui, |ui| {
+                                            for rate in RibbleSampleRate::iter() {
+                                                if ui
+                                                    .selectable_value(
+                                                        &mut sample_rate,
+                                                        rate,
+                                                        rate.as_ref(),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    let new_configs =
+                                                        configs.with_sample_rate(sample_rate);
+                                                    controller.write_recorder_configs(new_configs);
+                                                }
                                             }
-                                        }
-                                    }).response.on_hover_cursor(egui::CursorIcon::Default);
+                                        })
+                                        .response
+                                        .on_hover_cursor(egui::CursorIcon::Default);
+
+                                    ui.add_space(ui.available_width());
+                                });
 
                                 ui.end_row();
 
@@ -127,11 +141,14 @@ impl PaneView for RecordingPane {
                                                 )
                                                 .clicked()
                                             {
-                                                let new_configs = configs.with_num_channels(channels);
+                                                let new_configs =
+                                                    configs.with_num_channels(channels);
                                                 controller.write_recorder_configs(new_configs);
                                             }
                                         }
-                                    }).response.on_hover_cursor(egui::CursorIcon::Default);
+                                    })
+                                    .response
+                                    .on_hover_cursor(egui::CursorIcon::Default);
                                 ui.end_row();
 
                                 ui.label("Buffer size:");
@@ -152,16 +169,27 @@ impl PaneView for RecordingPane {
                                                 controller.write_recorder_configs(new_configs);
                                             }
                                         }
-                                    }).response.on_hover_cursor(egui::CursorIcon::Default);
+                                    })
+                                    .response
+                                    .on_hover_cursor(egui::CursorIcon::Default);
 
                                 ui.end_row();
+
+                                ui.label("Reset settings:");
+                                if ui
+                                    .button("Reset")
+                                    .on_hover_cursor(egui::CursorIcon::Default)
+                                    .clicked()
+                                {
+                                    controller.write_recorder_configs(Default::default());
+                                }
                             });
                     });
-                    configs_dropdown.header_response.on_hover_cursor(egui::CursorIcon::Default);
-                    configs_dropdown.body_response.map(|resp| resp.on_hover_cursor(egui::CursorIcon::Default));
+                    configs_dropdown
+                        .header_response
+                        .on_hover_cursor(egui::CursorIcon::Default);
                 });
             });
-
 
         // TODO: test out the recording modal.
         // ADD A DEBUG BUTTON to just pop open the modal.
@@ -316,7 +344,7 @@ impl PaneView for RecordingPane {
         // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
         // will just nop.
         resp.context_menu(|ui| {
-            ui.selectable_value(should_close, self.is_pane_closable(), "Close tab");
+            ui.selectable_value(should_close, self.is_pane_closable(), "Close pane");
         });
 
         resp

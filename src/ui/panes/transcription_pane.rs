@@ -1,6 +1,7 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::ui::panes::{PaneView, PANE_INNER_MARGIN};
+use crate::ui::HEADING_BUTTON_SIZE;
 use egui_notify::Toast;
 
 #[derive(Copy, Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
@@ -10,9 +11,6 @@ pub(crate) struct TranscriptionPane {}
 const COPY_ICON: &str = "📋";
 // Floppy Disk: https://unicodeplus.com/U+1F4BE
 const SAVE_ICON: &str = "💾";
-
-// TODO: determine a reasonable button size.
-const HEADING_BUTTON_SIZE: f32 = 16.0;
 
 impl PaneView for TranscriptionPane {
     fn pane_id(&self) -> RibblePaneId {

@@ -381,6 +381,7 @@ impl eframe::App for Ribble {
                                     }
 
                                     // NOTE: To avoid allocating every frame, this is more of a "try to recover"
+                                    // This shouldn't ever appear since the empty tree is caught in the ui loop.
                                     if self.tree.is_invalid() {
                                         ui.separator();
                                         if ui.button("Restore Layout").clicked() {
@@ -409,14 +410,15 @@ impl eframe::App for Ribble {
                                     #[cfg(debug_assertions)] {
                                         ui.separator();
                                         ui.menu_button("Debug menu", |ui| {
-                                            // TODO: buttons for testing purposes
-                                            // ONE: -> a dummy progress job
                                             if ui.button("Test Progress").clicked() {
                                                 todo!("Test Progress");
                                             }
-                                            // TWO: -> a dummy download (from self-hosted server)
                                             if ui.button("Test Download").clicked() {
                                                 todo!("Test Download");
+                                            }
+
+                                            if ui.button("Test Console").clicked() {
+                                                todo!("Test Console");
                                             }
 
                                             // For fuzzing the layout/tree and inducing fallback mechanisms
@@ -429,6 +431,8 @@ impl eframe::App for Ribble {
                                                     std::ptr::null_mut::<i32>().write(42);
                                                 }
                                             }
+
+                                            // For testing tree fallback mechanisms.
                                             if ui.button("Clear Tree").clicked() {
                                                 self.tree.clear_tree();
                                             }
@@ -581,6 +585,10 @@ impl eframe::App for Ribble {
             // especially on dark backgrounds.
             // This needs to be addressed: consider using some sort of extreme fg color or
             // the outline color
+            // NOTE: this is only a problem with the system dark-mode.
+
+            // The Light mode and catppuccin themes both are fine, but this should probably be set
+            // to a different color regardless if at all possible.
             self.tree.ui(ui);
         });
 
@@ -588,20 +596,12 @@ impl eframe::App for Ribble {
         self.toasts_handle.show(ctx);
     }
 
-    // TODO: determine whether to actually use this method at all,
-    // or whether to just spawn a separate thread and periodically run the save method.
-    // It'll get a little bit spicy on close, seeing as this also gets called on shutdown,
-    // And each individual resource also serializes itself on shutdown.
-
-    // This is causing some weird issues -> it's failing to initialize the Storage
-    // I'm -not- quite sure how to approach replicating this just yet ->
-    // This app is non-send/sync, so it's a little tricky to do the threading -> look into this.
+    // This will automatically save egui memory (window position, etc.) upon opening the storage file
+    // Instead of one gigantic point of failure, Ribble stores its state across multiple files in the data directory.
     fn save(&mut self, _storage: &mut dyn Storage) {
         self.serialize_app_state();
     }
 
-    // TODO: determine whether or not to just periodically run serialization on the background thread itself and join on drop.
-    // Would be easier; I'm not using egui's persistence and the tree saves itself.
     fn persist_egui_memory(&self) -> bool {
         true
     }

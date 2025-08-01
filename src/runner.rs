@@ -53,6 +53,7 @@ impl RibbleRunner<'_> {
     // Right now it's good for a "week's worth".
     const MAX_LOG_FILES: usize = 7;
     const LOG_FILE_NAME: &'static str = "ribble_log";
+    const EGUI_MEMORY_FILE_NAME: &'static str = "egui.ron";
 
     pub(crate) fn new() -> Result<Self, RibbleError> {
         // Set up the project directory
@@ -128,8 +129,7 @@ impl RibbleRunner<'_> {
 
         // Construct the app
         // Give a copy of the data dir to the eframe window (for other persistence)
-        // TODO: swap this out, this needs to be a file-path.
-        let window_options = build_window(data_directory.clone());
+        let window_options = build_window(data_directory.join(Self::EGUI_MEMORY_FILE_NAME));
 
         let app_path = data_directory.clone();
         let app: AppCreator<'_> = Box::new(move |cc| {
@@ -226,8 +226,6 @@ impl Drop for RibbleRunner<'_> {
 fn build_window(persistence_path: PathBuf) -> NativeOptions {
     NativeOptions {
         viewport: build_viewport(),
-        // TODO: this seems to be causing an error.
-        // For some reason eframe::native::file_storage is trying to create a "ribble" file instead of treating this as a directory.
         persistence_path: Some(persistence_path),
         persist_window: true,
         ..Default::default()

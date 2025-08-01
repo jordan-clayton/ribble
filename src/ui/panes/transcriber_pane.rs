@@ -104,25 +104,38 @@ impl PaneView for TranscriberPane {
 
         // MAIN PANEL FRAME
         egui::Frame::default().fill(pane_col).inner_margin(PANE_INNER_MARGIN).show(ui, |ui| {
-            // TODO: cop the trick used in the main app to get this to align properly.
             let header_height = egui::TextStyle::Heading.resolve(ui.style()).size;
             let header_width = ui.max_rect().width();
             let desired_size = egui::Vec2::new(header_width, header_height);
-            // TODO: this -does- not work.
-            // Instead, follow app.rs and use the columns trick.
-            let layout = egui::Layout::left_to_right(egui::Align::Center).with_main_justify(true).with_main_wrap(true);
 
-            ui.allocate_ui_with_layout(
-                desired_size,
-                layout,
-                |ui| {
-                    ui.heading(header_text);
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("Switch mode:");
-                        ui.add_enabled(!audio_worker_running, toggle(&mut self.realtime));
+            ui.horizontal(|ui| {
+                ui.columns_const(|[col1, col2]| {
+                    col1.vertical_centered_justified(|ui| {
+                        let layout = egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true);
+                        let header_height = egui::TextStyle::Heading.resolve(ui.style()).size;
+                        let header_width = ui.max_rect().width();
+                        let desired_size = egui::Vec2::new(header_width, header_height);
+                        ui.allocate_ui_with_layout(desired_size, layout, |ui| {
+                            ui.heading(header_text);
+                        });
                     });
-                },
-            );
+                    col2.vertical_centered_justified(|ui| {
+                        let header_height = egui::TextStyle::Heading.resolve(ui.style()).size;
+                        let header_width = ui.max_rect().width();
+                        let desired_size = egui::Vec2::new(header_width, header_height);
+                        let layout = egui::Layout::right_to_left(egui::Align::Center).with_main_wrap(true);
+
+                        let tooltip = if self.realtime { "Switch to file transcription." } else { "Switch to real-time transcription." };
+
+                        ui.allocate_ui_with_layout(desired_size, layout, |ui| {
+                            ui.add_enabled(!audio_worker_running, toggle(&mut self.realtime))
+                                .on_hover_cursor(egui::CursorIcon::Default)
+                                .on_hover_text(tooltip);
+                            ui.label("Realtime mode: ");
+                        })
+                    }).response.on_hover_cursor(egui::CursorIcon::Default);
+                });
+            });
 
             let button_spacing = ui.spacing().button_padding.y;
             egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
@@ -462,9 +475,8 @@ impl PaneView for TranscriberPane {
                                                 Set to infinite for continuous sessions, but note that performance may degrade.");
                                     });
 
-                                    let rt_timeout_id = egui::Id::new("realtime_timeout_id");
 
-                                    egui::ComboBox::from_id_salt(rt_timeout_id)
+                                    egui::ComboBox::from_id_salt("realtime_timeout_combobox")
                                         .selected_text(realtime_timeout.as_ref())
                                         .show_ui(ui, |ui| {
                                             for timeout_len in RealtimeTimeout::iter() {
@@ -475,7 +487,7 @@ impl PaneView for TranscriberPane {
                                                     controller.write_transcription_configs(new_configs);
                                                 }
                                             }
-                                        });
+                                        }).response.on_hover_cursor(egui::CursorIcon::Default);
                                     ui.end_row();
 
                                     // ROW: SAMPLE LEN
@@ -497,9 +509,7 @@ impl PaneView for TranscriberPane {
                                                 Larger sizes: higher latency, higher accuracy, lower power draw.");
                                     });
 
-                                    let a_sample_id = egui::Id::new("audio_sample_len");
-
-                                    egui::ComboBox::from_id_salt(a_sample_id)
+                                    egui::ComboBox::from_id_salt("audio_sample_len")
                                         .selected_text(audio_sample_len.as_ref())
                                         .show_ui(ui, |ui| {
                                             for sample_len in AudioSampleLen::iter() {
@@ -510,7 +520,7 @@ impl PaneView for TranscriberPane {
                                                     controller.write_transcription_configs(new_configs);
                                                 }
                                             }
-                                        });
+                                        }).response.on_hover_cursor(egui::CursorIcon::Default);
                                     ui.end_row();
 
                                     // ROW: VAD SAMPLE LEN
@@ -544,14 +554,16 @@ impl PaneView for TranscriberPane {
                                                     controller.write_transcription_configs(new_configs);
                                                 }
                                             }
-                                        });
+                                        }).response.on_hover_cursor(egui::CursorIcon::Default);
 
                                     ui.end_row();
                                 }
 
                                 // ROW: RESET TO DEFAULTS.
-                                ui.label("Reset settings:");
-                                if ui.button("Reset").clicked() {
+                                ui.label("Reset to defaults:");
+                                if ui.button("Reset")
+                                    .on_hover_cursor(egui::CursorIcon::Default)
+                                    .clicked() {
                                     // Since real-time configs expose some more parameters,
                                     // Only reset the whisper configs if resetting from offline mode.
                                     let new_configs = if self.realtime {
@@ -570,7 +582,7 @@ impl PaneView for TranscriberPane {
                 ui.add_space(button_spacing);
                 ui.separator();
 
-                ui.collapsing("Voice Activitiy Detector Configs.", |ui| {
+                let vd_configs = ui.collapsing("Voice Activity Detector Configs", |ui| {
                     ui.add_enabled_ui(!audio_worker_running, |ui| {
                         egui::Grid::new("vad_configs_grid").striped(true)
                             .num_columns(2)
@@ -585,20 +597,26 @@ impl PaneView for TranscriberPane {
                                 });
 
                                 let mut vad_type = vad_configs.vad_type();
-                                egui::ComboBox::from_id_salt("vad_type_combobox")
-                                    .selected_text(vad_type.as_ref()).show_ui(ui, |ui| {
-                                    for vad in VadType::iter() {
-                                        if ui.selectable_value(&mut vad_type, vad, vad.as_ref())
-                                            .on_hover_ui(|ui| {
-                                                ui.style_mut().interaction.selectable_labels = true;
-                                                ui.label(vad.tooltip());
-                                            })
-                                            .clicked() {
-                                            let new_vad_configs = vad_configs.with_vad_type(vad_type);
-                                            controller.write_vad_configs(new_vad_configs);
+                                ui.horizontal(|ui| {
+                                    egui::ComboBox::from_id_salt("vad_type_combobox")
+                                        .selected_text(vad_type.as_ref()).show_ui(ui, |ui| {
+                                        for vad in VadType::iter() {
+                                            if ui.selectable_value(&mut vad_type, vad, vad.as_ref())
+                                                .on_hover_ui(|ui| {
+                                                    ui.style_mut().interaction.selectable_labels = true;
+                                                    ui.label(vad.tooltip());
+                                                })
+                                                .clicked() {
+                                                let new_vad_configs = vad_configs.with_vad_type(vad_type);
+                                                controller.write_vad_configs(new_vad_configs);
+                                            }
                                         }
-                                    }
+                                    }).response.on_hover_cursor(egui::CursorIcon::Default);
+
+                                    // This is just an empty to paint the grid color to the edge of the screen.
+                                    ui.add_space(ui.available_width());
                                 });
+
                                 ui.end_row();
 
                                 // FRAME SIZE
@@ -618,7 +636,7 @@ impl PaneView for TranscriberPane {
                                             controller.write_vad_configs(new_vad_configs);
                                         }
                                     }
-                                });
+                                }).response.on_hover_cursor(egui::CursorIcon::Default);
                                 ui.end_row();
 
                                 // STRICTNESS
@@ -638,29 +656,33 @@ impl PaneView for TranscriberPane {
                                                 controller.write_vad_configs(new_vad_configs);
                                             }
                                         }
-                                    });
+                                    }).response.on_hover_cursor(egui::CursorIcon::Default);
                                 ui.end_row();
 
                                 // USE OFFLINE
                                 let mut vad_use_offline = vad_configs.use_vad_offline();
-                                ui.label("Use offline:").on_hover_ui(|ui| {
+                                ui.label("File VAD:").on_hover_ui(|ui| {
                                     ui.style_mut().interaction.selectable_labels = true;
                                     ui.label("Run VAD for file transcription.\n\
                                     Significantly improves performance but may cause transcription artifacts.");
                                 });
-                                if ui.add(egui::Checkbox::without_text(&mut vad_use_offline)).clicked() {
+                                if ui.add(egui::Checkbox::without_text(&mut vad_use_offline)).on_hover_cursor(egui::CursorIcon::Default)
+                                    .clicked() {
                                     let new_vad_configs = vad_configs.with_use_vad_offline(vad_use_offline);
                                     controller.write_vad_configs(new_vad_configs);
                                 }
                                 ui.end_row();
                                 ui.label("Reset settings:");
-                                if ui.button("Reset").clicked() {
+                                if ui.button("Reset")
+                                    .on_hover_cursor(egui::CursorIcon::Default)
+                                    .clicked() {
                                     controller.write_vad_configs(Default::default());
                                 }
                                 ui.end_row();
                             })
                     });
                 });
+                vd_configs.header_response.on_hover_cursor(egui::CursorIcon::Default);
             });
         });
 
