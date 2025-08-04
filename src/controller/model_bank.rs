@@ -68,6 +68,10 @@ impl RibbleModelBankState {
         Ok(self)
     }
 
+    fn create_model_key(&self, file_name: &str) -> ModelId {
+        XxHash3_64::oneshot_with_seed(MODEL_ID_SEED, file_name.as_bytes())
+    }
+
     fn model_directory(&self) -> &Path {
         self.model_directory.as_path()
     }
@@ -332,6 +336,10 @@ impl RibbleModelBank {
             worker_thread: Some(work_thread),
             debouncer: Some(debouncer),
         })
+    }
+
+    pub(crate) fn create_model_key(&self, file_name: &str) -> ModelId {
+        self.create_model_key(file_name)
     }
 
     pub(crate) fn model_directory(&self) -> &Path {

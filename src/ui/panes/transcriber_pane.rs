@@ -13,7 +13,8 @@ use strum::IntoEnumIterator;
 
 // Icon button for opening a link to huggingface/a readme explainer
 const LINK_ICON: &str = "🌐";
-// TODO: link icon size, should be around 16 pt.
+
+// TODO: remove the selectable labels -> they're annoying and stick around too long.
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(in crate::ui) struct TranscriberPane {
@@ -92,9 +93,6 @@ impl PaneView for TranscriberPane {
             "File Transcription"
         };
 
-        // TODO: this might not work just yet - test out and remove this todo if it's right.
-        // Create a (hopefully) lower-priority pane-sized interaction hitbox
-        // Handle dragging the UI.
         let pane_id = egui::Id::new("transcriber_pane");
         // Return the interaction response.
         let resp = ui.interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
@@ -106,7 +104,6 @@ impl PaneView for TranscriberPane {
         egui::Frame::default().fill(pane_col).inner_margin(PANE_INNER_MARGIN).show(ui, |ui| {
             let header_height = egui::TextStyle::Heading.resolve(ui.style()).size;
             let header_width = ui.max_rect().width();
-            let desired_size = egui::Vec2::new(header_width, header_height);
 
             ui.horizontal(|ui| {
                 ui.columns_const(|[col1, col2]| {
@@ -290,6 +287,7 @@ impl PaneView for TranscriberPane {
                                 ui.label("Model:");
                                 // NOTE: this might be too many buttons, test and see.
                                 ui.horizontal_wrapped(|ui| {
+                                    // TODO: the interaction here needs to be tested.
                                     // Try-Get the model list from the controller.
                                     controller.try_read_model_list(&mut self.model_list);
                                     // Get a clone of the model_id to modify
@@ -297,13 +295,14 @@ impl PaneView for TranscriberPane {
 
                                     let model_id_combobox = match current_model {
                                         Some((_, file)) => {
+                                            let salt = "model_id_combobox";
                                             match file {
                                                 ModelFile::Packed(idx) => {
-                                                    egui::ComboBox::from_id_salt("model_id_combobox")
+                                                    egui::ComboBox::from_id_salt(salt)
                                                         .selected_text(ModelFile::PACKED_NAMES[idx])
                                                 }
                                                 ModelFile::File(name) => {
-                                                    egui::ComboBox::from_id_salt("model_id_combobox")
+                                                    egui::ComboBox::from_id_salt(salt)
                                                         .selected_text(name.as_ref())
                                                 }
                                             }
@@ -335,22 +334,46 @@ impl PaneView for TranscriberPane {
                                         }
                                     });
 
-                                    if ui.button("Open Model").clicked() {
-                                        let file_dialog = rfd::FileDialog::new()
-                                            .add_filter("ggml-model", &[".bin"])
-                                            .set_directory(controller.base_dir());
-
-                                        // If there is path, it is a ".bin".
-                                        // At the moment, there's no integrity checking
-                                        // mechanisms
-                                        if let Some(path) = file_dialog.pick_file() {
-                                            controller.copy_new_model(path);
-                                        }
-                                    }
-                                    if ui.button("Download Model").clicked() {
-                                        self.download_modal = true;
-                                    }
+                                    // START NEXT ROW.
+                                    ui.add_space(ui.available_width());
                                 });
+                                ui.end_row();
+
+                                ui.label("Load Model:").on_hover_text("Load a downloaded model into Ribble.");
+                                if ui.button("Open File Manager").clicked() {
+                                    let file_dialog = rfd::FileDialog::new()
+                                        .add_filter("ggml-model", &[".bin"])
+                                        .set_directory(controller.base_dir());
+
+                                    // If there is path, it is a ".bin".
+                                    // At the moment, there's no integrity checking
+                                    // mechanisms
+                                    if let Some(path) = file_dialog.pick_file() {
+                                        // Try and set the Model ID if it's valid - the hash is expected to be stable.
+
+                                        // Since this is happening over a background thread,
+                                        // there isn't yet a great way to "await" this or get the file_name
+                                        // if the result is successful.
+
+                                        // Instead, expect it -will- be a successful operation,
+                                        // Get an identical hash - if it's valid, the id will align
+                                        // and be confirmed in the next repaint.
+
+                                        // NOTE: implement a broadcast system.
+                                        if let Some(file_name) = path.as_path().file_name() {
+                                            let key = controller.get_model_key(&file_name.to_string_lossy());
+                                            controller.write_transcription_configs(configs.with_model_id(Some(key)))
+                                        }
+                                        controller.copy_new_model(path);
+                                    }
+                                }
+                                ui.end_row();
+
+                                ui.label("Download Model:").on_hover_text("Open the the downloads menu.");
+                                if ui.button("Open menu").clicked() {
+                                    self.download_modal = true;
+                                }
+
                                 ui.end_row();
 
                                 // ROW: OPEN MODEL FOLDER
@@ -360,7 +383,8 @@ impl PaneView for TranscriberPane {
                                     // Try and open it in the default file explorer.
                                     // There's a debouncer in the model-bank that will
                                     // keep the list mostly up to date.
-                                    let _ = opener::reveal(model_directory);
+                                    // TODO: SHOW A TOAST ON ERROR.
+                                    let _ = opener::open(model_directory);
                                 }
                                 ui.end_row();
 
@@ -371,13 +395,30 @@ impl PaneView for TranscriberPane {
                                     ui.style_mut().interaction.selectable_labels = true;
                                     ui.label("Set the number of threads to allocate to whisper. Recommended: 7.");
                                 });
-                                // TODO: if this gets too janky, consider using caching and dirty-writes.
-                                // TODO: Absolutely work this out differently with caching/dirty-writes.
-                                // This is not going to play nicely/as expected.
-                                if ui.add(egui::Slider::new(&mut n_threads, thread_range).integer()).is_pointer_button_down_on() {
+
+                                let slider = ui.add(egui::Slider::new(&mut n_threads, thread_range).integer());
+                                let keyboard_input = slider.changed() && ui.input(|i| i.keys_down.iter().any(|key| {
+                                    // NOTE: there is no "is_numeric() or similar in egui, afaik.
+                                    // To avoid unnecessary/excess caching (and allow the slider to work as intended),
+                                    // Check for a (numeric) key input on the slider, and write on a
+                                    // change -> enter isn't strictly necessary and writes are atomic anyway.
+                                    matches!(key, egui::Key::Num0 |
+                                        egui::Key::Num1 |
+                                        egui::Key::Num2 |
+                                        egui::Key::Num3 |
+                                        egui::Key::Num4 |
+                                        egui::Key::Num5 |
+                                        egui::Key::Num6 |
+                                        egui::Key::Num7 |
+                                        egui::Key::Num8 |
+                                        egui::Key::Num9)
+                                }));
+
+                                if slider.drag_stopped() || (slider.changed() && keyboard_input) {
                                     let new_configs = configs.with_n_threads(n_threads);
                                     controller.write_transcription_configs(new_configs)
                                 }
+
                                 ui.end_row();
 
                                 // NOTE: if it becomes imperative to expose past prompt tokens,
@@ -404,8 +445,16 @@ impl PaneView for TranscriberPane {
                                 // NOTE TO SELF: implement Language::default() in Ribble-Whisper;
                                 // It's fine for now: Default = None = Auto anyway.
                                 let mut language = configs.language().unwrap_or(Language::Auto);
+
+                                // NOTE: The other codes are all lowercase, but "auto" doesn't fit
+                                // well with the rest of the UI.
+
+                                let lang_selected_text = match language {
+                                    Language::Auto => "Auto",
+                                    _ => language.as_ref()
+                                };
                                 egui::ComboBox::from_id_salt("select_language_combobox")
-                                    .selected_text(language.as_ref()).show_ui(ui, |ui| {
+                                    .selected_text(lang_selected_text).show_ui(ui, |ui| {
                                     for lang in Language::iter() {
                                         if ui.selectable_value(&mut language, lang, lang.as_ref()).clicked() {
                                             let new_configs = configs.with_language(Some(language));
@@ -432,7 +481,7 @@ impl PaneView for TranscriberPane {
                                 ui.label("Use Context:").on_hover_ui(|ui| {
                                     ui.style_mut().interaction.selectable_labels = true;
                                     ui.label("Use previous context to inform transcription.\n\
-                                            Improves accuracy but may introduce real-time artefacts.");
+                                            Generally improves accuracy but may cause artifacts.");
                                 });
 
                                 let mut using_context = !configs.using_no_context();

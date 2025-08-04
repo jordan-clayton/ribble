@@ -21,6 +21,11 @@ fn set_base_directory() -> PathBuf {
     }
 }
 
+
+// TODO: figure out how to structure polling for new console messages in case the console is not open.
+// Atm, there's no "broadcast" mechanism in place to get that state up unless requested.
+// TODO-TWICE: implement a bounded "broadcast" mechanism.
+
 #[derive(Clone)]
 pub(crate) struct RibbleController {
     kernel: Arc<Kernel>,
@@ -113,6 +118,10 @@ impl RibbleController {
     // (ID, File name)
     pub(crate) fn try_read_model_list(&self, copy_buffer: &mut Vec<(ModelId, ModelFile)>) {
         self.kernel.try_read_model_list(copy_buffer);
+    }
+
+    pub(crate) fn get_model_key(&self, file_name: &str) -> ModelId {
+        self.kernel.get_model_key(file_name)
     }
 
     pub(crate) fn get_model_directory(&self) -> &Path {

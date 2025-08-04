@@ -183,6 +183,10 @@ impl Kernel {
         self.model_bank.copy_model_to_bank(file_path);
     }
 
+    pub(super) fn get_model_key(&self, model_key: &str) -> ModelId {
+        self.model_bank.create_model_key(model_key)
+    }
+
     pub(super) fn get_model_directory(&self) -> &Path {
         self.model_bank.model_directory()
     }
