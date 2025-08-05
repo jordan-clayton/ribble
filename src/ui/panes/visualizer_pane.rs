@@ -1,8 +1,9 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{AnalysisType, RotationDirection, NUM_VISUALIZER_BUCKETS};
 use crate::ui::panes::ribble_pane::RibblePaneId;
-use crate::ui::panes::{PaneView, PANE_INNER_MARGIN};
+use crate::ui::panes::PaneView;
 use crate::ui::widgets::soundbar::soundbar;
+use crate::ui::PANE_INNER_MARGIN;
 use crate::utils::preferences::RibbleAppTheme;
 use egui_colorgradient::ColorInterpolator;
 use std::fmt::Debug;
@@ -105,7 +106,10 @@ impl PaneView for VisualizerPane {
 
         // Smooth the buffer to prevent the (unintended) jumpiness.
         let dt = ui.ctx().input(|i| i.stable_dt);
-        smoothing(&self.visualizer_buckets, &mut self.presentation_buckets, dt);
+        let repaint = smoothing(&self.visualizer_buckets, &mut self.presentation_buckets, dt);
+        if repaint {
+            ui.ctx().request_repaint();
+        }
 
         // Check the theme to determine whether the gradient needs to be swapped.
         let theme = controller.read_user_preferences().system_theme();
@@ -214,9 +218,14 @@ impl PaneView for VisualizerPane {
     }
 }
 
-fn smoothing(target: &[f32], current: &mut [f32], dt: f32) {
+fn smoothing(target: &[f32], current: &mut [f32], dt: f32) -> bool {
     assert_eq!(target.len(), current.len());
+    let mut repaint = false;
     for i in 0..target.len() {
+        if current[i] != target[i] {
+            repaint = true;
+        }
         current[i] = current[i] + (target[i] - current[i]) * SMOOTHING_CONSTANT * dt;
     }
+    repaint
 }

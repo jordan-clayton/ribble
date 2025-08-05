@@ -15,7 +15,7 @@ use crate::ui::panes::ribble_pane::{PaneView, RibblePane, RibblePaneId};
 use crate::utils::errors::RibbleError;
 use eframe::epaint::Hsva;
 use egui::{lerp, Painter, Rect, Stroke, StrokeKind, Style};
-use egui_tiles::{Behavior, Container, SimplificationOptions, Tile, TileId, Tiles, Tree, UiResponse};
+use egui_tiles::{Behavior, Container, ResizeState, SimplificationOptions, Tile, TileId, Tiles, Tree, UiResponse};
 use std::collections::HashMap;
 use std::error::Error;
 use std::f32::consts::PI;
@@ -24,9 +24,6 @@ use std::path::{Path, PathBuf};
 use strum::{EnumCount, IntoEnumIterator};
 
 const FOCUS_ANIMATION_DURATION: f32 = 1.0;
-// Right now, going with a symmetric margin
-// This may change in the future.
-const PANE_INNER_MARGIN: f32 = 8.0;
 
 pub(in crate::ui) struct RibbleTree {
     data_directory: PathBuf,
@@ -74,6 +71,12 @@ impl RibbleTree {
             self.try_recover_layout();
         }
 
+        // Check to ensure the root exists in the tiles collection
+        let root = self.tree.root.expect("A non-empty tree must have a root.");
+        if self.tree.tiles.get(root).is_none() {
+            self.try_recover_layout();
+        }
+
         // Do a once-over of any tabs which should be closed.
         self.check_remove_old_tabs();
         // Add any new panes to the tree before painting.
@@ -97,13 +100,13 @@ impl RibbleTree {
     }
 
 
-    // This should be called at least once (at construction time) to make sure the Non-closable panes
-    // are in the tree.
-    // NOTE: This shouldn't get too expensive, but it's most likely not the best thing to call -often-
-    // Also, it has to be static to be called at construction time, unless using a builder...
+    // NOTE: this probably should not be called all too often.
     pub(in crate::ui) fn check_insert_non_closable_panes(&mut self) {
         // Check for an invalid tree - sometimes it can get lost if there's a panic in the UI code.
         // Fall-back to a previously serialized version, and if that fails, just reset to defaults.
+
+        // In most cases, this function is called right after attempting to restore layout, so the
+        // tree should never be empty.
         if self.tree.is_empty() {
             // This will fall back to defaults if there's no root.
             self.tree = Self::deserialize_tree(&self.data_directory);
@@ -194,16 +197,23 @@ impl RibbleTree {
         }
     }
 
+    // This function gets called as part of the check to ensure all non-closable panes exist
+    // somewhere in the tree.
     fn insert_child(&mut self, ribble_id: RibblePaneId) {
         let new_child = self.tree.tiles.insert_pane(ribble_id.into());
 
+        // NOTE: this can fail twice (no root, no root container), but the deserialization should
+        // catch an invalid tree and fall back to the default layout.
+        // (There are also guards against serializing an invalid tree)
         match self.handle_missing_node(new_child) {
-            Ok(_) => {}
+            Ok(_) => {
+                // ADD a record into the opened tabs to prevent duplicates
+                self.behavior.opened_tabs.insert(ribble_id, new_child);
+            }
             Err(_) => {
                 // Try to deserialize things first.
                 self.tree = Self::deserialize_tree(&self.data_directory);
                 self.behavior = RibbleTreeBehavior::from_tree(self.behavior.controller.clone(), &self.tree);
-                self.check_insert_non_closable_panes();
 
                 // If the old layout had the tab in it (and has all valid panes)
                 if self.behavior.opened_tabs.contains_key(&ribble_id) {
@@ -212,16 +222,19 @@ impl RibbleTree {
 
                 let new_child = self.tree.tiles.insert_pane(ribble_id.into());
                 self.handle_missing_node(new_child).expect("Default layout should have a root node.");
+                // ADD a record into the opened tabs to prevent duplicates
+                self.behavior.opened_tabs.insert(ribble_id, new_child);
             }
         }
     }
 
     pub(in crate::ui) fn try_recover_layout(&mut self) {
-        // This will reconstruct a default tree if the old tree is empty
+        // This will reconstruct a default tree if the old tree is empty,
+        // OR if the root node has no corresponding tile in the tree.
         self.tree = Self::deserialize_tree(&self.data_directory);
         self.behavior = RibbleTreeBehavior::from_tree(self.behavior.controller.clone(), &self.tree);
         // This will try to ensure the non-closable panes remain in the tree at all times.
-        // If, somehow, there is no root, this will fall back to the default layout.
+        // If, somehow, there is no root/an invalid tree, this will, again fall back to the default layout.
         self.check_insert_non_closable_panes();
     }
 
@@ -232,7 +245,7 @@ impl RibbleTree {
 
     fn handle_missing_node(&mut self, new_child: TileId) -> Result<(), RibbleError> {
         let root = self.tree.root.ok_or(RibbleError::Core("Tree missing!".to_string()))?;
-        match self.tree.tiles.get_mut(root).expect("The root node should") {
+        match self.tree.tiles.get_mut(root).ok_or(RibbleError::Core("Root node has no tile!".to_string()))? {
             Tile::Pane(_) => {
                 // NOTE: if this ever triggers, that means there's some sort of issue with the Tree::gc(..) sweep.
                 // It should also be the case such that
@@ -294,8 +307,30 @@ impl RibbleTree {
 
                 if tree.is_empty() {
                     log::error!("Deserialized Empty tree! Falling back to default.");
+                    return Self::default_tree();
+                }
+                // If the tree is non-empty, there must exist a root
+                let root = tree.root().expect("A non-empty tree must have a root node");
+                // Check to see whether the root maps to a tile
+
+                // If it doesn't, there's something -really- weird going on;
+                // It's a bit difficult to parse what's going on with egui_tiles, but the tree can
+                // become incoherent during layout panics.
+
+                // What seems to be happening:
+                //  - If there's a layout panic, the pane gets removed (or not re-inserted) into the tree.
+                //  - If that leaves only 1 child in the layout, by the default SimpleOptions, this gets flattened
+                //      -- Sometimes the root can get lost; sometimes the root gets detached from the tiles, not sure why.
+                //      -- Sometimes the root ends up as just a pane.
+
+                // Since there are at least 2 non-closable panes, the root has to be a container.
+
+                // The easiest fix is to just restore the default layout if the root is not a
+                // container with children.
+                if tree.tiles.get_container(root).is_none() {
                     Self::default_tree()
                 } else {
+                    // If there's a root and the root has a tile
                     tree
                 }
             }
@@ -353,32 +388,40 @@ impl TreeSerializer {
     // NOTE: this only logs errors - there are fallbacks if the tree doesn't serialize/is missing
     // If the root-node is missing/tree is empty, then this will not re-write the old layout because
     // that implies a major error/panic has happened.
-
-    // NOTE: this -could- be better served with a tombstone.
     pub(in crate::ui) fn serialize(&self) {
-        if !self.tree.is_empty() {
-            match std::fs::File::create(self.out_file_path.as_path()) {
-                Ok(tree_file) => {
-                    let writer = BufWriter::new(tree_file);
-                    match ron::Options::default().to_io_writer_pretty(
-                        writer,
-                        &self.tree,
-                        ron::ser::PrettyConfig::default(),
-                    ) {
-                        Ok(_) => {
-                            log::info!("Tree serialized to: {}", self.out_file_path.display());
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to serialize tree: {e}");
-                        }
+        if self.tree.is_empty() {
+            log::error!("Root node missing! Empty tree. Skipping deserialization.");
+            return;
+        }
+
+        // CHECK FOR THE ROOT FIRST
+        let root = self.tree.root.expect("A non-empty tree must have a root node");
+
+        // Check to make sure the root maps to a tile in the tree before serializing
+        if self.tree.tiles.get(root).is_none() {
+            log::error!("Root node has no tile! Skipping deserialization.");
+            return;
+        }
+
+        match std::fs::File::create(self.out_file_path.as_path()) {
+            Ok(tree_file) => {
+                let writer = BufWriter::new(tree_file);
+                match ron::Options::default().to_io_writer_pretty(
+                    writer,
+                    &self.tree,
+                    ron::ser::PrettyConfig::default(),
+                ) {
+                    Ok(_) => {
+                        log::info!("Tree serialized to: {}", self.out_file_path.display());
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to serialize tree: {e}");
                     }
                 }
-                Err(e) => {
-                    log::warn!("Failed to create tree file: {e}");
-                }
             }
-        } else {
-            log::error!("Root node missing! Empty tree. Skipping deserialization.");
+            Err(e) => {
+                log::warn!("Failed to create tree file: {e}");
+            }
         }
     }
 }
@@ -495,6 +538,17 @@ impl Behavior<RibblePane> for RibbleTreeBehavior {
             UiResponse::DragStarted
         } else {
             UiResponse::None
+        }
+    }
+
+    fn resize_stroke(&self, style: &Style, resize_state: ResizeState) -> Stroke {
+        // This is basically the same as the default, except it uses egui widget visuals
+        // for idle instead of the tab bar color.
+        match resize_state {
+            ResizeState::Idle =>
+                style.visuals.widgets.noninteractive.bg_stroke,
+            ResizeState::Hovering => style.visuals.widgets.hovered.fg_stroke,
+            ResizeState::Dragging => style.visuals.widgets.active.fg_stroke,
         }
     }
 

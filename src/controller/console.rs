@@ -1,5 +1,7 @@
-use crate::controller::{Bus, ConsoleMessage};
+use crate::controller::{Bus, ConsoleMessage, LatestError};
 use crate::controller::{RibbleMessage, WorkRequest, MAX_NUM_CONSOLE_MESSAGES, MIN_NUM_CONSOLE_MESSAGES};
+use crate::utils::errors::RibbleErrorCategory;
+use arc_swap::ArcSwap;
 use parking_lot::RwLock;
 use ribble_whisper::utils::{Receiver, Sender};
 use std::collections::VecDeque;
@@ -7,6 +9,8 @@ use std::error::Error;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
+use std::time::Instant;
+use twox_hash::XxHash3_64;
 
 struct ConsoleEngineState {
     incoming_messages: Receiver<ConsoleMessage>,
@@ -16,9 +20,11 @@ struct ConsoleEngineState {
     // In practice, expect the real capacity to be slightly greater (likely the next power of two),
     // but the length of the elements will remain fixed to the user-specified limit.
     queue_capacity: AtomicUsize,
+    latest_error: ArcSwap<Option<LatestError>>,
 }
 
 impl ConsoleEngineState {
+    const CONSOLE_ENGINE_SEED: u64 = 1;
     fn new(incoming_messages: Receiver<ConsoleMessage>, capacity: usize) -> Self {
         let capacity = capacity.max(MIN_NUM_CONSOLE_MESSAGES);
         let queue = RwLock::new(VecDeque::with_capacity(capacity));
@@ -27,10 +33,20 @@ impl ConsoleEngineState {
             incoming_messages,
             queue,
             queue_capacity,
+            latest_error: ArcSwap::new(Arc::new(None)),
         }
     }
 
-    fn add_console_message(&self, message: ConsoleMessage) {
+    fn handle_new_message(&self, message: ConsoleMessage) {
+        // If the message is an error, update the latest error.
+        if let ConsoleMessage::Error(msg) = &message {
+            let category = msg.into();
+            let id = XxHash3_64::oneshot_with_seed(Self::CONSOLE_ENGINE_SEED, msg.to_string().as_bytes());
+            let timestamp = Instant::now();
+            let new_latest_error = LatestError::new(id, category, timestamp);
+            self.latest_error.store(Arc::new(Some(new_latest_error)))
+        }
+
         // Get a write lock for pushing to the buffer
         let mut queue = self.queue.write();
 
@@ -47,6 +63,10 @@ impl ConsoleEngineState {
             "Queue length greater than capacity, pop logic is incorrect. Len: {}",
             queue.len()
         );
+    }
+
+    fn clear_latest_error(&self) {
+        self.latest_error.store(Arc::new(None));
     }
 
     fn resize(&self, new_size: usize) {
@@ -113,7 +133,7 @@ impl ConsoleEngine {
                 // (and the console is still displaying, this will show a "shutting down") message.
 
                 // Otherwise, it's a plain console message.
-                thread_inner.add_console_message(console_message);
+                thread_inner.handle_new_message(console_message);
                 if closing_app {
                     break;
                 }
@@ -127,6 +147,25 @@ impl ConsoleEngine {
             work_request_sender: bus.work_request_sender(),
             work_thread,
         }
+    }
+
+    // TODO: EXPOSE THESE TO THE KERNEL & CONTROLLER AND IMPLEMENT A STATUS BAR IN THE UI.
+    // The get-latest is already hashed for ID comparison -> this may or may not be used, but can be used to detect stale errors
+    // (the same goes for the timestamp -> At the moment they're a little unnecessary, but that may change in the future.)
+
+    // Any meaningful work requested by the owner should clear the latest error.
+    pub(super) fn get_latest_error(&self) -> Arc<Option<LatestError>> {
+        self.inner.latest_error.load_full()
+    }
+
+    #[cfg(debug_assertions)]
+    pub(super) fn add_placeholder_error(&self) {
+        let fake_latest_error = LatestError::new(0, RibbleErrorCategory::Core, Instant::now());
+        self.inner.latest_error.store(Arc::new(Some(fake_latest_error)));
+    }
+
+    pub(super) fn clear_latest_error(&self) {
+        self.inner.clear_latest_error();
     }
 
     // Implementing Clone for ConsoleMessage would get expensive; it's cheaper to just use

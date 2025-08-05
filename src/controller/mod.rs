@@ -1,4 +1,4 @@
-use crate::utils::errors::RibbleError;
+use crate::utils::errors::{RibbleError, RibbleErrorCategory};
 use crate::utils::recorder_configs::RibbleRecordingConfigs;
 use atomic_enum::atomic_enum;
 use egui::{RichText, Visuals};
@@ -145,6 +145,25 @@ pub(crate) enum OfflineTranscriberFeedback {
     Progressive,
 }
 
+// TODO: continue noodling this out.
+// Perhaps set a work category, or keep an Arc<ConsoleMessage>,
+// or maybe copy the error string on error -> OR, just get the error discriminant
+pub(crate) struct LatestError {
+    id: u64,
+    category: RibbleErrorCategory,
+    timestamp: std::time::Instant,
+}
+
+impl LatestError {
+    pub(crate) fn new(id: u64, category: RibbleErrorCategory, timestamp: std::time::Instant) -> Self {
+        Self { id, category, timestamp }
+    }
+
+    pub(crate) fn id(&self) -> u64 { self.id }
+    pub(crate) fn category(&self) -> RibbleErrorCategory { self.category }
+    pub(crate) fn timestamp(&self) -> std::time::Instant { self.timestamp }
+}
+
 #[derive(Debug, Display)]
 pub(crate) enum ConsoleMessage {
     Error(RibbleError),
@@ -163,6 +182,14 @@ impl ConsoleMessage {
         // This has to make at least 1 heap allocation to coerce into a string
         // Test, but expect this to just move the string created above.
         RichText::new(msg).color(color).monospace()
+    }
+
+    pub(crate) fn message(&self) -> String {
+        match self {
+            ConsoleMessage::Error(msg) => msg.to_string(),
+            ConsoleMessage::Status(msg) => msg.to_owned(),
+            ConsoleMessage::Shutdown => "Shutting down.".to_string()
+        }
     }
 }
 

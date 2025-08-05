@@ -1,8 +1,8 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::Progress;
 use crate::ui::panes::ribble_pane::RibblePaneId;
-use crate::ui::panes::{PaneView, PANE_INNER_MARGIN};
-use crate::ui::GRID_ROW_SPACING_COEFF;
+use crate::ui::panes::PaneView;
+use crate::ui::{GRID_ROW_SPACING_COEFF, PANE_INNER_MARGIN};
 use irox_egui_extras::progressbar::ProgressBar;
 
 #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
@@ -86,7 +86,7 @@ impl PaneView for ProgressPane {
         // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
         // will just nop.
         resp.context_menu(|ui| {
-            ui.selectable_value(should_close, self.is_pane_closable(), "Close tab");
+            ui.selectable_value(should_close, self.is_pane_closable(), "Close pane");
         });
 
         resp

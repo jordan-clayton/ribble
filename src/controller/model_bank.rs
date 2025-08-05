@@ -339,7 +339,7 @@ impl RibbleModelBank {
     }
 
     pub(crate) fn create_model_key(&self, file_name: &str) -> ModelId {
-        self.create_model_key(file_name)
+        self.inner.create_model_key(file_name)
     }
 
     pub(crate) fn model_directory(&self) -> &Path {

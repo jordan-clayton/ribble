@@ -56,9 +56,8 @@ struct TranscriberEngineState {
 }
 
 impl TranscriberEngineState {
-    // Right now, this default feedback rate is at 1.5s
-    // NOTE: do some testing, look at implementing dynamic throttling.
-    // Possibly expose in the UI as a parameter.
+    // At the moment, there isn't a noticeable penalty to 1500ms.
+    // There also isn't a significant penalty for 500ms for short transcriptions.
     const DEFAULT_FEEDBACK_RATE_MILLIS: u64 = 1500;
     fn new(
         configs: WhisperRealtimeConfigs,
@@ -165,18 +164,16 @@ impl TranscriberEngineState {
         let (text_sender, text_receiver) = get_channel(UTILITY_QUEUE_SIZE);
         let vad_configs = *self.vad_configs.load_full().clone();
 
-        let vad = vad_configs.build_vad().or_else(|e| {
+        let vad = vad_configs.build_vad().inspect_err(|e| {
             self.cleanup_remove_progress_job(setup_id);
-            Err(e)
         })?;
 
         // Set up the mic capture -> the default is "Whisper-ready"
         let spec = CaptureSpec::default();
         let sink = ArcChannelSink::new(audio_sender);
 
-        let mic = audio_backend.open_capture(spec, sink).or_else(|e| {
+        let mic = audio_backend.open_capture(spec, sink).inspect_err(|e| {
             self.cleanup_remove_progress_job(setup_id);
-            Err(e)
         })?;
 
         // Get a copy of the configs
@@ -189,9 +186,8 @@ impl TranscriberEngineState {
             .with_voice_activity_detector(vad)
             .with_shared_model_retriever(shared_model_retriever)
             .build()
-            .or_else(|e| {
+            .inspect_err(|e| {
                 self.cleanup_remove_progress_job(setup_id);
-                Err(e)
             })?;
 
         let recording_expected_available = Arc::new(AtomicBool::new(true));
@@ -381,6 +377,9 @@ impl TranscriberEngineState {
     where
         M: ModelRetriever + Sync + Send,
     {
+        // Clear the previous transcription
+        self.clear_transcription();
+
         // Unpack the audio.
         let audio_path = self.current_audio_file_path.load_full();
 
@@ -695,9 +694,8 @@ impl TranscriberEngineState {
         let confirmed_transcription = Arc::new(final_transcription);
         let snapshot = TranscriptionSnapshot::new(confirmed_transcription, Default::default());
         self.current_snapshot.store(Arc::new(snapshot));
-        // TODO: swap this to idle once implemented.
         self.current_control_phrase
-            .store(Arc::new(WhisperControlPhrase::GettingReady));
+            .store(Arc::new(WhisperControlPhrase::default()));
     }
 
     fn clear_transcription(&self) {

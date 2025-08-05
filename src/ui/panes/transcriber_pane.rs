@@ -1,18 +1,23 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{CompletedRecordingJobs, ModelFile, OfflineTranscriberFeedback};
 use crate::ui::panes::ribble_pane::RibblePaneId;
-use crate::ui::panes::{PaneView, PANE_INNER_MARGIN};
+use crate::ui::panes::PaneView;
+use crate::ui::widgets::recording_modal::build_recording_modal;
 use crate::ui::widgets::toggle_switch::toggle;
-use crate::ui::GRID_ROW_SPACING_COEFF;
+use crate::ui::{
+    GRID_ROW_SPACING_COEFF, MODAL_HEIGHT_PROPORTION, PANE_HEADING_BUTTON_SIZE, PANE_INNER_MARGIN,
+};
 use crate::utils::realtime_settings::{AudioSampleLen, RealtimeTimeout, VadSampleLen};
 use crate::utils::vad_configs::{VadFrameSize, VadStrictness, VadType};
 use ribble_whisper::whisper::configs::Language;
 use ribble_whisper::whisper::model::{DefaultModelType, ModelId};
+use std::error::Error;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 
 // Icon button for opening a link to huggingface/a readme explainer
 const LINK_ICON: &str = "🌐";
+const LINK_BUTTON_SIZE: f32 = 18.0;
 
 // TODO: remove the selectable labels -> they're annoying and stick around too long.
 
@@ -79,9 +84,9 @@ impl PaneView for TranscriberPane {
 
         let configs = *controller.read_transcription_configs();
         let vad_configs = *controller.read_vad_configs();
-        let current_model = (*configs
-            .model_id())
-            .and_then(|id| self.model_list.iter().find(|(k, _)| *k == id)).cloned();
+        let current_model = (*configs.model_id())
+            .and_then(|id| self.model_list.iter().find(|(k, _)| *k == id))
+            .cloned();
 
         // RUN TRANSCRIPTION
         let can_run_transcription = current_model.is_some() && !audio_worker_running;
@@ -95,16 +100,14 @@ impl PaneView for TranscriberPane {
 
         let pane_id = egui::Id::new("transcriber_pane");
         // Return the interaction response.
-        let resp = ui.interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
+        let resp = ui
+            .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::Grab);
 
         let pane_col = ui.visuals().panel_fill;
 
         // MAIN PANEL FRAME
         egui::Frame::default().fill(pane_col).inner_margin(PANE_INNER_MARGIN).show(ui, |ui| {
-            let header_height = egui::TextStyle::Heading.resolve(ui.style()).size;
-            let header_width = ui.max_rect().width();
-
             ui.horizontal(|ui| {
                 ui.columns_const(|[col1, col2]| {
                     col1.vertical_centered_justified(|ui| {
@@ -137,11 +140,12 @@ impl PaneView for TranscriberPane {
             let button_spacing = ui.spacing().button_padding.y;
             egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
                 // FUNCTIONS
+                // REALTIME RUNNER BUTTONS
                 if self.realtime {
                     // RUNNER BUTTONS: START + STOP + Re-Transcribe
                     ui.vertical_centered_justified(|ui| {
                         if ui
-                            .add_enabled(can_run_transcription, egui::Button::new("Start Real-time"))
+                            .add_enabled(can_run_transcription, egui::Button::new("Start"))
                             .clicked()
                         {
                             controller.start_realtime_transcription();
@@ -159,7 +163,7 @@ impl PaneView for TranscriberPane {
                         if ui
                             .add_enabled(
                                 latest_recording_exists && can_run_transcription,
-                                egui::Button::new("Re-transcribe Latest"),
+                                egui::Button::new("Re-transcribe Last Recording"),
                             ).on_hover_ui(|ui| {
                             ui.style_mut().interaction.selectable_labels = true;
                             ui.label("Offline transcribe latest cached recording.\n\
@@ -173,14 +177,12 @@ impl PaneView for TranscriberPane {
                         }
                     });
                 } else {
+                    // OFFLINE RUNNER BUTTONS
+                    // TODO: This needs some tlc -> the buttons are a bit funky.
                     // Get the audio file information.
                     let current_audio_path = controller.read_current_audio_file_path();
-                    let current_file = match current_audio_path.as_ref() {
-                        Some(path) => {
-                            path.file_name()
-                        }
-                        None => None
-                    };
+
+                    let current_file = current_audio_path.as_deref().and_then(|path| path.file_name());
 
                     // RUNER BUTTONS: START + STOP
                     ui.vertical_centered_justified(|ui| {
@@ -200,17 +202,27 @@ impl PaneView for TranscriberPane {
                     ui.add_space(button_spacing);
                     ui.separator();
                     // AUDIO FILE: LOAD FILE, LOAD RECORDING, CLEAR
-                    ui.heading("Audio File");
+                    ui.heading("Audio File:");
+                    let audio_file_label_text = match current_file {
+                        None => "None".to_string(),
+                        Some(file) => {
+                            file.to_string_lossy().to_string()
+                        }
+                    };
                     ui.vertical_centered_justified(|ui| {
                         // AUDIO FILE
                         egui::Grid::new("audio_file")
-                            .num_columns(2)
+                            .num_columns(3)
                             .striped(true)
                             .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
                             .show(ui, |ui| {
                                 ui.label("Current audio file:");
-                                ui.horizontal(|ui| {
-                                    ui.label(format!("{current_file:#?}"));
+                                // TODO: determine whether to truncate.
+                                ui.label(audio_file_label_text);
+                                // THIS COULD BE AN "X" instead of clear.
+                                let desired_size = egui::Vec2::new(ui.available_width(), ui.spacing().interact_size.y);
+                                let layout = egui::Layout::right_to_left(egui::Align::Center);
+                                ui.allocate_ui_with_layout(desired_size, layout, |ui| {
                                     if ui.button("Clear").clicked() {
                                         controller.clear_audio_file_path();
                                     }
@@ -246,18 +258,31 @@ impl PaneView for TranscriberPane {
 
                     ui.heading("Feedback Mode");
                     // FEEDBACK MODE -> possibly hide this, but it seems important to have accessible.
+                    // NOTE: this is dubious, but it's
                     egui::Grid::new("offline_feedback")
-                        .num_columns(2)
+                        .num_columns(3)
                         .striped(true)
                         .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
                         .show(ui, |ui| {
                             let mut offline_feedback = controller.read_offline_transcriber_feedback();
-                            ui.label("Feedback mode.").on_hover_ui(|ui| {
+                            ui.label("Feedback mode:").on_hover_ui(|ui| {
                                 ui.style_mut().interaction.selectable_labels = true;
                                 ui.label("Set the feedback mode for file transcription.\n\
-                            Progressive: Enables live updates. Significantly degrades performance.\n\
-                            Minimal: Disables live updates. Significant increases performance.");
+                            Progressive: Enables live updates (degrades performance).\n\
+                            Minimal: Disables live updates.");
                             });
+
+                            // This is a "null" column to try and get the combobox spacing a little
+                            // more "nice".
+                            let size = ui.spacing().interact_size;
+
+                            ui.allocate_space(size);
+
+                            // NOTE: This can be used to crash egui's layout algorithm (intentionally)
+                            // and can semi-reliably induce the weird conditions that cause the tree to become incoherent.
+                            // (If the pane crashes on painting, it seems to be removed from the tree entirely)
+                            // ui.add_space(size.x);
+
                             egui::ComboBox::from_id_salt("feedback_mode_combobox")
                                 .selected_text(offline_feedback.as_ref()).show_ui(ui, |ui| {
                                 for feedback_mode in OfflineTranscriberFeedback::iter() {
@@ -285,10 +310,7 @@ impl PaneView for TranscriberPane {
                             .show(ui, |ui| {
                                 // ROW: MODEL
                                 ui.label("Model:");
-                                // NOTE: this might be too many buttons, test and see.
                                 ui.horizontal_wrapped(|ui| {
-                                    // TODO: the interaction here needs to be tested.
-                                    // Try-Get the model list from the controller.
                                     controller.try_read_model_list(&mut self.model_list);
                                     // Get a clone of the model_id to modify
                                     let mut model_id = *configs.model_id();
@@ -340,7 +362,7 @@ impl PaneView for TranscriberPane {
                                 ui.end_row();
 
                                 ui.label("Load Model:").on_hover_text("Load a downloaded model into Ribble.");
-                                if ui.button("Open File Manager").clicked() {
+                                if ui.button("Load").clicked() {
                                     let file_dialog = rfd::FileDialog::new()
                                         .add_filter("ggml-model", &[".bin"])
                                         .set_directory(controller.base_dir());
@@ -378,13 +400,18 @@ impl PaneView for TranscriberPane {
 
                                 // ROW: OPEN MODEL FOLDER
                                 ui.label("Models Folder");
-                                if ui.button("Open Models Folder").clicked() {
+                                if ui.button("Open").clicked() {
                                     let model_directory = controller.get_model_directory();
                                     // Try and open it in the default file explorer.
                                     // There's a debouncer in the model-bank that will
                                     // keep the list mostly up to date.
                                     // TODO: SHOW A TOAST ON ERROR.
-                                    let _ = opener::open(model_directory);
+                                    if let Err(e) = opener::open(model_directory) {
+                                        log::warn!("Failed to open model directory. Error: {}\n\
+                                        Error source: {:#?}", &e, e.source());
+                                        let toast = egui_notify::Toast::error("Failed to open models directory");
+                                        controller.send_toast(toast);
+                                    }
                                 }
                                 ui.end_row();
 
@@ -737,120 +764,30 @@ impl PaneView for TranscriberPane {
 
         // MODALS -> this doesn't need to be in the scroll area.
         if self.recording_modal {
-            let modal_id = egui::Id::new("transcriber_recordings_modal");
-            let modal = egui::Modal::new(modal_id).show(ui.ctx(), |ui| {
-
-                // Try-get the latest list of recordings.
-                // TODO: maaaaybe this should have a debouncer.
-                controller.try_get_completed_recordings(&mut self.recordings_buffer);
-
-                // TODO: abstract better constants/variables here -> should probably be a percentage of the
-                // window size
-                ui.set_width_range(70f32..=100f32);
-                let header_height = egui::TextStyle::Heading.resolve(ui.style()).size;
-                let header_width = ui.max_rect().width();
-                let desired_size = egui::Vec2::new(header_width, header_height);
-
-
-                ui.allocate_ui_with_layout(desired_size, egui::Layout::left_to_right(egui::Align::Center).with_main_justify(true), |ui| {
-                    ui.heading("Previous recordings:");
-                    if ui.button("Clear recordings").clicked() {
-                        // This guards against grandma clicks.
-                        controller.clear_recording_cache();
+            controller.try_get_completed_recordings(&mut self.recordings_buffer);
+            let handle_recordings = |file_name| {
+                match controller.try_get_recording_path(Arc::clone(&file_name)) {
+                    Some(path) => {
+                        controller.set_audio_file_path(path);
+                        self.realtime = false;
+                        self.recording_modal = false;
                     }
-                });
+                    None => {
+                        log::warn!("Temporary recording file missing: {file_name}");
+                        let toast = egui_notify::Toast::warning("Failed to find saved recording.");
+                        controller.send_toast(toast);
+                    }
+                }
+            };
 
-                // NOTE: if this is a sufficient size, cache it higher up in the ui function.
-                // (Unless the sizing gets modified in configs).
-                // Maybe spacing isn't really needed.
-                let gap_space = ui.spacing().interact_size.y;
-                ui.add_space(gap_space);
-
-                // If it's possible to know the size in advance, use show-rows.
-                egui::ScrollArea::both().show(ui, |ui| {
-                    egui::Grid::new("transcriber recording_list_grid")
-                        .num_columns(1)
-                        .striped(true)
-                        .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
-                        .show(ui, |ui| {
-                            let len = self.recordings_buffer.len();
-                            for (i, (file_name, recording)) in self.recordings_buffer.iter().enumerate() {
-                                let heading_text = format!("Recording: {}", len - i);
-
-                                // TODO: if this is expensive/not all that valuable, just do the duration.
-                                // NOTE: atm this code is identical to the recording modal
-                                // If this diverges, keep the code here.
-                                // Otherwise, look at factoring into a common function.
-                                let body_text = {
-                                    let secs = recording.total_duration().as_secs();
-                                    let seconds = secs % 60;
-                                    let minutes = (secs / 60) % 60;
-                                    let hours = (secs / 60) / 60;
-
-                                    // This is in bytes.
-                                    let file_size_estimate = recording.file_size_estimate();
-                                    let size_text = match unit_prefix::NumberPrefix::binary(file_size_estimate as f32) {
-                                        unit_prefix::NumberPrefix::Standalone(number) => format!("{number:.0} B"),
-                                        unit_prefix::NumberPrefix::Prefixed(prefix, number) => format!("{number:.2} {prefix}B"),
-                                    };
-
-                                    format!("Total time: {hours}:{minutes}:{seconds} | Approx size: {size_text}")
-                                };
-
-                                // NOTE: this might actually panic if called from more than one spot
-                                // Look into factoring out this modal.
-                                let tile_id = egui::Id::new(heading_text.as_str());
-                                let resp = ui.interact(ui.max_rect(), tile_id, egui::Sense::click());
-                                let visuals = ui.style().interact(&resp);
-
-                                // TODO: TEST THIS OUT AND MAKE SURE THINGS WORK OUT
-                                // THE GOAL: highlight color + OUTLINE
-                                // NOTE: atm this code is identical to the recording modal
-                                // If this diverges, keep the code here.
-                                // Otherwise, look at factoring into a common function.
-                                egui::Frame::default().fill(visuals.bg_fill).stroke(visuals.fg_stroke).show(ui, |ui| {
-                                    ui.vertical(|ui| {
-                                        ui.label(heading_text);
-                                        ui.small(body_text);
-                                    });
-                                });
-
-                                if resp.clicked() {
-                                    // Try to load the recording - an unsuccessful recording will just
-                                    // get the updated list.
-
-                                    // NOTE: controller.try_get_recording_path() will internally
-                                    // prune out nonexistent paths -> it's possibly not necessary to set
-                                    // up a debouncer just yet.
-                                    //
-                                    // If the file doesn't exist, this will return None
-                                    if let Some(path) = controller.try_get_recording_path(Arc::clone(file_name)) {
-                                        // Close the modal
-                                        // Since this ui cursor doesn't have .close(), just set the ref
-                                        self.recording_modal = false;
-                                        // Set the audio
-                                        controller.set_audio_file_path(path);
-                                        // Swap to offline-mode for re-transcription
-
-                                        self.realtime = false;
-                                    } else {
-                                        // The writer engine will prune out its nonexistent file-paths,
-                                        // so perhaps maybe a "toast" is sufficient here to say "sorry
-                                        // cannot find recording".
-                                        //
-                                        // Otherwise, a debouncer will be necessary to maintain the state
-                                        // of the directory.
-
-                                        log::warn!("Temporary recording file missing: {file_name}");
-                                        let toast = egui_notify::Toast::warning("Failed to find saved recording.");
-                                        controller.send_toast(toast);
-                                    }
-                                }
-                                ui.end_row();
-                            }
-                        });
-                });
-            });
+            let modal = build_recording_modal(
+                ui,
+                "transcriber_recording_modal",
+                "transcriber_recording_grid",
+                &controller,
+                &self.recordings_buffer,
+                handle_recordings,
+            );
 
             // If a user clicks outside the modal, this will close it.
             if modal.should_close() {
@@ -861,86 +798,100 @@ impl PaneView for TranscriberPane {
         if self.download_modal {
             let modal = egui::Modal::new(egui::Id::new("download_models_modal"))
                 .show(ui.ctx(), |ui| {
-                    // TODO: like above: abstract better constants/variables here -> should probably be a percentage of the
-                    // window size
-                    ui.set_width_range(70f32..=100f32);
+                    let height = ui.ctx().screen_rect().height() * MODAL_HEIGHT_PROPORTION;
+                    ui.set_max_height(height);
+                    egui::Frame::default().inner_margin(PANE_INNER_MARGIN).show(ui, |ui| {
+                        ui.heading("Download Models:");
 
-                    ui.heading("Download Models:");
+                        // NOTE: this might not be necessary; remove it if it looks weird.
+                        let gap_space = ui.spacing().interact_size.y;
+                        ui.add_space(gap_space);
 
-                    // NOTE: this might not be necessary; remove it if it looks weird.
-                    let gap_space = ui.spacing().interact_size.y;
-                    ui.add_space(gap_space);
-
-                    egui::ScrollArea::both().show(ui, |ui| {
-                        egui::Grid::new("download_models_grid")
-                            .num_columns(2)
-                            .striped(true)
-                            .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
+                        egui::ScrollArea::vertical()
                             .show(ui, |ui| {
-                                ui.label("Url:");
-                                ui.horizontal(|ui| {
-                                    let empty = self.model_url.is_empty();
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut self.model_url)
-                                            .hint_text("Download url"),
-                                    );
+                                egui::Grid::new("download_models_grid")
+                                    .num_columns(2)
+                                    .striped(true)
+                                    .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
+                                    .show(ui, |ui| {
+                                        ui.label("Url:");
+                                        ui.horizontal_centered(|ui| {
+                                            // Set the interact size to be slightly larger (to match the button size)
+                                            ui.spacing_mut().interact_size.y *= 1.25;
 
-                                    // Download runner button
-                                    if ui
-                                        .add_enabled(!empty, egui::Button::new("Download"))
-                                        .clicked()
-                                    {
-                                        // TODO: possibly validate (try-parse) the url.
-                                        self.download_modal = false;
-                                        self.model_url.clear();
-                                        controller.download_model(&self.model_url);
-                                    }
-                                    if ui
-                                        .button(LINK_ICON)
-                                        .on_hover_ui(|ui| {
-                                            ui.style_mut().interaction.selectable_labels = true;
-                                            ui.label("Launch the browser to open a model repository.");
-                                        })
-                                        .clicked()
-                                    {
-                                        self.download_modal = false;
-                                        self.model_url.clear();
-                                        // TODO: Change this to open a MODELS.md or similar containing
-                                        // explanations + links for stuff.
-                                        let _ = opener::open_browser(
-                                            "https://huggingface.co/ggerganov/whisper.cpp/tree/main",
-                                        );
-                                    }
-                                });
+                                            let empty = self.model_url.is_empty();
+                                            ui.add(
+                                                egui::TextEdit::singleline(&mut self.model_url)
+                                                    .hint_text("Download url"),
+                                            );
 
-                                ui.end_row();
-                            });
+                                            // Download runner button
+                                            if ui
+                                                .add_enabled(!empty, egui::Button::new("Download"))
+                                                .clicked()
+                                            {
+                                                // TODO: possibly validate (try-parse) the url.
+                                                self.download_modal = false;
+                                                self.model_url.clear();
+                                                controller.download_model(&self.model_url);
+                                            }
 
-                        // Collapsible default-models.
-                        // NOTE: These will just pull from the huggingface ggml repository.
-                        // Consider looking into mirroring/stable storage.
-                        ui.collapsing("Default models:", |ui| {
-                            egui::Grid::new("default_models_grid")
-                                .num_columns(2)
-                                .striped(true)
-                                .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
-                                .show(ui, |ui| {
-                                    for model_type in DefaultModelType::iter() {
-                                        ui.label(model_type.as_ref());
-                                        if ui.button("Download").clicked() {
-                                            self.download_modal = false;
-                                            let url = model_type.url();
-                                            controller.download_model(&url);
-                                        }
+                                            // The "link" icon is a little small ->
+                                            let link_button = egui::RichText::new(LINK_ICON).size(LINK_BUTTON_SIZE);
+
+                                            if ui
+                                                .button(link_button)
+                                                .on_hover_ui(|ui| {
+                                                    ui.style_mut().interaction.selectable_labels = true;
+                                                    ui.label("Launch the browser to open a model repository.");
+                                                })
+                                                .clicked()
+                                            {
+                                                self.download_modal = false;
+                                                self.model_url.clear();
+                                                // TODO: Change this to open a MODELS.md or similar containing
+                                                // explanations + links for stuff.
+                                                // TODO-TWICE: once changed, make sure to log this interaction on failure.
+                                                let _ = opener::open_browser(
+                                                    "https://huggingface.co/ggerganov/whisper.cpp/tree/main",
+                                                );
+                                            }
+                                        });
+
                                         ui.end_row();
-                                    }
-                                });
-                            // Tooltip for default moddels
-                        })
-                            .header_response
-                            .on_hover_ui(|ui| {
-                                ui.style_mut().interaction.selectable_labels = true;
-                                ui.label("A selection of downloadable models sourced from huggingface.");
+                                    });
+
+                                // Collapsible default-models.
+                                // NOTE: These will just pull from the huggingface ggml repository.
+                                // Consider looking into mirroring/stable storage.
+                                ui.collapsing("Default models:", |ui| {
+                                    egui::Grid::new("default_models_grid")
+                                        .num_columns(2)
+                                        .striped(true)
+                                        .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
+                                        .show(ui, |ui| {
+                                            for model_type in DefaultModelType::iter() {
+                                                ui.label(model_type.as_ref());
+                                                ui.horizontal(|ui| {
+                                                    if ui.button("Download").clicked() {
+                                                        self.download_modal = false;
+                                                        let url = model_type.url();
+                                                        controller.download_model(&url);
+                                                    }
+                                                    // This is hacky, but it will extend the striping to the edge
+                                                    // of the grid.
+                                                    ui.add_space(ui.available_width());
+                                                });
+                                                ui.end_row();
+                                            }
+                                        });
+                                    // Tooltip for default moddels
+                                })
+                                    .header_response
+                                    .on_hover_ui(|ui| {
+                                        ui.style_mut().interaction.selectable_labels = true;
+                                        ui.label("A selection of downloadable models sourced from huggingface.");
+                                    });
                             });
                     });
                 });

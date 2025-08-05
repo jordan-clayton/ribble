@@ -45,7 +45,7 @@ struct WriterEngineState {
 impl WriterEngineState {
     const DEFAULT_CACHE_SIZE: usize = 5;
     const TMP_FILE: &'static str = "tmp_recording";
-    const FILE_EXTENSION: &'static str = ".wav";
+    const FILE_EXTENSION: &'static str = "wav";
     fn new(data_directory: PathBuf, incoming_jobs: Receiver<WriteRequest>, bus: &Bus) -> Self {
         let ticket = AtomicUsize::new(0);
         let clearing = AtomicBool::new(false);

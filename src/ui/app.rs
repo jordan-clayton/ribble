@@ -8,12 +8,12 @@ use crate::controller::audio_backend_proxy::{
     AudioBackendProxy, AudioCaptureRequest, SharedSdl2Capture,
 };
 use crate::controller::ribble_controller::RibbleController;
-use crate::controller::{AmortizedDownloadProgress, AmortizedProgress, UI_UPDATE_QUEUE_SIZE};
+use crate::controller::{AmortizedDownloadProgress, AmortizedProgress, LatestError, UI_UPDATE_QUEUE_SIZE};
 use crate::ui::panes::ribble_pane::{ClosableRibbleViewPane, RibblePaneId};
 use crate::ui::panes::RibbleTree;
 use crate::ui::widgets::pie_progress::pie_progress;
 use crate::ui::widgets::recording_icon::recording_icon;
-use crate::utils::errors::RibbleError;
+use crate::utils::errors::{RibbleError, RibbleErrorCategory};
 use crate::utils::migration::{RibbleVersion, Version};
 use crate::utils::preferences::RibbleAppTheme;
 use eframe::Storage;
@@ -38,20 +38,21 @@ use strum::IntoEnumIterator;
 // Icon constants
 const HAMBURGER: &str = "☰";
 const NO_DOWNLOADS: &str = "📥";
+const ERROR_ICON: &str = "❎";
 const TOOLTIP_GRACE_TIME: f32 = 0.0;
 const TOOLTIP_DELAY: f32 = 0.5;
 
 // This is in seconds
 const THEME_TRANSITION_TIME: f32 = 0.3;
-
-// Relative progress bar size.
-const BOTTOM_PROGRESS_RATIO: f32 = 0.3;
 const RECORDING_ICON_FLICKER_SPEED: f32 = 1.0;
 
 const TOP_BAR_HEIGHT_COEFF: f32 = 1.5;
+const BOTTOM_PROGRESS_COLUMN_RATIO: f32 = 0.9;
 
 // NOTE: If this works for everything in the app, move it to a common place (mod) or make it public.
 const TOP_BAR_BUTTON_SIZE: f32 = 20.0;
+
+// TODO: ADD A "LATEST ERROR" STATUS BAR SECTION TO THE BOTTOM.
 
 // TODO: keyboard shortcuts?
 
@@ -194,7 +195,6 @@ impl Ribble {
         }
     }
 
-    // TODO: DETERMINE WHETHER OR NOT TO LET egui DO THIS, OR IMPLEMENT DIRTY WRITES.
     fn serialize_app_state(&mut self) {
         self.check_join_last_save();
         let controller = self.controller.clone();
@@ -284,197 +284,204 @@ impl eframe::App for Ribble {
             .resizable(false)
             .min_height(0.0)
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.columns_const(|[col1, col2]| {
-                        // Recording icon + status message
-                        col1.vertical_centered_justified(|ui| {
-                            // This code needs to be duplicated or be a tuple-closure
-                            // -> The calculation needs to be relative to the columns.
-                            let header_height = ui.spacing().interact_size.y * TOP_BAR_HEIGHT_COEFF;
-                            let header_width = ui.max_rect().width();
-                            // Allocate a top "toolbar"-sized toolbar.
-                            let desired_size = egui::Vec2::new(header_width, header_height);
-                            let layout =
-                                egui::Layout::left_to_right(egui::Align::Center);
-                            ui.allocate_ui_with_layout(desired_size, layout, |ui| {
-                                let real_time = self.controller.realtime_running();
-                                let offline = self.controller.offline_running();
-                                let recording = self.controller.recorder_running();
-                                let idle = !(real_time | offline | recording);
+                ui.columns_const(|[col1, col2]| {
+                    // Recording icon + status message
+                    col1.vertical_centered_justified(|ui| {
+                        // This code needs to be duplicated or be a tuple-closure
+                        // -> The calculation needs to be relative to the columns.
+                        let header_height = ui.spacing().interact_size.y * TOP_BAR_HEIGHT_COEFF;
+                        let header_width = ui.max_rect().width();
+                        // Allocate a top "toolbar"-sized toolbar.
+                        let desired_size = egui::Vec2::new(header_width, header_height);
+                        let layout =
+                            egui::Layout::left_to_right(egui::Align::Center);
+                        ui.allocate_ui_with_layout(desired_size, layout, |ui| {
+                            let real_time = self.controller.realtime_running();
+                            let offline = self.controller.offline_running();
+                            let recording = self.controller.recorder_running();
+                            let idle = !(real_time | offline | recording);
 
-                                // This maps the visuals to a catppuccin theme to make it easier
-                                // to get Red-Green-Yellow that "mostly" matches with the user's selected theme.
-                                let theme = match self.controller.get_app_theme() {
-                                    None => {
-                                        match ui
-                                            .ctx()
-                                            .system_theme()
-                                            .unwrap_or(egui::Theme::Dark)
-                                        {
-                                            egui::Theme::Dark => RibbleAppTheme::Mocha
-                                                .app_theme()
-                                                .expect("This theme has 1:1 mapping with catppuccin."),
-                                            egui::Theme::Light => RibbleAppTheme::Latte
-                                                .app_theme()
-                                                .expect("This theme has 1:1 mapping with catppuccin."),
-                                        }
+                            // This maps the visuals to a catppuccin theme to make it easier
+                            // to get Red-Green-Yellow that "mostly" matches with the user's selected theme.
+                            let theme = match self.controller.get_app_theme() {
+                                None => {
+                                    match ui
+                                        .ctx()
+                                        .system_theme()
+                                        .unwrap_or(egui::Theme::Dark)
+                                    {
+                                        egui::Theme::Dark => RibbleAppTheme::Mocha
+                                            .app_theme()
+                                            .expect("This theme has 1:1 mapping with catppuccin."),
+                                        egui::Theme::Light => RibbleAppTheme::Latte
+                                            .app_theme()
+                                            .expect("This theme has 1:1 mapping with catppuccin."),
                                     }
-                                    Some(theme) => theme,
-                                };
-
-                                let (color, msg, animate) = if idle {
-                                    (theme.green, "Ready...", false)
-                                } else if offline {
-                                    (theme.yellow, "Transcribing audio file...", true)
-                                } else {
-                                    let device_running = !self.current_devices.is_empty();
-                                    let msg = if device_running {
-                                        "Recording..."
-                                    } else {
-                                        "Preparing to record..."
-                                    };
-                                    (theme.red, msg, device_running)
-                                };
-                                ui.add(recording_icon(color.into(), animate, RECORDING_ICON_FLICKER_SPEED));
-                                ui.monospace(msg);
-                            });
-                        });
-                        // Control buttons.
-                        col2.vertical_centered_justified(|ui| {
-                            let header_height = ui.spacing().interact_size.y * TOP_BAR_HEIGHT_COEFF;
-                            let header_width = ui.max_rect().width();
-                            // Allocate a top "toolbar"-sized toolbar.
-                            let desired_size = egui::Vec2::new(header_width, header_height);
-                            let layout =
-                                egui::Layout::right_to_left(egui::Align::Center);
-
-                            // Allocate a top "toolbar"-sized toolbar.
-                            ui.allocate_ui_with_layout(desired_size, layout, |ui| {
-                                // UH, this does not seem to be respected by egui 0.32.0
-                                // Until this bug gets resolved, this needs to use a richtext object instead
-
-                                // This -should- hopefully be restored at some point
-                                // ui.style_mut().text_styles.insert(
-                                //     egui::TextStyle::Button,
-                                //     egui::FontId::new(TOP_BAR_BUTTON_SIZE, eframe::epaint::FontFamily::Proportional),
-                                // );
-
-                                // NOTE NOTE NOTE: if memory allocation churn becomes an issue, this is low-hanging fruit to cache
-                                // (or just set it back when the error is fixed).
-
-                                let settings_button = egui::RichText::new(HAMBURGER).size(TOP_BAR_BUTTON_SIZE);
-
-                                // Far right hamburger button.
-                                ui.menu_button(settings_button, |ui| {
-                                    ui.menu_button("Window", |ui| {
-                                        for pane in ClosableRibbleViewPane::iter()
-                                            .filter(|p| !matches!(*p, ClosableRibbleViewPane::UserPreferences)) {
-                                            if ui.button(pane.as_ref()).clicked() {
-                                                self.tree.add_new_pane(pane.into());
-                                                ui.ctx().request_repaint();
-                                            }
-                                        }
-                                    });
-                                    if ui.button("Settings").clicked() {
-                                        self.tree.add_new_pane(RibblePaneId::UserPreferences);
-                                        ui.ctx().request_repaint();
-                                    }
-
-                                    // NOTE: To avoid allocating every frame, this is more of a "try to recover"
-                                    // This shouldn't ever appear since the empty tree is caught in the ui loop.
-                                    if self.tree.is_invalid() {
-                                        ui.separator();
-                                        if ui.button("Restore Layout").clicked() {
-                                            if !self.tree.recovery_tree_exists() {
-                                                let toast = Toast::warning("Layout file missing!");
-                                                self.controller.send_toast(toast)
-                                            }
-                                            // This will try to deserialize the layout and check to make sure it
-                                            // contains a copy of non-closable tabs.
-                                            // It will fall back to the default layout on a total failure.
-                                            self.tree.try_recover_layout();
-                                        }
-                                    }
-
-                                    ui.separator();
-                                    if ui.button("Reset layout").clicked() {
-                                        self.tree.reset_layout();
-                                        ui.ctx().request_repaint();
-                                    }
-
-                                    ui.separator();
-
-                                    if ui.button("Quit").clicked() {
-                                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                                    }
-                                    #[cfg(debug_assertions)] {
-                                        ui.separator();
-                                        ui.menu_button("Debug menu", |ui| {
-                                            if ui.button("Test Progress").clicked() {
-                                                todo!("Test Progress");
-                                            }
-                                            if ui.button("Test Download").clicked() {
-                                                todo!("Test Download");
-                                            }
-
-                                            if ui.button("Test Console").clicked() {
-                                                todo!("Test Console");
-                                            }
-
-                                            // For fuzzing the layout/tree and inducing fallback mechanisms
-                                            if ui.button("Induce panic").clicked() {
-                                                panic!("Panic triggered!");
-                                            }
-                                            // For testing the segfault handler.
-                                            if ui.button("Induce segfault").clicked() {
-                                                unsafe {
-                                                    std::ptr::null_mut::<i32>().write(42);
-                                                }
-                                            }
-
-                                            // For testing tree fallback mechanisms.
-                                            if ui.button("Clear Tree").clicked() {
-                                                self.tree.clear_tree();
-                                            }
-                                            if ui.button("Test Tree Recovery").clicked() {
-                                                self.tree.test_tree_recovery();
-                                            }
-                                        });
-                                    }
-                                });
-
-                                // Downloads widget.
-                                if let Some(downloads) =
-                                    self.controller.try_get_amortized_download_progress()
-                                {
-                                    self.cached_downloads_progress = downloads;
                                 }
+                                Some(theme) => theme,
+                            };
 
-                                let download_button = match self.cached_downloads_progress {
-                                    AmortizedDownloadProgress::NoJobs => {
-                                        let no_downloads_button = egui::RichText::new(NO_DOWNLOADS).size(TOP_BAR_BUTTON_SIZE);
-                                        ui.add(egui::Button::selectable(false, no_downloads_button))
+                            let (color, msg, animate) = if idle {
+                                (theme.green, "Ready...", false)
+                            } else if offline {
+                                (theme.yellow, "Transcribing audio file...", true)
+                            } else {
+                                let device_running = !self.current_devices.is_empty();
+                                let msg = if device_running {
+                                    "Recording..."
+                                } else {
+                                    "Preparing to record..."
+                                };
+                                (theme.red, msg, device_running)
+                            };
+                            ui.add(recording_icon(color.into(), animate, RECORDING_ICON_FLICKER_SPEED));
+                            ui.monospace(msg);
+                        });
+                    });
+                    // Control buttons.
+                    col2.vertical_centered_justified(|ui| {
+                        let header_height = ui.spacing().interact_size.y * TOP_BAR_HEIGHT_COEFF;
+                        let header_width = ui.max_rect().width();
+                        // Allocate a top "toolbar"-sized toolbar.
+                        let desired_size = egui::Vec2::new(header_width, header_height);
+                        let layout =
+                            egui::Layout::right_to_left(egui::Align::Center);
+
+                        // Allocate a top "toolbar"-sized toolbar.
+                        ui.allocate_ui_with_layout(desired_size, layout, |ui| {
+                            // UH, this does not seem to be respected by egui 0.32.0
+                            // Until this bug gets resolved, this needs to use a richtext object instead
+
+                            // This -should- hopefully be restored at some point
+                            // ui.style_mut().text_styles.insert(
+                            //     egui::TextStyle::Button,
+                            //     egui::FontId::new(TOP_BAR_BUTTON_SIZE, eframe::epaint::FontFamily::Proportional),
+                            // );
+
+                            // NOTE NOTE NOTE: if memory allocation churn becomes an issue, this is low-hanging fruit to cache
+                            // (or just set it back when the error is fixed).
+
+                            let settings_button = egui::RichText::new(HAMBURGER).size(TOP_BAR_BUTTON_SIZE);
+
+                            // Far right hamburger button.
+                            ui.menu_button(settings_button, |ui| {
+                                ui.menu_button("Window", |ui| {
+                                    for pane in ClosableRibbleViewPane::iter()
+                                        .filter(|p| !matches!(*p, ClosableRibbleViewPane::UserPreferences)) {
+                                        if ui.button(pane.as_ref()).clicked() {
+                                            self.tree.add_new_pane(pane.into());
+                                            ui.ctx().request_repaint();
+                                        }
                                     }
-                                    AmortizedDownloadProgress::Total {
-                                        current,
-                                        total_size,
-                                    } => {
-                                        // TODO: this needs to be tested -> It is not known whether or not the drawing behaves as written.
-                                        let resp = ui.add(pie_progress(current as f32, total_size as f32));
-                                        ui.ctx().request_repaint();
-                                        resp
-                                    }
-                                }.on_hover_ui(|ui| {
-                                    ui.style_mut().interaction.selectable_labels = true;
-                                    ui.label("Show downloads");
                                 });
-
-                                if download_button.clicked() {
-                                    self.tree.add_new_pane(RibblePaneId::Downloads);
+                                if ui.button("Settings").clicked() {
+                                    self.tree.add_new_pane(RibblePaneId::UserPreferences);
                                     ui.ctx().request_repaint();
                                 }
-                            })
-                        });
+
+                                // NOTE: To avoid allocating every frame, this is more of a "try to recover"
+                                // This shouldn't ever appear since the empty tree is caught in the ui loop.
+                                if self.tree.is_invalid() {
+                                    ui.separator();
+                                    if ui.button("Restore Layout").clicked() {
+                                        if !self.tree.recovery_tree_exists() {
+                                            let toast = Toast::warning("Layout file missing!");
+                                            self.controller.send_toast(toast)
+                                        }
+                                        // This will try to deserialize the layout and check to make sure it
+                                        // contains a copy of non-closable tabs.
+                                        // It will fall back to the default layout on a total failure.
+                                        self.tree.try_recover_layout();
+                                    }
+                                }
+
+                                ui.separator();
+                                if ui.button("Reset layout").clicked() {
+                                    self.tree.reset_layout();
+                                    ui.ctx().request_repaint();
+                                }
+
+                                ui.separator();
+
+                                if ui.button("Quit").clicked() {
+                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                                }
+                                #[cfg(debug_assertions)] {
+                                    ui.separator();
+                                    ui.menu_button("Debug menu", |ui| {
+                                        if ui.button("Test Progress").clicked() {
+                                            todo!("Test Progress");
+                                        }
+                                        if ui.button("Test Download").clicked() {
+                                            todo!("Test Download");
+                                        }
+
+                                        if ui.button("Test Console").clicked() {
+                                            todo!("Test Console");
+                                        }
+
+                                        // For testing "Latest Error".
+
+                                        if ui.button("Add Placeholder Error").clicked() {
+                                            self.controller.add_placeholder_error()
+                                        }
+                                        if ui.button("Clear Latest Error").clicked() {
+                                            self.controller.clear_latest_error()
+                                        }
+
+                                        // For fuzzing the layout/tree and inducing fallback mechanisms
+                                        if ui.button("Induce panic").clicked() {
+                                            panic!("Panic triggered!");
+                                        }
+                                        // For testing the segfault handler.
+                                        if ui.button("Induce segfault").clicked() {
+                                            unsafe {
+                                                std::ptr::null_mut::<i32>().write(42);
+                                            }
+                                        }
+
+                                        // For testing tree fallback mechanisms.
+                                        if ui.button("Clear Tree").clicked() {
+                                            self.tree.clear_tree();
+                                        }
+                                        if ui.button("Test Tree Recovery").clicked() {
+                                            self.tree.test_tree_recovery();
+                                        }
+                                    });
+                                }
+                            });
+
+                            // Downloads widget.
+                            if let Some(downloads) =
+                                self.controller.try_get_amortized_download_progress()
+                            {
+                                self.cached_downloads_progress = downloads;
+                            }
+
+                            let download_button = match self.cached_downloads_progress {
+                                AmortizedDownloadProgress::NoJobs => {
+                                    let no_downloads_button = egui::RichText::new(NO_DOWNLOADS).size(TOP_BAR_BUTTON_SIZE);
+                                    ui.add(egui::Button::selectable(false, no_downloads_button))
+                                }
+                                AmortizedDownloadProgress::Total {
+                                    current,
+                                    total_size,
+                                } => {
+                                    // TODO: this needs to be tested -> It is not known whether or not the drawing behaves as written.
+                                    let resp = ui.add(pie_progress(current as f32, total_size as f32));
+                                    ui.ctx().request_repaint();
+                                    resp
+                                }
+                            }.on_hover_ui(|ui| {
+                                ui.style_mut().interaction.selectable_labels = true;
+                                ui.label("Show downloads");
+                            });
+
+                            if download_button.clicked() {
+                                self.tree.add_new_pane(RibblePaneId::Downloads);
+                                ui.ctx().request_repaint();
+                            }
+                        })
                     });
                 });
             });
@@ -483,37 +490,12 @@ impl eframe::App for Ribble {
             .min_height(0.0)
             .resizable(false)
             .show(ctx, |ui| {
-                let interact_size = ui.spacing().interact_size;
-                // Allocate a bottom "toolbar"-sized toolbar.
-                let desired_size = egui::vec2(ui.max_rect().width(), interact_size.y);
-                let layout = egui::Layout::right_to_left(egui::Align::Center);
-
-                ui.allocate_ui_with_layout(desired_size, layout, |ui| {
-                    if let Some(progress) = self.controller.try_get_amortized_progress() {
-                        self.cached_progress = progress;
-                    }
-
-                    // Print the ribble version
-                    ui.monospace(self.version.semver_string());
-
-                    match self.cached_progress {
-                        AmortizedProgress::NoJobs => {
-                            ui.horizontal(|ui| {
-                                #[cfg(debug_assertions)]
-                                {
-                                    let rect = ui.max_rect();
-                                    let desired_size = egui::vec2(rect.width() * BOTTOM_PROGRESS_RATIO, interact_size.y);
-                                    let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
-                                    if ui.is_rect_visible(rect) {
-                                        let color = egui::Color32::from_rgb(255, 0, 0);
-
-                                        ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(1.0, color), egui::StrokeKind::Middle);
-                                    }
-                                    if response.clicked() {
-                                        self.tree.add_new_pane(RibblePaneId::Progress);
-                                    }
-
-                                    ui.monospace("Debug:");
+                ui.columns_const(|[col1, col2, col3]|
+                    {
+                        #[cfg(debug_assertions)]
+                        {
+                            col1.vertical_centered_justified(|ui| {
+                                ui.horizontal(|ui| {
                                     // FPS counter -> NOTE this is not mean frame time and is not smoothed out
                                     // TODO: look at maybe implementing smoothing at some point.
                                     // stable_dt is in seconds
@@ -522,46 +504,148 @@ impl eframe::App for Ribble {
                                     let fps = 1.0 / dt;
                                     ui.monospace(format!("FPS: {fps:.2}"));
                                     ui.monospace(format!("Frame time: {dt_ms:.2} ms"));
-                                }
+                                });
                             });
                         }
-                        AmortizedProgress::Determinate {
-                            current,
-                            total_size,
-                        } => {
-                            ui.horizontal(|ui| {
-                                let progress = current as f32 / total_size as f32;
-                                debug_assert!(!progress.is_nan());
-                                let rect = ui.max_rect();
-                                let pb = ProgressBar::new(progress)
-                                    .desired_width(rect.width() * BOTTOM_PROGRESS_RATIO)
-                                    .desired_height(rect.height());
-                                // Paint a progress bar
-                                if ui.add(pb).clicked() {
-                                    self.tree.add_new_pane(RibblePaneId::Progress);
-                                }
-                                ui.monospace("Working:");
-                                ui.ctx().request_repaint();
-                            });
-                        }
-                        AmortizedProgress::Indeterminate => {
-                            ui.horizontal(|ui| {
-                                let rect = ui.max_rect();
-                                let pb = ProgressBar::indeterminate()
-                                    .desired_width(rect.width() * BOTTOM_PROGRESS_RATIO)
-                                    .desired_height(rect.height())
-                                    .text("Working".to_string());
 
-                                // Paint an indeterminate progress bar
-                                if ui.add(pb).clicked() {
-                                    self.tree.add_new_pane(RibblePaneId::Progress);
+                        col2.vertical_centered_justified(|ui| {
+                            // LATEST ERROR.
+                            // TODO: if/when getting to cleanup, this could probably be a method.
+                            let mut error_ui_closure = |ui: &mut egui::Ui, error: &LatestError| {
+                                // Try and do a single widget here.
+                                let mut layout_job = egui::text::LayoutJob::default();
+                                let font_id = egui::TextStyle::Monospace.resolve(ui.style());
+                                layout_job.append(ERROR_ICON, 0.0, egui::TextFormat {
+                                    font_id: font_id.clone(),
+                                    color: ui.visuals().error_fg_color,
+                                    ..Default::default()
+                                });
+
+                                layout_job.append(" ", 0.0, Default::default());
+
+                                layout_job.append(error.category().as_ref(), 0.0,
+                                                  egui::TextFormat { font_id, ..Default::default() });
+
+                                if ui.label(layout_job)
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .clicked() {
+                                    self.tree.add_new_pane(RibblePaneId::Console);
+                                    ui.ctx().request_repaint();
                                 }
-                                ui.monospace("Working:");
-                                ui.ctx().request_repaint();
+                            };
+
+                            match self.controller.get_latest_error().as_ref() {
+                                None => {
+                                    #[cfg(debug_assertions)]
+                                    {
+                                        let dummy_error = LatestError::new(1, RibbleErrorCategory::ConversionError, std::time::Instant::now());
+                                        error_ui_closure(ui, &dummy_error);
+                                    }
+                                }
+                                Some(error) => {
+                                    error_ui_closure(ui, error);
+                                }
+                            }
+                        });
+
+                        col3.vertical_centered_justified(|ui| {
+                            let interact_size = ui.spacing().interact_size;
+                            let desired_size = egui::vec2(ui.available_width(), interact_size.y);
+                            let layout = egui::Layout::right_to_left(egui::Align::Center);
+
+                            ui.allocate_ui_with_layout(desired_size, layout, |ui| {
+                                if let Some(progress) = self.controller.try_get_amortized_progress() {
+                                    self.cached_progress = progress;
+                                }
+
+                                // Print the ribble version
+                                ui.monospace(self.version.semver_string());
+                                // NOTE: this technically spills over into the middle column
+                                // but expect this to never overlap
+                                let desired_size = egui::vec2(ui.available_width() * BOTTOM_PROGRESS_COLUMN_RATIO, interact_size.y);
+
+                                // NOTE: THIS IS NOT CORRECT YET.
+                                match self.cached_progress {
+                                    AmortizedProgress::NoJobs => {
+                                        ui.horizontal(|ui| {
+                                            #[cfg(debug_assertions)]
+                                            {
+                                                let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+                                                if ui.is_rect_visible(rect) {
+                                                    let color = egui::Color32::from_rgb(255, 0, 0);
+
+                                                    ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(1.0, color), egui::StrokeKind::Middle);
+                                                }
+                                                if response
+                                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                                    .clicked() {
+                                                    self.tree.add_new_pane(RibblePaneId::Progress);
+                                                }
+                                                ui.monospace("Working:");
+                                            }
+                                        });
+                                    }
+                                    AmortizedProgress::Determinate {
+                                        current,
+                                        total_size,
+                                    } => {
+                                        ui.horizontal(|ui| {
+                                            let progress = current as f32 / total_size as f32;
+
+                                            debug_assert!(!progress.is_nan());
+                                            // TODO: check for infinities/Nan at the call site. (current/total)
+
+                                            let pb = ProgressBar::new(progress)
+                                                .desired_width(desired_size.x)
+                                                .desired_height(desired_size.y * 0.5);
+
+                                            let (rect, resp) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+
+                                            if ui.is_rect_visible(rect) {
+                                                ui.put(rect, pb);
+                                            }
+
+                                            // Paint a progress bar
+                                            if resp
+                                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                                .clicked() {
+                                                log::info!("Progress bar clicked");
+                                                self.tree.add_new_pane(RibblePaneId::Progress);
+                                            }
+
+
+                                            ui.monospace("Working:");
+                                            ui.ctx().request_repaint();
+                                        });
+                                    }
+                                    AmortizedProgress::Indeterminate => {
+                                        ui.horizontal(|ui| {
+                                            let pb = ProgressBar::indeterminate()
+                                                .desired_width(desired_size.x)
+                                                .desired_height(desired_size.y * 0.5);
+
+                                            let (rect, resp) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+
+                                            if ui.is_rect_visible(rect) {
+                                                ui.put(rect, pb);
+                                            }
+
+                                            // Paint a progress bar
+                                            if resp
+                                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                                .clicked() {
+                                                log::info!("Progress bar clicked");
+                                                self.tree.add_new_pane(RibblePaneId::Progress);
+                                            }
+
+                                            ui.monospace("Working:");
+                                            ui.ctx().request_repaint();
+                                        });
+                                    }
+                                }
                             });
-                        }
-                    }
-                });
+                        });
+                    });
             });
 
         // Remove any and all margins -> these will (are?) handled by the panes themselves
@@ -594,6 +678,13 @@ impl eframe::App for Ribble {
 
         // Show any toasts that might be in the buffer.
         self.toasts_handle.show(ctx);
+
+        // If there's any sort of "work" being done (transcribing, recording)
+        // then request a repaint -> the downloads/progress will already request repaints if they
+        // are showing work.
+        if self.controller.recorder_running() || self.controller.transcriber_running() {
+            ctx.request_repaint();
+        }
     }
 
     // This will automatically save egui memory (window position, etc.) upon opening the storage file

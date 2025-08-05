@@ -7,7 +7,7 @@ use crate::controller::transcriber::TranscriberEngine;
 use crate::controller::visualizer::VisualizerEngine;
 use crate::controller::worker::WorkerEngine;
 use crate::controller::writer::WriterEngine;
-use crate::controller::{AmortizedDownloadProgress, AmortizedProgress, Bus, CompletedRecordingJobs, ConsoleMessage, ModelFile, OfflineTranscriberFeedback, Progress, RotationDirection, DEFAULT_PROGRESS_SLAB_CAPACITY, NUM_VISUALIZER_BUCKETS, SMALL_UTILITY_QUEUE_SIZE, UTILITY_QUEUE_SIZE};
+use crate::controller::{AmortizedDownloadProgress, AmortizedProgress, Bus, CompletedRecordingJobs, ConsoleMessage, LatestError, ModelFile, OfflineTranscriberFeedback, Progress, RotationDirection, DEFAULT_PROGRESS_SLAB_CAPACITY, NUM_VISUALIZER_BUCKETS, SMALL_UTILITY_QUEUE_SIZE, UTILITY_QUEUE_SIZE};
 use crate::controller::{AnalysisType, FileDownload};
 use crate::utils::errors::RibbleError;
 use crate::utils::preferences::UserPreferences;
@@ -26,9 +26,9 @@ use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-// NOTE: At the moment, it's a lot easier to just work with the concrete proxy.
-// Until generics are absolutely required for testing/swapping different audio backends,
-// avoid using them here.
+
+// NOTE: any meaningful/user-commanded background work should clear the "latest error" before starting work.
+// Most are covered, some may be missing, TODO: test.
 pub(super) struct Kernel {
     data_directory: PathBuf,
     user_preferences: ArcSwap<UserPreferences>,
@@ -99,10 +99,16 @@ impl Kernel {
         let worker_engine = WorkerEngine::new(work_receiver, &bus)?;
 
         let recording_directory = data_directory.join(Self::TEMP_AUDIO_DIR_SLUG);
+        // CREATE the recording directory if it doesn't exist.
+        std::fs::create_dir_all(&recording_directory)?;
+
         let writer_engine = WriterEngine::new(recording_directory, write_receiver, &bus);
         let download_engine = DownloadEngine::new(download_receiver, &bus);
 
         let model_directory = data_directory.join(Self::MODEL_BANK_DIR_SLUG);
+        // CREATE the model directory if it doesn't exist
+        std::fs::create_dir_all(&model_directory)?;
+
         let model_bank = Arc::new(RibbleModelBank::new(model_directory.as_path(), &bus)?);
 
         // In case the user has mucked around with the model directory and the previous ID is
@@ -177,9 +183,14 @@ impl Kernel {
     // TODO: perhaps these methods should be trait methods if the controller needs to be testable.
     // MODEL MANAGEMENT
     pub(super) fn download_model(&self, url: &str) {
+        // Clear the latest error before starting bg work
+        self.console_engine.clear_latest_error();
         self.model_bank.download_new_model(url);
     }
     pub(super) fn copy_new_model_to_bank(&self, file_path: PathBuf) {
+        // Clear the latest error before starting bg work
+        self.console_engine.clear_latest_error();
+
         self.model_bank.copy_model_to_bank(file_path);
     }
 
@@ -250,6 +261,10 @@ impl Kernel {
     pub(super) fn start_realtime_transcription(&self) {
         let bank = Arc::clone(&self.model_bank);
         let backend = Arc::clone(&self.audio_backend);
+
+        // Clear the latest error before starting background work.
+        self.console_engine.clear_latest_error();
+
         self.transcriber_engine
             .start_realtime_transcription(backend, bank);
     }
@@ -266,16 +281,20 @@ impl Kernel {
     pub(super) fn try_retranscribe_latest(&self) {
         if let Some(path) = self.try_get_latest_recording() {
             self.set_audio_file_path(path);
-            self.start_realtime_transcription();
+            self.start_offline_transcription();
         }
     }
 
     pub(super) fn start_offline_transcription(&self) {
         let bank = Arc::clone(&self.model_bank);
+        // Clear the latest error before starting background work.
+        self.console_engine.clear_latest_error();
         self.transcriber_engine.start_offline_transcription(bank);
     }
 
     pub(super) fn save_transcription(&self, out_path: PathBuf) {
+        // Clear the latest error before starting background work.
+        self.console_engine.clear_latest_error();
         self.transcriber_engine.save_transcription(out_path);
     }
 
@@ -293,6 +312,8 @@ impl Kernel {
 
     pub(super) fn start_recording(&self) {
         let backend = Arc::clone(&self.audio_backend);
+        // Clear the latest error before starting background work.
+        self.console_engine.clear_latest_error();
         self.recorder_engine.start_recording(backend);
     }
     pub(super) fn stop_recording(&self) {
@@ -304,6 +325,10 @@ impl Kernel {
         self.writer_engine.is_clearing()
     }
     pub(super) fn clear_recording_cache(&self) {
+
+        // Clear the latest error before starting background work.
+        self.console_engine.clear_latest_error();
+
         self.writer_engine.clear_cache()
     }
     pub(super) fn latest_recording_exists(&self) -> bool {
@@ -335,11 +360,27 @@ impl Kernel {
         recording_file_name: Arc<str>,
         output_format: RibbleRecordingExportFormat,
     ) {
+
+        // Clear the latest error before starting background work.
+        self.console_engine.clear_latest_error();
+
         self.writer_engine
             .export_recording(out_path, recording_file_name, output_format);
     }
 
     // CONSOLE
+    #[cfg(debug_assertions)]
+    pub(super) fn clear_latest_error(&self) {
+        self.console_engine.clear_latest_error();
+    }
+    #[cfg(debug_assertions)]
+    pub(super) fn add_placeholder_error(&self) {
+        self.console_engine.add_placeholder_error()
+    }
+
+    pub(super) fn get_latest_error(&self) -> Arc<Option<LatestError>> {
+        self.console_engine.get_latest_error()
+    }
     pub(super) fn try_get_current_messages(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
         self.console_engine.try_get_current_messages(copy_buffer);
     }

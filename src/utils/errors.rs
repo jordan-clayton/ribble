@@ -1,7 +1,14 @@
 use ribble_whisper::utils::errors::RibbleWhisperError;
+use strum::{AsRefStr, Display, EnumDiscriminants, EnumIter, EnumString, IntoStaticStr};
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+
+// NOTE: THIS NEEDS TO BE TESTED, but it should be perfectly fine to just call .into() to convert
+// to a discriminant without consuming the error.
+#[derive(Debug, Error, EnumDiscriminants)]
+#[strum_discriminants(name(RibbleErrorCategory))]
+#[strum_discriminants(derive(Display, EnumIter, AsRefStr, IntoStaticStr, EnumString))]
+#[strum_discriminants(strum(prefix = "RibbleError: "))]
 pub(crate) enum RibbleError {
     // RibbleWhisper has its own to_string impls.
     #[error("Ribble Whisper: {0}")]
@@ -31,4 +38,3 @@ pub(crate) enum RibbleError {
     #[error("Conversion Error: {0}")]
     ConversionError(&'static str),
 }
-

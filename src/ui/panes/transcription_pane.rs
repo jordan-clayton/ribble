@@ -1,7 +1,7 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::panes::ribble_pane::RibblePaneId;
-use crate::ui::panes::{PaneView, PANE_INNER_MARGIN};
-use crate::ui::HEADING_BUTTON_SIZE;
+use crate::ui::panes::PaneView;
+use crate::ui::{PANE_HEADING_BUTTON_SIZE, PANE_INNER_MARGIN};
 use egui_notify::Toast;
 
 #[derive(Copy, Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
@@ -28,8 +28,14 @@ impl PaneView for TranscriptionPane {
         _should_close: &mut bool,
         controller: RibbleController,
     ) -> egui::Response {
-        let transcription_background_color = ui.visuals().code_bg_color;
+        let text_edit_color = ui.visuals().extreme_bg_color;
+
         let header_color = ui.visuals().panel_fill;
+
+        let header_rgb: egui::Rgba = header_color.into();
+        let text_edit_rgb: egui::Rgba = text_edit_color.into();
+
+        let transcription_background_color: egui::Color32 = egui::lerp(header_rgb..=text_edit_rgb, 0.85).into();
 
         let transcription_snapshot = controller.read_transcription_snapshot();
         let transcriber_running = controller.transcriber_running();
@@ -82,7 +88,7 @@ impl PaneView for TranscriptionPane {
                                 ui.add_enabled_ui(!(transcriber_running || transcription_empty), |ui| {
                                     // NOTE: This might cause lag with long transcriptions
                                     // If that's the case, spawn a short-lived thread to perform the string join.
-                                    let copy_button = egui::RichText::new(COPY_ICON).size(HEADING_BUTTON_SIZE);
+                                    let copy_button = egui::RichText::new(COPY_ICON).size(PANE_HEADING_BUTTON_SIZE);
                                     let copy_tooltip = |ui: &mut egui::Ui| {
                                         ui.style_mut().interaction.selectable_labels = true;
                                         ui.label("Copy to clipboard.");
@@ -99,7 +105,7 @@ impl PaneView for TranscriptionPane {
                                         controller.send_toast(toast);
                                     }
 
-                                    let save_button = egui::RichText::new(SAVE_ICON).size(HEADING_BUTTON_SIZE);
+                                    let save_button = egui::RichText::new(SAVE_ICON).size(PANE_HEADING_BUTTON_SIZE);
                                     let save_tooltip = |ui: &mut egui::Ui| {
                                         ui.style_mut().interaction.selectable_labels = true;
                                         ui.label("Save transcription.");
@@ -137,10 +143,20 @@ impl PaneView for TranscriptionPane {
                         .stick_to_bottom(true)
                         .show(ui, |ui| {
                             // Show the full transcription state first.
-                            ui.monospace(transcription_snapshot.confirmed());
+                            let confirmed = transcription_snapshot.confirmed();
+                            if !confirmed.is_empty() {
+                                ui.monospace(transcription_snapshot.confirmed().trim_start());
+                            }
                             // Then print the segment buffer.
                             for segment in transcription_snapshot.string_segments().iter() {
-                                ui.monospace(segment);
+                                if !segment.is_empty() {
+                                    // Try to preserve whitespace/newlines.
+                                    if segment.len() > 1 {
+                                        ui.monospace(segment.trim_start());
+                                    } else {
+                                        ui.monospace(segment);
+                                    }
+                                }
                             }
                         })
                 });

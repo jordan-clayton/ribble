@@ -1,7 +1,8 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::ConsoleMessage;
 use crate::ui::panes::ribble_pane::RibblePaneId;
-use crate::ui::panes::{PaneView, PANE_INNER_MARGIN};
+use crate::ui::panes::PaneView;
+use crate::ui::PANE_INNER_MARGIN;
 use std::sync::Arc;
 
 // TODO: TEST THIS.
@@ -38,15 +39,14 @@ impl PaneView for ConsolePane {
             .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::Grab);
 
-        let console_bg_color = ui.visuals().extreme_bg_color;
+        let text_edit_color = ui.visuals().extreme_bg_color;
         let panel_col = ui.visuals().panel_fill;
 
-        // TODO: test this.
-        // Set up a debug menu item to fire messages to the console.
+        let panel_rgb: egui::Rgba = panel_col.into();
+        let text_edit_rgb: egui::Rgba = text_edit_color.into();
 
-        // I'm leaning towards an explicit margin that exposes the panel color.
-        // The alternative is to wrap frames (outer = color, (inner = margin)) with explicit margins
-        // to paint across the entire box.
+        let console_bg_color: egui::Color32 = egui::lerp(panel_rgb..=text_edit_rgb, 0.85).into();
+
         egui::Frame::default().fill(panel_col).inner_margin(PANE_INNER_MARGIN).show(ui, |ui| {
             ui.heading("Console:");
             egui::Frame::default().fill(console_bg_color).show(ui, |ui| {
@@ -71,7 +71,7 @@ impl PaneView for ConsolePane {
         // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
         // will just nop.
         resp.context_menu(|ui| {
-            ui.selectable_value(should_close, self.is_pane_closable(), "Close tab");
+            ui.selectable_value(should_close, self.is_pane_closable(), "Close pane");
         });
         resp
     }

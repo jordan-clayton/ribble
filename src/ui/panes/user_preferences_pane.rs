@@ -1,8 +1,8 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{MAX_NUM_CONSOLE_MESSAGES, MIN_NUM_CONSOLE_MESSAGES};
 use crate::ui::panes::ribble_pane::RibblePaneId;
-use crate::ui::panes::{PaneView, PANE_INNER_MARGIN};
-use crate::ui::GRID_ROW_SPACING_COEFF;
+use crate::ui::panes::PaneView;
+use crate::ui::{GRID_ROW_SPACING_COEFF, PANE_INNER_MARGIN};
 use crate::utils::preferences::RibbleAppTheme;
 use strum::IntoEnumIterator;
 

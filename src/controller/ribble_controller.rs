@@ -1,6 +1,6 @@
 use crate::controller::audio_backend_proxy::AudioBackendProxy;
 use crate::controller::kernel::Kernel;
-use crate::controller::{AmortizedDownloadProgress, AmortizedProgress, AnalysisType, CompletedRecordingJobs, ConsoleMessage, FileDownload, ModelFile, OfflineTranscriberFeedback, Progress, RotationDirection, NUM_VISUALIZER_BUCKETS};
+use crate::controller::{AmortizedDownloadProgress, AmortizedProgress, AnalysisType, CompletedRecordingJobs, ConsoleMessage, FileDownload, LatestError, ModelFile, OfflineTranscriberFeedback, Progress, RotationDirection, NUM_VISUALIZER_BUCKETS};
 use crate::utils::errors::RibbleError;
 use crate::utils::preferences::UserPreferences;
 use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExportFormat};
@@ -21,10 +21,6 @@ fn set_base_directory() -> PathBuf {
     }
 }
 
-
-// TODO: figure out how to structure polling for new console messages in case the console is not open.
-// Atm, there's no "broadcast" mechanism in place to get that state up unless requested.
-// TODO-TWICE: implement a bounded "broadcast" mechanism.
 
 #[derive(Clone)]
 pub(crate) struct RibbleController {
@@ -270,6 +266,19 @@ impl RibbleController {
     }
 
     // CONSOLE
+
+    pub(crate) fn get_latest_error(&self) -> Arc<Option<LatestError>> {
+        self.kernel.get_latest_error()
+    }
+
+    #[cfg(debug_assertions)]
+    pub(crate) fn clear_latest_error(&self) {
+        self.kernel.clear_latest_error();
+    }
+    #[cfg(debug_assertions)]
+    pub(crate) fn add_placeholder_error(&self) {
+        self.kernel.add_placeholder_error()
+    }
     pub(crate) fn try_get_current_messages(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
         self.kernel.try_get_current_messages(copy_buffer);
     }
