@@ -4,16 +4,16 @@ use crate::controller::{
 };
 use crate::utils::errors::RibbleError;
 use parking_lot::RwLock;
-use ribble_whisper::downloader::downloaders::sync_download_request;
 use ribble_whisper::downloader::SyncDownload;
+use ribble_whisper::downloader::downloaders::sync_download_request;
 use ribble_whisper::utils::callback::{RibbleAbortCallback, RibbleWhisperCallback};
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{get_channel, Receiver, Sender};
+use ribble_whisper::utils::{Receiver, Sender, get_channel};
 use slab::Slab;
 use std::error::Error;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 
 const FALLBACK_NAME: &str = "invalid_download";
@@ -48,9 +48,13 @@ impl DownloadEngineState {
             return Err(RibbleWhisperError::ParameterError(format!(
                 "File not found, likely invalid url.\nURL:{url}"
             ))
-                .into());
+            .into());
         }
 
+        // TODO: these should actually probably handle "indeterminate".
+        //
+        // When total_size is 1, the content-length is actually unknown, which is going to lead to
+        // weird issues.
         let progress_job =
             Progress::new_determinate("Downloading model.", sync_downloader.total_size() as u64);
 
@@ -92,22 +96,22 @@ impl DownloadEngineState {
         };
 
         let callback_progress_sender = self.progress_sender.clone();
+
+        // NOTE: Downloads -accumulate- progress
         let progress_closure = move |n: usize| {
-            if progress_id.is_none() {
-                return;
-            }
+            if let Some(id) = progress_id {
+                let update = ProgressMessage::Set {
+                    job_id: id,
+                    pos: n as u64,
+                };
 
-            let update = ProgressMessage::Increment {
-                job_id: progress_id.unwrap(),
-                delta: n as u64,
-            };
-
-            if let Err(e) = callback_progress_sender.try_send(update) {
-                log::warn!(
-                    "Cannot send update request, channel either closed or too small.\nError: {}\nError source: {:#?}",
-                    &e,
-                    e.source()
-                );
+                if let Err(e) = callback_progress_sender.try_send(update) {
+                    log::warn!(
+                        "Cannot send update request, channel either closed or too small.\nError: {}\nError source: {:#?}",
+                        &e,
+                        e.source()
+                    );
+                }
             }
         };
 
@@ -202,9 +206,9 @@ impl DownloadEngine {
                         let work_request = WorkRequest::Short(start_download);
                         if let Err(e) = thread_inner.worker_sender.send(work_request) {
                             log::warn!(
-                        "Worker Engine closed. Can no longer send requests.\nError source: {:#?}",
-                        e.source()
-                    );
+                                "Worker Engine closed. Can no longer send requests.\nError source: {:#?}",
+                                e.source()
+                            );
                             break;
                         }
                     }

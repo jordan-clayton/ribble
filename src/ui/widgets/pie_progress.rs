@@ -19,7 +19,9 @@ fn init_pie_vertices() -> Vec<Pos2> {
     for i in 0..=RESOLUTION {
         let t = i as f32 / RESOLUTION as f32;
         let angle = t * 2.0 * PI;
-        let new_pos = Vec2::angled(angle);
+        // NOTE: this runs clockwise, and the unit Y points down.
+        // To start at the top, this needs to subtract pi / 2
+        let new_pos = Vec2::angled(angle - 0.5 * PI);
         vertices.push(Pos2::new(new_pos.x, new_pos.y));
     }
 
@@ -52,11 +54,16 @@ fn draw_progress_pie(ui: &mut Ui, current: f32, total_size: f32) -> Response {
         let nearest_idx = (t * RESOLUTION as f32).round() as usize;
         let last_vertex = (nearest_idx + 1).min(vertices.len() - 1);
 
-        let points = vertices[0..=last_vertex]
+        // If the last-vertex is len - 1, the SDF algorithm will bug out with the center vertex.
+        let start_vertex = if last_vertex == vertices.len() - 1 { 1 } else { 0 };
+
+        let points = vertices[start_vertex..=last_vertex]
             .iter()
             .copied()
             .map(|point| center + (inner_radius * Vec2::new(point.x, point.y)))
             .collect();
+
+
         painter.add(PathShape::convex_polygon(
             points,
             visuals.bg_fill,

@@ -1,4 +1,6 @@
-use crate::controller::{AnalysisType, AtomicAnalysisType, RotationDirection, VisualizerPacket, NUM_VISUALIZER_BUCKETS};
+use crate::controller::{
+    AnalysisType, AtomicAnalysisType, RotationDirection, VisualizerPacket, NUM_VISUALIZER_BUCKETS,
+};
 use crate::utils::errors::RibbleError;
 use crossbeam::channel::Receiver;
 use parking_lot::RwLock;
@@ -49,25 +51,37 @@ impl VisualizerEngineState {
         }
     }
 
+    fn fit_frames(window: &mut Vec<f32>, frame_size: usize) {
+        let floor_ratio = (window.len() / frame_size) as f32;
+        let float_ratio = window.len() as f32 / frame_size as f32;
+
+        // If the number of windows isn't precisely an integer, duplicate the last n samples
+        // of the signal.
+        if float_ratio > floor_ratio {
+            let to_add = (1.0 - float_ratio.fract() * frame_size as f32).ceil() as usize;
+            let new_size = window.len() + to_add;
+            let start_idx = window.len() - to_add;
+            window.extend_from_within(start_idx..);
+            debug_assert_eq!(window.len(), new_size);
+        }
+    }
+
     // TODO: look at precomputing the frame size/FFT planner, etc.
     fn power_analysis(&self, samples: &[f32]) -> Result<(), RibbleError> {
         // True = apply gain
-        let window_samples = hann_window(samples, true);
+        let mut window = hann_window(samples, true);
 
         let (frame_size, step_size) =
-            compute_welch_frames(window_samples.len() as f32, Self::POWER_OVERLAP);
+            compute_welch_frames(window.len() as f32, Self::POWER_OVERLAP);
 
-        let frames = window_samples.windows(frame_size).step_by(step_size);
-        debug_assert_eq!(
-            frames.len(),
-            NUM_VISUALIZER_BUCKETS,
-            "Failed to compute window sizes properly in power analysis."
-        );
+        Self::fit_frames(&mut window, frame_size);
+
+        let frames = window.windows(frame_size).step_by(step_size);
 
         let fft = self.planner.write().plan_fft_forward(frame_size);
         let mut input = fft.make_input_vec();
         let mut output = fft.make_output_vec();
-        let mut power_samples = vec![0.0; NUM_VISUALIZER_BUCKETS];
+        let mut power_samples = [0.0; NUM_VISUALIZER_BUCKETS];
         for (i, frame) in frames.enumerate() {
             input.copy_from_slice(frame);
             fft.process(&mut input, &mut output)?;
@@ -76,6 +90,9 @@ impl VisualizerEngineState {
             let log_power = if power > 0.0 { power.log10() } else { 0.0 };
             power_samples[i] = log_power
         }
+
+        // Double-check for NaN/Inf
+        debug_assert!(power_samples.iter().all(|f| f.is_finite()));
 
         let max_amp = power_samples.iter().copied().fold(1.0, f32::max);
 
@@ -93,35 +110,36 @@ impl VisualizerEngineState {
             "Failed to fit power_samples into buckets."
         );
 
-        self.buffer.write().copy_from_slice(&power_samples);
+        // To avoid an out-of-range memcpy (in release), limit the slice to the buffer size.
+        self.buffer.write().copy_from_slice(&power_samples[..NUM_VISUALIZER_BUCKETS]);
         Ok(())
     }
 
-    // NOTE: this normalizes amplitude to [-1, 1], then remaps the range to [0, 1]
     fn normalized_waveform(&self, samples: &[f32]) -> Result<(), RibbleError> {
-        // No smoothing for the waveform
         let (frame_size, step_size) = compute_welch_frames(samples.len() as f32, 0f32);
-        let window = samples
+        // Apply a gain and normalize the audio signal.
+        let mut window = samples
             .iter()
-            .map(|s| *s * Self::WAVEFORM_GAIN)
+            .map(|s| (*s * Self::WAVEFORM_GAIN) / Self::WAVEFORM_GAIN)
             .collect::<Vec<_>>();
 
-        let mut waveform = window
+        Self::fit_frames(&mut window, frame_size);
+
+        let waveform = window
             .windows(frame_size)
             .step_by(step_size)
-            .map(|window| window.iter().sum::<f32>() / (window.len() as f32))
+            .map(|win| {
+                let sum = win.iter().sum::<f32>();
+                let avg = sum / win.len() as f32;
+
+                // Remapping will stick 0 @ 0.5, which isn't really ideal for the "soundbar" widget
+                // Instead, treat -1/1 as a "maximum deviation" from silence.
+                avg.abs().clamp(0.0, 1.0)
+            })
             .collect::<Vec<_>>();
 
-        let max_amp = waveform
-            .iter()
-            .copied()
-            .fold(1f32, |acc, n| acc.max(n.abs()));
-
-        // Normalize and remap between [-1, 1]
-        for avg in waveform.iter_mut() {
-            let normalized = *avg / max_amp;
-            *avg = normalized * 0.5 + 0.5;
-        }
+        // Double-check for NaN/Inf
+        debug_assert!(waveform.iter().all(|f| f.is_finite()));
 
         debug_assert_eq!(
             waveform.len(),
@@ -129,34 +147,39 @@ impl VisualizerEngineState {
             "Failed to fit waveform into buckets."
         );
 
-        self.buffer.write().copy_from_slice(&waveform);
+        debug_assert!(waveform.iter().all(|f| f.is_finite()));
+
+        // To avoid an out-of-range memcpy (in release), limit the slice to the buffer size.
+        self.buffer.write().copy_from_slice(&waveform[..NUM_VISUALIZER_BUCKETS]);
         Ok(())
     }
 
     fn amplitude_envelope(&self, samples: &[f32]) -> Result<(), RibbleError> {
         let (frame_size, step_size) =
             compute_welch_frames(samples.len() as f32, Self::AMPLITUDE_OVERLAP);
-        let window = samples
+        let mut window = samples
             .iter()
             .map(|s| *s * Self::WAVEFORM_GAIN)
             .collect::<Vec<_>>();
 
+        Self::fit_frames(&mut window, frame_size);
+
         let mut amp_envelope = window
             .windows(frame_size)
             .step_by(step_size)
-            .map(|window| {
-                (window.iter().copied().map(|n| n.powi(2)).sum::<f32>() / (window.len() as f32))
+            .map(|win| {
+                (win.iter().copied().map(|n| n.powi(2)).sum::<f32>() / (win.len() as f32))
                     .sqrt()
             })
             .collect::<Vec<_>>();
 
         // Assert no nan/infinite
-        debug_assert!(amp_envelope.iter().all(|f| f.is_finite() && !f.is_nan()));
+        debug_assert!(amp_envelope.iter().all(|f| f.is_finite()));
 
         // Grab the maximum rms
         let max_rms = amp_envelope.iter().copied().fold(1f32, f32::max);
 
-        // Normalize between [-1, 1]
+        // Normalize the RMS.
         for rms in amp_envelope.iter_mut() {
             *rms /= max_rms;
         }
@@ -167,31 +190,27 @@ impl VisualizerEngineState {
             "Failed to fit amplitude_envelope into buckets."
         );
 
-        self.buffer.write().copy_from_slice(&amp_envelope);
+        self.buffer.write().copy_from_slice(&amp_envelope[..NUM_VISUALIZER_BUCKETS]);
         Ok(())
     }
 
     fn spectrum_density(&self, samples: &[f32], sample_rate: f64) -> Result<(), RibbleError> {
-        // I don't remember why I'm not applying gain...
-        let window_samples = hann_window(samples, false);
+        // I don't remember why I'm not applying gain here...
+        let mut window = hann_window(samples, false);
         // TODO: look at precomputing on changing settings/running transcriber, etc.
-        // Assert nonzero frame size
         let (frame_size, step_size) =
-            compute_welch_frames(samples.len() as f32, Self::POWER_OVERLAP);
-        let frames = window_samples.windows(frame_size).step_by(step_size);
-        debug_assert_eq!(
-            frames.len(),
-            NUM_VISUALIZER_BUCKETS,
-            "Failed to compute window sizes properly in frequency analysis."
-        );
+            compute_welch_frames(window.len() as f32, Self::POWER_OVERLAP);
 
+        Self::fit_frames(&mut window, frame_size);
+
+        let frames = window.windows(frame_size).step_by(step_size);
         // TODO: the FFT stuff can be precomputed upon changing the analysis type + Sample Rate
         // Not quite sure how to handle this just yet.
 
         let fft = self.planner.write().plan_fft_forward(frame_size);
         let mut input = fft.make_input_vec();
         let mut output = fft.make_output_vec();
-        let mut spectrum_samples = vec![0.0; NUM_VISUALIZER_BUCKETS];
+        let mut spectrum_samples = [0.0; NUM_VISUALIZER_BUCKETS];
 
         let frame_size = output.len();
         let min_freq = sample_rate / (frame_size as f64);
@@ -201,12 +220,8 @@ impl VisualizerEngineState {
         let log_max = max_freq.log10();
 
         let log_range = log_max - log_min;
-        debug_assert!(
-            !(log_min.is_nan()
-                || log_min.is_infinite()
-                || log_range.is_nan()
-                || log_range.is_infinite())
-        );
+
+        debug_assert!(log_range.is_finite() && log_min.is_finite());
 
         // Compute edges -> map frequency bins to log-spaced buckets
         // (human perception; low frequencies = tighter resolution).
@@ -228,9 +243,8 @@ impl VisualizerEngineState {
                     continue;
                 }
 
-                // TODO: this might not be necessary.
-                debug_assert!(freq.is_finite() || !freq.is_nan(), "Frequency inf or NaN: {freq}");
-                debug_assert!(value.is_finite() || !value.is_nan(), "Complex value inf or NaN: {value}");
+                debug_assert!(freq.is_finite(), "Frequency inf or NaN: {freq}");
+                debug_assert!(value.is_finite(), "Complex value inf or NaN: {value}");
 
                 // Find the bucket.
                 let closest =
@@ -251,11 +265,20 @@ impl VisualizerEngineState {
         for res in spectrum_samples.iter_mut() {
             *res /= max_amp;
         }
+
+        debug_assert_eq!(
+            spectrum_samples.len(),
+            NUM_VISUALIZER_BUCKETS,
+            "Failed to fit spectrum_density into buckets"
+        );
+
         debug_assert!(
             spectrum_samples.iter().all(|n| *n <= 1.0 && *n >= 0.0),
             "Failed to normalize in spectrum density calculations"
         );
-        self.buffer.write().copy_from_slice(&spectrum_samples);
+
+        // To avoid an out-of-range memcpy (in release), limit the slice to the buffer size.
+        self.buffer.write().copy_from_slice(&spectrum_samples[..NUM_VISUALIZER_BUCKETS]);
         Ok(())
     }
 }
@@ -279,15 +302,9 @@ fn hann_window(samples: &[f32], apply_gain: bool) -> Vec<f32> {
         })
         .collect()
 }
-fn apply_gain(samples: &mut [f32], gain: f32) {
-    for sample in samples.iter_mut() {
-        *sample *= gain;
-    }
-}
 
 // (Frame size, step size)
 // TODO: This should probably be pre-computed whenever the visualizer is changed.
-// -> handle this in the controller and cache
 fn compute_welch_frames(sample_len: f32, overlap_ratio: f32) -> (usize, usize) {
     let frame_size =
         sample_len / (1f32 + (NUM_VISUALIZER_BUCKETS as f32 - 1f32) * (1f32 - overlap_ratio));
@@ -312,11 +329,18 @@ impl VisualizerEngine {
 
             while let Ok(packet) = thread_inner.incoming_samples.recv() {
                 match packet {
-                    VisualizerPacket::VisualizerSample { sample, sample_rate } => {
-
+                    VisualizerPacket::VisualizerSample {
+                        sample,
+                        sample_rate,
+                    } => {
                         // If the visualizer isn't open, just skip over the sample and don't do the
                         // computation.
                         if !thread_inner.visualizer_running.load(Ordering::Acquire) {
+                            continue;
+                        }
+
+                        if sample.is_empty() {
+                            log::warn!("Visualizer sent empty sample packet!");
                             continue;
                         }
 
@@ -325,10 +349,10 @@ impl VisualizerEngine {
                         // remain.
                         if let Err(e) = thread_inner.run_analysis(&sample, sample_rate) {
                             log::warn!(
-                        "Failed to run visual analysis.\nType: {}, Error: {e}, Error Source: {:#?}",
-                        thread_inner.analysis_type.load(Ordering::Acquire),
-                        e.source()
-                    );
+                                "Failed to run visual analysis.\nType: {}, Error: {e}, Error Source: {:#?}",
+                                thread_inner.analysis_type.load(Ordering::Acquire),
+                                e.source()
+                            );
                         }
                     }
                     VisualizerPacket::Shutdown => break,
@@ -343,11 +367,6 @@ impl VisualizerEngine {
         self.inner
             .visualizer_running
             .store(is_visible, Ordering::Release);
-    }
-
-    // TODO: look at removing this --> I don't think the rest of the application needs to know if the visualizer is currently running.
-    pub(super) fn visualizer_running(&self) -> bool {
-        self.inner.visualizer_running.load(Ordering::Acquire)
     }
 
     pub(super) fn try_read_visualization_buffer(

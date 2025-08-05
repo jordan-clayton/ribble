@@ -34,9 +34,9 @@ pub const UTILITY_QUEUE_SIZE: usize = 32;
 
 pub const SMALL_UTILITY_QUEUE_SIZE: usize = 16;
 pub const UI_UPDATE_QUEUE_SIZE: usize = 8;
-// TODO: determine whether or not this is necessary, whether it should be changed.
-// Right now, there are no hard limits on how large this can get.
-const DEFAULT_PROGRESS_SLAB_CAPACITY: usize = 8;
+
+// 8 is far too small to handle updates, especially with downloads.
+const DEFAULT_PROGRESS_SLAB_CAPACITY: usize = 16;
 // CONSOLE CONSTANTS
 pub const DEFAULT_NUM_CONSOLE_MESSAGES: usize = 32;
 
@@ -155,13 +155,27 @@ pub(crate) struct LatestError {
 }
 
 impl LatestError {
-    pub(crate) fn new(id: u64, category: RibbleErrorCategory, timestamp: std::time::Instant) -> Self {
-        Self { id, category, timestamp }
+    pub(crate) fn new(
+        id: u64,
+        category: RibbleErrorCategory,
+        timestamp: std::time::Instant,
+    ) -> Self {
+        Self {
+            id,
+            category,
+            timestamp,
+        }
     }
 
-    pub(crate) fn id(&self) -> u64 { self.id }
-    pub(crate) fn category(&self) -> RibbleErrorCategory { self.category }
-    pub(crate) fn timestamp(&self) -> std::time::Instant { self.timestamp }
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+    pub(crate) fn category(&self) -> RibbleErrorCategory {
+        self.category
+    }
+    pub(crate) fn timestamp(&self) -> std::time::Instant {
+        self.timestamp
+    }
 }
 
 #[derive(Debug, Display)]
@@ -188,7 +202,7 @@ impl ConsoleMessage {
         match self {
             ConsoleMessage::Error(msg) => msg.to_string(),
             ConsoleMessage::Status(msg) => msg.to_owned(),
-            ConsoleMessage::Shutdown => "Shutting down.".to_string()
+            ConsoleMessage::Shutdown => "Shutting down.".to_string(),
         }
     }
 }
@@ -240,10 +254,7 @@ impl FileDownload {
 // NOTE: if it somehow becomes necessary to send information (e.g. the returned PathBuf) back from the DownloadRequest to the
 // requester, then use a queue.
 enum DownloadRequest {
-    DownloadJob {
-        url: String,
-        directory: PathBuf,
-    },
+    DownloadJob { url: String, directory: PathBuf },
     Shutdown,
 }
 
@@ -337,6 +348,8 @@ pub(crate) enum AmortizedProgress {
     Indeterminate,
 }
 
+// TODO: Look at adding an indeterminate.
+// Perhaps just re-use the AmortizedProgress -> Swap the pie for a spinner on indeterminate.
 #[derive(Copy, Clone, Default)]
 pub(crate) enum AmortizedDownloadProgress {
     #[default]
@@ -347,6 +360,7 @@ pub(crate) enum AmortizedDownloadProgress {
     },
 }
 impl AmortizedDownloadProgress {
+    // This method goes unused atm.
     pub(crate) fn decompose(self) -> Option<(usize, usize)> {
         match self {
             AmortizedDownloadProgress::Total {
@@ -370,6 +384,8 @@ impl From<(usize, usize)> for AmortizedDownloadProgress {
     }
 }
 
+// Since this is just a shared-wrapper with limited access,
+// This should probably accept a Progress enum member to account for downloads of unknown size.
 #[derive(Debug, Clone)]
 pub(crate) struct ProgressView {
     inner: Arc<AtomicProgress>,
@@ -391,6 +407,7 @@ impl ProgressView {
     pub(crate) fn total_size(&self) -> u64 {
         self.inner.total_size()
     }
+
     pub(crate) fn is_finished(&self) -> bool {
         self.inner.is_finished()
     }
@@ -498,6 +515,7 @@ impl Progress {
         }
     }
 
+    // TODO: Fix this up: ProgressViews should handle determinate
     pub(crate) fn progress_view(&self) -> Option<ProgressView> {
         match self {
             Progress::Determinate {
@@ -657,3 +675,4 @@ impl VisualizerPacket {
         }
     }
 }
+

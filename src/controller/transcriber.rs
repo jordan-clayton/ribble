@@ -104,19 +104,6 @@ impl TranscriberEngineState {
         }
     }
 
-    fn update_increment_progress_job(&self, maybe_id: Option<usize>, delta: u64) {
-        if let Some(id) = maybe_id {
-            let update_progress_message = ProgressMessage::Increment { job_id: id, delta };
-            if let Err(e) = self.progress_message_sender.send(update_progress_message) {
-                log::warn!(
-                    "Progress channel closed, cannot send transcriber increment progress message.\n\
-                Error source: {:#?}",
-                    e.source()
-                );
-            }
-        }
-    }
-
     fn run_realtime_transcription<M, A>(
         &self,
         audio_backend: &A,
@@ -164,7 +151,7 @@ impl TranscriberEngineState {
         let (text_sender, text_receiver) = get_channel(UTILITY_QUEUE_SIZE);
         let vad_configs = *self.vad_configs.load_full().clone();
 
-        let vad = vad_configs.build_vad().inspect_err(|e| {
+        let vad = vad_configs.build_vad().inspect_err(|_e| {
             self.cleanup_remove_progress_job(setup_id);
         })?;
 
@@ -172,7 +159,7 @@ impl TranscriberEngineState {
         let spec = CaptureSpec::default();
         let sink = ArcChannelSink::new(audio_sender);
 
-        let mic = audio_backend.open_capture(spec, sink).inspect_err(|e| {
+        let mic = audio_backend.open_capture(spec, sink).inspect_err(|_e| {
             self.cleanup_remove_progress_job(setup_id);
         })?;
 
@@ -186,7 +173,7 @@ impl TranscriberEngineState {
             .with_voice_activity_detector(vad)
             .with_shared_model_retriever(shared_model_retriever)
             .build()
-            .inspect_err(|e| {
+            .inspect_err(|_e| {
                 self.cleanup_remove_progress_job(setup_id);
             })?;
 
@@ -271,8 +258,6 @@ impl TranscriberEngineState {
                                 log::warn!("{warning}");
                             }
 
-                            // TODO: have to use self, but just use this to stub.
-                            // Send out data to the VisualizerEngine
                             let visualizer_sample =
                                 VisualizerPacket::new(Arc::clone(&audio), WHISPER_SAMPLE_RATE);
 
@@ -471,7 +456,19 @@ impl TranscriberEngineState {
         };
 
         let load_audio_callback = move |progress: usize| {
-            self.update_increment_progress_job(load_audio_id, progress as u64);
+            if let Some(id) = load_audio_id {
+                let update_progress_message = ProgressMessage::Increment {
+                    job_id: id,
+                    delta: progress as u64,
+                };
+                if let Err(e) = self.progress_message_sender.send(update_progress_message) {
+                    log::warn!(
+                        "Progress channel closed, cannot send transcriber increment progress message.\n\
+                    Error source: {:#?}",
+                        e.source()
+                    );
+                }
+            }
         };
 
         // Load the audio file.
@@ -561,9 +558,9 @@ impl TranscriberEngineState {
 
             let transcription_closure = move |percent: i32| {
                 if let Some(id) = transcription_id {
-                    let progress_message = ProgressMessage::Increment {
+                    let progress_message = ProgressMessage::Set {
                         job_id: id,
-                        delta: percent as u64,
+                        pos: percent as u64,
                     };
 
                     if let Err(e) = progress_sender.try_send(progress_message) {
@@ -580,12 +577,11 @@ impl TranscriberEngineState {
             let segment_closure = move |snapshot| {
                 // Take the snapshot into an Arc (for swapping in the print loop).
                 let a_snap = Arc::new(snapshot);
-                // TODO: determine whether or not this should actually log.
-                //
-                // Send it off to the print loop -> This shouldn't likely ever have an issue with
-                // a full queue--whisper dwarfs the callback, giving the print loop time to receive.
-                // If it fails due to a dropped receiver, this sender should -also- be gone.
-                let _ = sender.try_send(WhisperOutput::TranscriptionSnapshot(a_snap));
+                if let Err(e) = sender.try_send(WhisperOutput::TranscriptionSnapshot(a_snap)) {
+                    log::warn!("Cannot send segment transcription snapshot.\n\
+                        Error: {}\n\
+                        Error source: {:#?}", &e, e.source());
+                }
             };
 
             // Since the callbacks require static lifetime, copy the inner atomics and pass to the
@@ -837,9 +833,13 @@ impl TranscriberEngine {
 
         let work_request = WorkRequest::Long(worker);
         if let Err(e) = self.work_request_sender.try_send(work_request) {
-            log::warn!("Cannot send real-time transcription request, channel is too small or closed.\n\
+            log::warn!(
+                "Cannot send real-time transcription request, channel is too small or closed.\n\
             Error: {}\n\
-                Error source: {:#?}", &e, e.source());
+                Error source: {:#?}",
+                &e,
+                e.source()
+            );
         }
     }
 
@@ -860,9 +860,13 @@ impl TranscriberEngine {
         // Send off the request
         let work_request = WorkRequest::Long(worker);
         if let Err(e) = self.work_request_sender.try_send(work_request) {
-            log::warn!("Cannot send offline transcription request, channel is too small or closed.\n\
+            log::warn!(
+                "Cannot send offline transcription request, channel is too small or closed.\n\
             Error: {}\n\
-                Error source: {:#?}", &e, e.source());
+                Error source: {:#?}",
+                &e,
+                e.source()
+            );
         }
     }
 
@@ -872,9 +876,13 @@ impl TranscriberEngine {
 
         let work_request = WorkRequest::Short(worker);
         if let Err(e) = self.work_request_sender.try_send(work_request) {
-            log::warn!("Cannot send save request, channel is too small or closed.\n\
+            log::warn!(
+                "Cannot send save request, channel is too small or closed.\n\
             Error: {}\n\
-                Error source: {:#?}", &e, e.source());
+                Error source: {:#?}",
+                &e,
+                e.source()
+            );
         }
     }
 }

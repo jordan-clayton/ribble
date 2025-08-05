@@ -55,9 +55,11 @@ impl PaneView for DownloadsPane {
 
                     // This is a "best-effort" sort of deal
                     // TODO: test to make sure the size is mostly correct to size the grid properly.
+                    // TODO-TWICE: this is wrong; the sizes are not sizing.
                     // The pb should fill the space.
                     // If that doesn't work, try to come up with a ui.vertical/layout solution
                     let pb_width = grid_width - spacing - button_size;
+                    // Instead
 
                     // NOTE: a left-to-right solution like User-preferences would be much simpler
                     // TODO: if this is not working well, test out egui_extras::Table
@@ -79,9 +81,9 @@ impl PaneView for DownloadsPane {
                                 let cur_bytes_text = NumberPrefix::binary(current_bytes as f32);
                                 let total_bytes_text = NumberPrefix::binary(total_size as f32);
                                 let bytes_format = match (cur_bytes_text, total_bytes_text) {
-                                    (NumberPrefix::Standalone(cur), NumberPrefix::Standalone(tot)) => format!("{cur}/{tot} B"),
-                                    (NumberPrefix::Standalone(cur), NumberPrefix::Prefixed(prefix, tot)) => format!("{cur} B/{tot} {prefix}B"),
-                                    (NumberPrefix::Prefixed(c_pref, cur), NumberPrefix::Prefixed(t_pref, tot)) => format!("{cur} {c_pref}B/{tot} {t_pref}B"),
+                                    (NumberPrefix::Standalone(cur), NumberPrefix::Standalone(tot)) => format!("{cur:02}/{tot:02} B"),
+                                    (NumberPrefix::Standalone(cur), NumberPrefix::Prefixed(prefix, tot)) => format!("{cur:02} B/{tot:02} {prefix}B"),
+                                    (NumberPrefix::Prefixed(c_pref, cur), NumberPrefix::Prefixed(t_pref, tot)) => format!("{cur:02} {c_pref}B/{tot:02} {t_pref}B"),
                                     _ => unreachable!("Total size should never be less than current bytes. Cur: {current_bytes}, Tot: {total_size}"),
                                 };
 

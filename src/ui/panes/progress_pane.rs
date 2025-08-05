@@ -68,7 +68,7 @@ impl PaneView for ProgressPane {
                                     Some(progress) => ProgressBar::new(progress)
                                         .desired_width(grid_width)
                                         .text_left(prog_job.job_name().to_string())
-                                        .text_right(format!("{}%", progress * 100f32)),
+                                        .text_right(format!("{:02}%", progress * 100f32)),
                                     None => ProgressBar::indeterminate()
                                         .desired_width(grid_width)
                                         .text_left(prog_job.job_name().to_string()),
