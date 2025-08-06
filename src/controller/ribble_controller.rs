@@ -302,6 +302,20 @@ impl RibbleController {
     }
 
     // DOWNLOADER
+    #[cfg(debug_assertions)]
+    pub(crate) fn remove_debug_download(&self, download_id: usize) {
+        self.kernel.remove_debug_download(download_id);
+    }
+
+    #[cfg(debug_assertions)]
+    pub(crate) fn add_debug_download(&self) -> usize {
+        self.kernel.add_debug_download()
+    }
+
+    #[cfg(debug_assertions)]
+    pub(crate) fn add_debug_indeterminate_download(&self) -> usize {
+        self.kernel.add_debug_indeterminate_download()
+    }
 
     pub(crate) fn try_get_current_downloads(&self, copy_buffer: &mut Vec<(usize, FileDownload)>) {
         self.kernel.try_get_current_downloads(copy_buffer);

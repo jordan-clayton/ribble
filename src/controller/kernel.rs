@@ -73,7 +73,9 @@ impl Kernel {
             user_preferences,
         } = Self::deserialize_user_data(data_directory);
         let (console_sender, console_receiver) = get_channel(UTILITY_QUEUE_SIZE);
-        let (progress_sender, progress_receiver) = get_channel(SMALL_UTILITY_QUEUE_SIZE);
+        // NOTE: at the moment, it seems like 16 messages is too small for the progress channel
+        // Download updates fire at the -byte- level, so perhaps this needs to batch the update.
+        let (progress_sender, progress_receiver) = get_channel(UTILITY_QUEUE_SIZE);
         let (work_sender, work_receiver) = get_channel(UTILITY_QUEUE_SIZE);
         let (write_sender, write_receiver) = get_channel(UTILITY_QUEUE_SIZE);
         let (visualizer_sender, visualizer_receiver) = get_channel(UTILITY_QUEUE_SIZE);
@@ -398,6 +400,21 @@ impl Kernel {
     }
 
     // DOWNLOADER
+    #[cfg(debug_assertions)]
+    pub(super) fn remove_debug_download(&self, download_id: usize) {
+        self.download_engine.remove_fake_download(download_id);
+    }
+
+    #[cfg(debug_assertions)]
+    pub(super) fn add_debug_download(&self) -> usize {
+        self.download_engine.add_fake_download()
+    }
+
+    #[cfg(debug_assertions)]
+    pub(super) fn add_debug_indeterminate_download(&self) -> usize {
+        self.download_engine.add_fake_indeterminate_download()
+    }
+
     pub(super) fn try_get_current_downloads(&self, copy_buffer: &mut Vec<(usize, FileDownload)>) {
         self.download_engine.try_get_current_downloads(copy_buffer);
     }

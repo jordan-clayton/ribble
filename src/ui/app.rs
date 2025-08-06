@@ -76,6 +76,8 @@ pub struct Ribble {
 
     cached_downloads_progress: AmortizedDownloadProgress,
     cached_progress: AmortizedProgress,
+    #[cfg(debug_assertions)]
+    debug_download_id: Option<usize>,
 }
 
 impl Ribble {
@@ -138,6 +140,8 @@ impl Ribble {
             // Or accept that some blocking might be necessary to get the read lock.
             cached_downloads_progress: AmortizedDownloadProgress::NoJobs,
             cached_progress: AmortizedProgress::NoJobs,
+            #[cfg(debug_assertions)]
+            debug_download_id: None,
         })
     }
 
@@ -409,19 +413,34 @@ impl eframe::App for Ribble {
                                 #[cfg(debug_assertions)] {
                                     ui.separator();
                                     ui.menu_button("Debug menu", |ui| {
+                                        // This mightn't be necessary.
+                                        // Recording works and doesn't induce a lot of overhead;
+                                        // Running file transcription will produce testable conditions.
                                         if ui.button("Test Progress").clicked() {
                                             todo!("Test Progress");
                                         }
                                         if ui.button("Test Download").clicked() {
-                                            todo!("Test Download");
+                                            if let Some(id) = self.debug_download_id.take() {
+                                                self.controller.remove_debug_download(id);
+                                            }
+                                            self.debug_download_id = Some(self.controller.add_debug_download());
                                         }
 
+                                        if ui.button("Test Indeterminate Download").clicked() {
+                                            if let Some(id) = self.debug_download_id.take() {
+                                                self.controller.remove_debug_download(id);
+                                            }
+                                            self.debug_download_id = Some(self.controller.add_debug_indeterminate_download());
+                                        }
+
+                                        // This mightn't be necessary.
+                                        // The application is in a mostly-working state,
+                                        // including the console.
                                         if ui.button("Test Console").clicked() {
                                             todo!("Test Console");
                                         }
 
                                         // For testing "Latest Error".
-
                                         if ui.button("Add Placeholder Error").clicked() {
                                             self.controller.add_placeholder_error()
                                         }

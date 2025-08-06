@@ -35,8 +35,7 @@ pub const UTILITY_QUEUE_SIZE: usize = 32;
 pub const SMALL_UTILITY_QUEUE_SIZE: usize = 16;
 pub const UI_UPDATE_QUEUE_SIZE: usize = 8;
 
-// 8 is far too small to handle updates, especially with downloads.
-const DEFAULT_PROGRESS_SLAB_CAPACITY: usize = 16;
+const DEFAULT_PROGRESS_SLAB_CAPACITY: usize = 8;
 // CONSOLE CONSTANTS
 pub const DEFAULT_NUM_CONSOLE_MESSAGES: usize = 32;
 
@@ -294,10 +293,15 @@ enum ProgressMessage {
     Shutdown,
 }
 
+// TODO: Determine whether this is easier/more logical for downloads
+// If the content-length is blank, the size is unknown.
+// At the moment, the FileDownload assumes the job is determinate.
+// It is undecided atm w.r.t GUI decisions as to whether this is the better solution.
 #[derive(Debug)]
 pub(crate) struct AtomicProgress {
     pos: AtomicU64,
     capacity: AtomicU64,
+    maybe_indeterminate: AtomicBool,
 }
 
 impl AtomicProgress {
@@ -305,18 +309,34 @@ impl AtomicProgress {
         Self {
             pos: AtomicU64::new(0),
             capacity: AtomicU64::new(0),
+            maybe_indeterminate: AtomicBool::new(false),
         }
     }
     fn with_capacity(self, capacity: u64) -> Self {
         self.capacity.store(capacity, Ordering::Release);
         self
     }
+    fn with_maybe_indeterminate(self, maybe_indeterminate: bool) -> Self {
+        self.maybe_indeterminate.store(maybe_indeterminate, Ordering::Release);
+        self
+    }
+
+    fn set_maybe_indeterminate(&self, maybe_indeterminate: bool) {
+        self.maybe_indeterminate.store(maybe_indeterminate, Ordering::Release);
+    }
 
     fn set(&self, pos: u64) {
         self.pos.store(pos, Ordering::Release);
+        if self.maybe_indeterminate.load(Ordering::Acquire) {
+            self.capacity.store(pos.saturating_add(1), Ordering::Release);
+        }
     }
     fn inc(&self, delta: u64) {
-        self.pos.fetch_add(delta, Ordering::Release);
+        let old = self.pos.fetch_add(delta, Ordering::Release);
+        if self.maybe_indeterminate.load(Ordering::Acquire) {
+            let pos = old + delta;
+            self.capacity.store(pos.saturating_add(1), Ordering::Release);
+        }
     }
     fn dec(&self, delta: u64) {
         self.pos.fetch_sub(delta, Ordering::Release);
@@ -432,6 +452,17 @@ impl Progress {
         let progress = AtomicProgress::new().with_capacity(total_size);
         let progress = Arc::new(progress);
         Self::Determinate { job_name, progress }
+    }
+
+    // This might be better to be an explicit mutator.
+    fn maybe_indeterminate(self, maybe_indeterminate: bool) -> Self {
+        match self {
+            Progress::Determinate { job_name, progress } => {
+                progress.set_maybe_indeterminate(maybe_indeterminate);
+                Progress::Determinate { job_name, progress }
+            }
+            Progress::Indeterminate { .. } => { self }
+        }
     }
 
     pub(crate) fn job_name(&self) -> &'static str {

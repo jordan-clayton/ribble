@@ -1,19 +1,16 @@
-use crate::controller::{
-    AmortizedDownloadProgress, Bus, ConsoleMessage, DownloadRequest, FileDownload, Progress,
-    ProgressMessage, RibbleMessage, WorkRequest,
-};
+use crate::controller::{AmortizedDownloadProgress, AtomicProgress, Bus, ConsoleMessage, DownloadRequest, FileDownload, Progress, ProgressMessage, RibbleMessage, WorkRequest};
 use crate::utils::errors::RibbleError;
 use parking_lot::RwLock;
-use ribble_whisper::downloader::SyncDownload;
 use ribble_whisper::downloader::downloaders::sync_download_request;
+use ribble_whisper::downloader::SyncDownload;
 use ribble_whisper::utils::callback::{RibbleAbortCallback, RibbleWhisperCallback};
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{Receiver, Sender, get_channel};
+use ribble_whisper::utils::{get_channel, Receiver, Sender};
 use slab::Slab;
 use std::error::Error;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 
 const FALLBACK_NAME: &str = "invalid_download";
@@ -48,15 +45,16 @@ impl DownloadEngineState {
             return Err(RibbleWhisperError::ParameterError(format!(
                 "File not found, likely invalid url.\nURL:{url}"
             ))
-            .into());
+                .into());
         }
 
-        // TODO: these should actually probably handle "indeterminate".
-        //
-        // When total_size is 1, the content-length is actually unknown, which is going to lead to
-        // weird issues.
+
+        // If the content-length is missing, sync_downloader defaults to "1" as an "indeterminate"
+        // There is a mechanism to set maybe_indeterminate to keep the total_size() as current() + 1
+        // At the moment, this fits better with the GUI.
         let progress_job =
-            Progress::new_determinate("Downloading model.", sync_downloader.total_size() as u64);
+            Progress::new_determinate("Downloading model.", sync_downloader.total_size() as u64)
+                .maybe_indeterminate(sync_downloader.total_size() == 1);
 
         let progress_view = progress_job
             .progress_view()
@@ -262,6 +260,39 @@ impl DownloadEngine {
     // NOTE: Metadata removal is handled internally; this only sets the flag to stop the download.
     pub(super) fn abort_download(&self, download_id: usize) {
         self.inner.abort_download(download_id);
+    }
+
+    // NOTE: this will block and should be called with care (i.e. from the debug menu)
+    #[cfg(debug_assertions)]
+    pub(super) fn add_fake_download(&self) -> usize {
+        use crate::controller::ProgressView;
+        let progress = Arc::new(AtomicProgress::new().with_capacity(100));
+        progress.set(50);
+        let fake_progress = ProgressView::new(progress);
+        let should_abort = Arc::new(AtomicBool::new(false));
+        let fake_download = FileDownload::new("fake_download", fake_progress, should_abort);
+
+        self.inner.file_downloads.write().insert(fake_download)
+    }
+
+    #[cfg(debug_assertions)]
+    pub(super) fn add_fake_indeterminate_download(&self) -> usize {
+        use crate::controller::ProgressView;
+        let progress = Arc::new(AtomicProgress::new().with_capacity(1).with_maybe_indeterminate(true));
+        progress.set(99);
+        // This is expected to sit at 99%, with the "current" at 100.
+        let fake_progress = ProgressView::new(progress);
+        let should_abort = Arc::new(AtomicBool::new(false));
+        let fake_download = FileDownload::new("fake_download", fake_progress, should_abort);
+
+        self.inner.file_downloads.write().insert(fake_download)
+    }
+
+    #[cfg(debug_assertions)]
+    pub(super) fn remove_fake_download(&self, download_id: usize) {
+        if self.inner.file_downloads.write().try_remove(download_id).is_none() {
+            log::warn!("File download metadata missing for (fake) id: {download_id}");
+        }
     }
 }
 
