@@ -1,5 +1,5 @@
 use crate::controller::{
-    AnalysisType, AtomicAnalysisType, RotationDirection, VisualizerPacket, NUM_VISUALIZER_BUCKETS,
+    AnalysisType, AtomicAnalysisType, NUM_VISUALIZER_BUCKETS, RotationDirection, VisualizerPacket,
 };
 use crate::utils::errors::RibbleError;
 use crossbeam::channel::Receiver;
@@ -8,8 +8,8 @@ use realfft::RealFftPlanner;
 use std::error::Error;
 use std::f32::consts::PI;
 use std::ops::Deref;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::thread::JoinHandle;
 
@@ -27,10 +27,14 @@ impl VisualizerEngineState {
     const POWER_GAIN: f32 = 30.0;
     const WAVEFORM_GAIN: f32 = Self::POWER_GAIN / 2.0;
 
-    fn new(incoming_samples: Receiver<VisualizerPacket>) -> Self {
+    // This could be made an option, I suppose?
+    fn new(
+        incoming_samples: Receiver<VisualizerPacket>,
+        starting_analysis_type: AnalysisType,
+    ) -> Self {
         let buffer = RwLock::new([0.0; NUM_VISUALIZER_BUCKETS]);
         let visualizer_running = AtomicBool::new(false);
-        let analysis_type = AtomicAnalysisType::new(AnalysisType::Waveform);
+        let analysis_type = AtomicAnalysisType::new(starting_analysis_type);
         let planner = RwLock::new(RealFftPlanner::new());
         Self {
             planner,
@@ -111,7 +115,9 @@ impl VisualizerEngineState {
         );
 
         // To avoid an out-of-range memcpy (in release), limit the slice to the buffer size.
-        self.buffer.write().copy_from_slice(&power_samples[..NUM_VISUALIZER_BUCKETS]);
+        self.buffer
+            .write()
+            .copy_from_slice(&power_samples[..NUM_VISUALIZER_BUCKETS]);
         Ok(())
     }
 
@@ -150,7 +156,9 @@ impl VisualizerEngineState {
         debug_assert!(waveform.iter().all(|f| f.is_finite()));
 
         // To avoid an out-of-range memcpy (in release), limit the slice to the buffer size.
-        self.buffer.write().copy_from_slice(&waveform[..NUM_VISUALIZER_BUCKETS]);
+        self.buffer
+            .write()
+            .copy_from_slice(&waveform[..NUM_VISUALIZER_BUCKETS]);
         Ok(())
     }
 
@@ -168,8 +176,7 @@ impl VisualizerEngineState {
             .windows(frame_size)
             .step_by(step_size)
             .map(|win| {
-                (win.iter().copied().map(|n| n.powi(2)).sum::<f32>() / (win.len() as f32))
-                    .sqrt()
+                (win.iter().copied().map(|n| n.powi(2)).sum::<f32>() / (win.len() as f32)).sqrt()
             })
             .collect::<Vec<_>>();
 
@@ -190,7 +197,9 @@ impl VisualizerEngineState {
             "Failed to fit amplitude_envelope into buckets."
         );
 
-        self.buffer.write().copy_from_slice(&amp_envelope[..NUM_VISUALIZER_BUCKETS]);
+        self.buffer
+            .write()
+            .copy_from_slice(&amp_envelope[..NUM_VISUALIZER_BUCKETS]);
         Ok(())
     }
 
@@ -278,7 +287,9 @@ impl VisualizerEngineState {
         );
 
         // To avoid an out-of-range memcpy (in release), limit the slice to the buffer size.
-        self.buffer.write().copy_from_slice(&spectrum_samples[..NUM_VISUALIZER_BUCKETS]);
+        self.buffer
+            .write()
+            .copy_from_slice(&spectrum_samples[..NUM_VISUALIZER_BUCKETS]);
         Ok(())
     }
 }
@@ -319,8 +330,14 @@ pub(super) struct VisualizerEngine {
     work_thread: Option<JoinHandle<()>>,
 }
 impl VisualizerEngine {
-    pub(super) fn new(incoming_samples: Receiver<VisualizerPacket>) -> Self {
-        let inner = Arc::new(VisualizerEngineState::new(incoming_samples));
+    pub(super) fn new(
+        incoming_samples: Receiver<VisualizerPacket>,
+        starting_analysis_type: AnalysisType,
+    ) -> Self {
+        let inner = Arc::new(VisualizerEngineState::new(
+            incoming_samples,
+            starting_analysis_type,
+        ));
         let thread_inner = Arc::clone(&inner);
 
         let work_thread = Some(thread::spawn(move || {
@@ -328,6 +345,8 @@ impl VisualizerEngine {
             // visualizer Analysis type.
 
             while let Ok(packet) = thread_inner.incoming_samples.recv() {
+                // TODO: if/when pre-computing the FFT planner/windowing, look at implementing a
+                // different kind of packet.
                 match packet {
                     VisualizerPacket::VisualizerSample {
                         sample,
@@ -377,6 +396,7 @@ impl VisualizerEngine {
             copy_buffer.copy_from_slice(buffer.deref())
         }
     }
+
     pub(super) fn get_visualizer_analysis_type(&self) -> AnalysisType {
         self.inner.analysis_type.load(Ordering::Acquire)
     }

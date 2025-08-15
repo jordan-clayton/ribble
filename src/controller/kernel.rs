@@ -74,6 +74,7 @@ impl Kernel {
             offline_transcriber_feedback,
             vad_configs,
             recording_configs,
+            visualizer_analysis_type,
             export_format,
             user_preferences,
         } = Self::deserialize_user_data(data_directory);
@@ -102,7 +103,8 @@ impl Kernel {
         );
         let progress_engine =
             ProgressEngine::new(DEFAULT_PROGRESS_SLAB_CAPACITY, progress_receiver);
-        let visualizer_engine = VisualizerEngine::new(visualizer_receiver);
+        let visualizer_engine =
+            VisualizerEngine::new(visualizer_receiver, visualizer_analysis_type);
         let worker_engine = WorkerEngine::new(work_receiver, &bus)?;
 
         let recording_directory = data_directory.join(Self::TEMP_AUDIO_DIR_SLUG);
@@ -467,6 +469,7 @@ impl Kernel {
         let vad_configs = *self.transcriber_engine.read_vad_configs();
         let recording_configs = *self.recorder_engine.read_recorder_configs();
         let export_format = self.recorder_engine.read_export_format();
+        let visualizer_analysis_type = self.visualizer_engine.get_visualizer_analysis_type();
         // TODO: add the recording export format
         let user_preferences = *self.user_preferences.load_full();
 
@@ -476,6 +479,7 @@ impl Kernel {
             vad_configs,
             recording_configs,
             export_format,
+            visualizer_analysis_type,
             user_preferences,
         };
 
@@ -549,7 +553,8 @@ struct KernelState {
     recording_configs: RibbleRecordingConfigs,
     #[serde(default)]
     export_format: RibbleRecordingExportFormat,
-    // TODO: add the export format to the KernelState.
+    #[serde(default)]
+    visualizer_analysis_type: AnalysisType,
     #[serde(default)]
     user_preferences: UserPreferences,
 }

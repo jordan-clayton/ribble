@@ -14,8 +14,10 @@ use crate::controller::ribble_controller::RibbleController;
 use crate::ui::panes::ribble_pane::{PaneView, RibblePane, RibblePaneId};
 use crate::utils::errors::RibbleError;
 use eframe::epaint::Hsva;
-use egui::{lerp, Painter, Rect, Stroke, StrokeKind, Style};
-use egui_tiles::{Behavior, Container, ResizeState, SimplificationOptions, Tile, TileId, Tiles, Tree, UiResponse};
+use egui::{Painter, Rect, Stroke, StrokeKind, Style, lerp};
+use egui_tiles::{
+    Behavior, Container, ResizeState, SimplificationOptions, Tile, TileId, Tiles, Tree, UiResponse,
+};
 use std::collections::HashMap;
 use std::error::Error;
 use std::f32::consts::PI;
@@ -37,10 +39,7 @@ pub(in crate::ui) struct RibbleTree {
 impl RibbleTree {
     const TREE_FILE: &'static str = "ribble_layout.ron";
     // TODO: this probably doesn't need to be a result and can just be Self
-    pub(in crate::ui) fn new(
-        data_directory: &Path,
-        controller: RibbleController,
-    ) -> Self {
+    pub(in crate::ui) fn new(data_directory: &Path, controller: RibbleController) -> Self {
         let tree = Self::deserialize_tree(data_directory);
         let behavior = RibbleTreeBehavior::from_tree(controller, &tree);
 
@@ -99,8 +98,7 @@ impl RibbleTree {
         tree.ui(behavior, ui)
     }
 
-
-    // NOTE: this probably should not be called all too often.
+    // NOTE: this probably should not be called too often.
     pub(in crate::ui) fn check_insert_non_closable_panes(&mut self) {
         // Check for an invalid tree - sometimes it can get lost if there's a panic in the UI code.
         // Fall-back to a previously serialized version, and if that fails, just reset to defaults.
@@ -110,7 +108,8 @@ impl RibbleTree {
         if self.tree.is_empty() {
             // This will fall back to defaults if there's no root.
             self.tree = Self::deserialize_tree(&self.data_directory);
-            self.behavior = RibbleTreeBehavior::from_tree(self.behavior.controller.clone(), &self.tree);
+            self.behavior =
+                RibbleTreeBehavior::from_tree(self.behavior.controller.clone(), &self.tree);
         }
 
         // For all non-closable tabs, check to make sure they exist -somewhere- in the layout and
@@ -123,7 +122,10 @@ impl RibbleTree {
                     self.insert_child(non_closable);
                 }
                 Some(tile_id) => {
-                    self.behavior.opened_tabs.entry(non_closable).or_insert(tile_id);
+                    self.behavior
+                        .opened_tabs
+                        .entry(non_closable)
+                        .or_insert(tile_id);
                 }
             }
         }
@@ -175,9 +177,8 @@ impl RibbleTree {
                     );
                     // If there's a parent and the parent is a tab container, set it to be the active tab
                     if let Some(parent_id) = self.tree.tiles.parent_of(*pane_id) {
-                        if let Some(Tile::Container(Container::Tabs(
-                                                        container,
-                                                    ))) = self.tree.tiles.get_mut(parent_id)
+                        if let Some(Tile::Container(Container::Tabs(container))) =
+                            self.tree.tiles.get_mut(parent_id)
                         {
                             container.set_active(*pane_id);
                         }
@@ -213,7 +214,8 @@ impl RibbleTree {
             Err(_) => {
                 // Try to deserialize things first.
                 self.tree = Self::deserialize_tree(&self.data_directory);
-                self.behavior = RibbleTreeBehavior::from_tree(self.behavior.controller.clone(), &self.tree);
+                self.behavior =
+                    RibbleTreeBehavior::from_tree(self.behavior.controller.clone(), &self.tree);
 
                 // If the old layout had the tab in it (and has all valid panes)
                 if self.behavior.opened_tabs.contains_key(&ribble_id) {
@@ -221,7 +223,8 @@ impl RibbleTree {
                 }
 
                 let new_child = self.tree.tiles.insert_pane(ribble_id.into());
-                self.handle_missing_node(new_child).expect("Default layout should have a root node.");
+                self.handle_missing_node(new_child)
+                    .expect("Default layout should have a root node.");
                 // ADD a record into the opened tabs to prevent duplicates
                 self.behavior.opened_tabs.insert(ribble_id, new_child);
             }
@@ -244,8 +247,16 @@ impl RibbleTree {
     }
 
     fn handle_missing_node(&mut self, new_child: TileId) -> Result<(), RibbleError> {
-        let root = self.tree.root.ok_or(RibbleError::Core("Tree missing!".to_string()))?;
-        match self.tree.tiles.get_mut(root).ok_or(RibbleError::Core("Root node has no tile!".to_string()))? {
+        let root = self
+            .tree
+            .root
+            .ok_or(RibbleError::Core("Tree missing!".to_string()))?;
+        match self
+            .tree
+            .tiles
+            .get_mut(root)
+            .ok_or(RibbleError::Core("Root node has no tile!".to_string()))?
+        {
             Tile::Pane(_) => {
                 // NOTE: if this ever triggers, that means there's some sort of issue with the Tree::gc(..) sweep.
                 // It should also be the case such that
@@ -255,7 +266,10 @@ impl RibbleTree {
                     self.tree.tiles.len()
                 );
                 // Insert it with a horizontal layout like the default.
-                let new_root = self.tree.tiles.insert_horizontal_tile(vec![root, new_child]);
+                let new_root = self
+                    .tree
+                    .tiles
+                    .insert_horizontal_tile(vec![root, new_child]);
                 self.tree.root = Some(new_root);
                 self.behavior.focus_non_tab_pane = Some(new_child);
             }
@@ -291,7 +305,10 @@ impl RibbleTree {
 
     pub(in crate::ui) fn tree_serializer(&self) -> TreeSerializer {
         let canonicalized = self.data_directory.join(Self::TREE_FILE);
-        TreeSerializer { out_file_path: canonicalized, tree: self.tree.clone() }
+        TreeSerializer {
+            out_file_path: canonicalized,
+            tree: self.tree.clone(),
+        }
     }
 
     fn deserialize_tree(data_directory: &Path) -> Tree<RibblePane> {
@@ -299,9 +316,14 @@ impl RibbleTree {
         match std::fs::File::open(canonicalized.as_path()) {
             Ok(tree_file) => {
                 let tree = ron::de::from_reader(tree_file).unwrap_or_else(|e| {
-                    log::warn!("Error deserializing tree file: {}\n\
+                    log::warn!(
+                        "Error deserializing tree file: {}\n\
                 Error: {}\n\
-                Error:source: {:#?}", canonicalized.display(), &e, e.source());
+                Error:source: {:#?}",
+                        canonicalized.display(),
+                        &e,
+                        e.source()
+                    );
                     Self::default_tree()
                 });
 
@@ -309,6 +331,7 @@ impl RibbleTree {
                     log::error!("Deserialized Empty tree! Falling back to default.");
                     return Self::default_tree();
                 }
+
                 // If the tree is non-empty, there must exist a root
                 let root = tree.root().expect("A non-empty tree must have a root node");
                 // Check to see whether the root maps to a tile
@@ -330,42 +353,72 @@ impl RibbleTree {
                 if tree.tiles.get_container(root).is_none() {
                     Self::default_tree()
                 } else {
-                    // If there's a root and the root has a tile
+                    // If there's a root and the root is a container, assume it's valid.
+                    // There are runtime checks (app load, before serializing, etc.) to ensure the
+                    // 2 non-closable panes exist in the view somewhere.
                     tree
                 }
             }
             Err(e) => {
-                log::warn!("Error opening tree file: {}\n\
+                log::warn!(
+                    "Error opening tree file: {}\n\
                 Error: {}\n\
-                Error source: {:#?}", canonicalized.display(), &e, e.source());
+                Error source: {:#?}",
+                    canonicalized.display(),
+                    &e,
+                    e.source()
+                );
                 Self::default_tree()
             }
         }
     }
 
-    // Vertical (root) (OR) Tabs **(better idea):
+    // Basic tree structure.
     //  // Horizontal:
-    //      // Vertical:
-    //          // Transcription
-    //          // Visualizer
-    //      // Transcriber
+    //      Left: Vertical:
+    //          Top: Transcription Pane
+    //          Bottom: Visualizer Pane
+    //      Right: Transcriber Pane
 
-    // Perhaps leave progress/downloads/console as "extra goodies" people can open if they want.
-    // NOTE: not sure if there's a way to set the split proportion.
     fn default_tree() -> Tree<RibblePane> {
-        let mut tiles = Tiles::default();
-        // TODO: consider defining shares so that things aren't evenly bisected ->
-        // See: https://github.com/rerun-io/egui_tiles/issues/46;
+        // NOTE: This is an unfortunate bit of cruft that will need to remain until there exists a
+        // cleaner way to define layout shares.
+        //
+        // Without needing to explicitly define containers, this achieves a 70/30 horizontal split
+        // (The code does not become any more readable when defining containers explicitly).
+        //
+        const LEFT_SHARE: f32 = 0.7;
 
-        let transcriber_layout = {
-            let children = vec![tiles.insert_pane(RibblePaneId::Transcription.into()), tiles.insert_pane(RibblePaneId::Visualizer.into())];
+        let mut tiles = Tiles::default();
+        let left = {
+            let children = vec![
+                tiles.insert_pane(RibblePaneId::Transcription.into()),
+                tiles.insert_pane(RibblePaneId::Visualizer.into()),
+            ];
             tiles.insert_vertical_tile(children)
         };
 
+        let right = tiles.insert_pane(RibblePaneId::Transcriber.into());
+
         let main_layout = {
-            let children = vec![transcriber_layout, tiles.insert_pane(RibblePaneId::Transcriber.into())];
+            let children = vec![left, right];
             tiles.insert_horizontal_tile(children)
         };
+
+        if let Some(pane) = tiles.get_mut(main_layout) {
+            match pane {
+                Tile::Container(container) => match container {
+                    Container::Linear(linear) => {
+                        linear.shares.set_share(left, LEFT_SHARE.clamp(0.0, 1.0));
+                        linear
+                            .shares
+                            .set_share(right, (1.0 - LEFT_SHARE).clamp(0.0, 1.0));
+                    }
+                    _ => unreachable!("The main layout must always be horizontal linear"),
+                },
+                _ => unreachable!("The main layout must always be a container."),
+            }
+        }
 
         Tree::new("ribble_tree", main_layout, tiles)
     }
@@ -389,15 +442,25 @@ impl TreeSerializer {
     // If the root-node is missing/tree is empty, then this will not re-write the old layout because
     // that implies a major error/panic has happened.
     pub(in crate::ui) fn serialize(&self) {
+        // CHECK FOR THE ROOT FIRST; if it's missing, the layout crashed and the tree is in an
+        // invalid state (at runtime).
+        //
+        // This should mostly only happen on a program panic (but successful drop).
+        // The previously serialized tree may be valid, and if not, will fall back to defaults.
         if self.tree.is_empty() {
             log::error!("Root node missing! Empty tree. Skipping deserialization.");
             return;
         }
 
-        // CHECK FOR THE ROOT FIRST
-        let root = self.tree.root.expect("A non-empty tree must have a root node");
+        // This cannot be None if the tree is non-empty.
+        let root = self
+            .tree
+            .root
+            .expect("A non-empty tree must have a root node");
 
         // Check to make sure the root maps to a tile in the tree before serializing
+        // If this branch is taken, then the tree is in an invalid state (at runtime).
+        // The previously serialized tree may be valid, and if not, will fall back to defaults.
         if self.tree.tiles.get(root).is_none() {
             log::error!("Root node has no tile! Skipping deserialization.");
             return;
@@ -462,10 +525,7 @@ impl RibbleTreeBehavior {
         }
     }
 
-    pub(in crate::ui) fn from_tree(
-        controller: RibbleController,
-        tree: &Tree<RibblePane>,
-    ) -> Self {
+    pub(in crate::ui) fn from_tree(controller: RibbleController, tree: &Tree<RibblePane>) -> Self {
         // Preallocate for at least RibbleTab::COUNT, such that there exists a bucket for each tab.
         // At any given time, all panes may be in the tree, so this might save on an allocation.
         let mut opened_tabs = HashMap::with_capacity(RibblePane::COUNT);
@@ -545,8 +605,7 @@ impl Behavior<RibblePane> for RibbleTreeBehavior {
         // This is basically the same as the default, except it uses egui widget visuals
         // for idle instead of the tab bar color.
         match resize_state {
-            ResizeState::Idle =>
-                style.visuals.widgets.noninteractive.bg_stroke,
+            ResizeState::Idle => style.visuals.widgets.noninteractive.bg_stroke,
             ResizeState::Hovering => style.visuals.widgets.hovered.fg_stroke,
             ResizeState::Dragging => style.visuals.widgets.active.fg_stroke,
         }
@@ -556,11 +615,7 @@ impl Behavior<RibblePane> for RibbleTreeBehavior {
         pane.pane_title()
     }
 
-    fn is_tab_closable(
-        &self,
-        tiles: &Tiles<RibblePane>,
-        tile_id: TileId,
-    ) -> bool {
+    fn is_tab_closable(&self, tiles: &Tiles<RibblePane>, tile_id: TileId) -> bool {
         if let Some(tile) = tiles.get(tile_id) {
             match tile {
                 Tile::Pane(ribble_pane) => ribble_pane.is_pane_closable(),
@@ -574,15 +629,15 @@ impl Behavior<RibblePane> for RibbleTreeBehavior {
         }
     }
 
-    fn on_tab_close(
-        &mut self,
-        tiles: &mut Tiles<RibblePane>,
-        tile_id: TileId,
-    ) -> bool {
+    fn on_tab_close(&mut self, tiles: &mut Tiles<RibblePane>, tile_id: TileId) -> bool {
         if let Some(tile) = tiles.get_mut(tile_id) {
             match tile {
                 Tile::Pane(ribble_tab) => {
-                    log::info!("Removing pane: {}, ID: {:#?}", ribble_tab.pane_id(), tile_id);
+                    log::info!(
+                        "Removing pane: {}, ID: {:#?}",
+                        ribble_tab.pane_id(),
+                        tile_id
+                    );
                     let close_tab = ribble_tab.on_pane_close(self.controller.clone());
                     // If it's a closeable tab, remove it from the mapping.
                     if close_tab {
@@ -592,7 +647,11 @@ impl Behavior<RibblePane> for RibbleTreeBehavior {
                     close_tab
                 }
                 Tile::Container(container) => {
-                    log::info!("Removing container: {:#?}, ID: {:#?}", container.kind(), tile_id);
+                    log::info!(
+                        "Removing container: {:#?}, ID: {:#?}",
+                        container.kind(),
+                        tile_id
+                    );
                     true
                 }
             }
@@ -610,6 +669,7 @@ impl Behavior<RibblePane> for RibbleTreeBehavior {
             match tile {
                 Tile::Pane(pane) => self.tab_title_for_pane(pane),
                 // For now, with tabs: set this up to be the App name + the number of children.
+                // I'm not 100% sure I like this, but it does communicate more than just "Ribble"
                 Tile::Container(container) => {
                     format!("Ribble: {}", container.num_children()).into()
                 }
@@ -631,13 +691,7 @@ impl Behavior<RibblePane> for RibbleTreeBehavior {
         self.simplification_options
     }
 
-    fn paint_on_top_of_tile(
-        &self,
-        painter: &Painter,
-        style: &Style,
-        tile_id: TileId,
-        rect: Rect,
-    ) {
+    fn paint_on_top_of_tile(&self, painter: &Painter, style: &Style, tile_id: TileId, rect: Rect) {
         let mut color: Hsva = style.visuals.selection.stroke.color.into();
         color.s = lerp(color.s..=(color.s + 0.5).max(1.0), self.focus_time);
         color.v = lerp(color.v..=(color.v + 0.5).max(0.8), self.focus_time);

@@ -2,11 +2,11 @@ use crate::ui::app::Ribble;
 use crate::utils::crash_handler::set_up_desktop_crash_handler;
 use crate::utils::errors::RibbleError;
 use crate::utils::migration::{
-    clear_old_ribble_state, migrate_model_filenames, RibbleVersion, Version,
+    RibbleVersion, Version, clear_old_ribble_state, migrate_model_filenames,
 };
 use crash_handler::CrashHandler;
 use directories::ProjectDirs;
-use eframe::{run_native, AppCreator, NativeOptions};
+use eframe::{AppCreator, NativeOptions, run_native};
 use egui::{IconData, ViewportBuilder};
 use flexi_logger::{
     Age, Cleanup, Criterion, Duplicate, FileSpec, Logger, LoggerHandle, Naming, WriteMode,
@@ -222,6 +222,9 @@ impl Drop for RibbleRunner<'_> {
     }
 }
 
+// TODO: rename this.
+const DEFAULT_WINDOW_SIZE: egui::Vec2 = egui::Vec2::new(1024.0, 768.0);
+
 #[inline]
 fn build_window(persistence_path: PathBuf) -> NativeOptions {
     NativeOptions {
@@ -240,9 +243,7 @@ fn build_viewport() -> ViewportBuilder {
         .with_title(APP_ID)
         .with_resizable(true)
         .with_icon(load_icon())
-        // NOTE: if maximizing is too annoying, go back to a default size.
-        // TODO: this is not being respected atm -> look into it.
-        .with_maximized(true)
+        .with_inner_size(DEFAULT_WINDOW_SIZE)
 }
 
 // TODO: MacOs may require more "Apple-like" configurations.
@@ -255,7 +256,7 @@ fn build_viewport() -> ViewportBuilder {
         .with_resizable(true)
         .with_titlebar_shown(false)
         .with_icon(load_icon())
-        .with_maximized(true)
+        .with_inner_size(DEFAULT_WINDOW_SIZE)
 }
 fn load_icon() -> Arc<IconData> {
     image::load_from_memory(ICON_BYTES)

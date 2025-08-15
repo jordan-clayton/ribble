@@ -3,33 +3,33 @@ use std::f32::consts::PI;
 use crate::controller::NUM_VISUALIZER_BUCKETS;
 use egui::emath::easing::{circular_in, circular_out, cubic_out, exponential_out};
 use egui::epaint::{Hsva, Rgba};
-use egui::{lerp, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2, Widget};
+use egui::{Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2, Widget, lerp};
 use egui_colorgradient::ColorInterpolator;
 
 const BAR_WIDTH_PERCENT: f32 = 0.1;
 const BAR_MAX_WIDTH: f32 = 10.0;
-const BAR_HEIGHT_PERCENT: f32 = 0.75;
-// TODO: change testing, old was 8.0 -> might be too small?
-// Can't tell if it's being covered, in the wrong spot, etc.
+const BAR_HEIGHT_PERCENT: f32 = 0.85;
 const BAR_MIN_HEIGHT: f32 = 8.0;
 
 const COLLISION_BOX_WIDTH_SCALE: f32 = 12.0;
 const COLLISION_BOX_HEIGHT_SCALE: f32 = 16.0;
-
 const COLLISION_BOX_SCALE: Vec2 = Vec2::new(COLLISION_BOX_WIDTH_SCALE, COLLISION_BOX_HEIGHT_SCALE);
+
 const INTERACTION_BOX_WIDTH_SCALE: f32 = 0.20;
 const INTERACTION_BOX_HEIGHT_SCALE: f32 = 0.65;
-const INTERACTION_LIMIT_SCALE: Vec2 = Vec2::new(INTERACTION_BOX_WIDTH_SCALE * COLLISION_BOX_SCALE.x, INTERACTION_BOX_HEIGHT_SCALE * COLLISION_BOX_SCALE.y);
+const INTERACTION_LIMIT_SCALE: Vec2 = Vec2::new(
+    INTERACTION_BOX_WIDTH_SCALE * COLLISION_BOX_SCALE.x,
+    INTERACTION_BOX_HEIGHT_SCALE * COLLISION_BOX_SCALE.y,
+);
 
-// TODO: MAKE THIS A PROPORTION OF THE SCREEN SIZE
-const BAR_HEIGHT_EXPANSION: f32 = 40.0;
+// Make the expansion a proportion of the "max bar height", at the moment this is set to:
+// 0.85 * 0.15 * Rect height.
+const BAR_HEIGHT_EXPANSION_PERCENT: f32 = 0.15;
 const BAR_WIDTH_EXPANSION: f32 = 3.0;
 const BAR_SATURATION_INCREASE: f32 = 0.5;
 const MIN_SATURATION: f32 = 0.3;
 const COLOR_CHANGE_DAMPING: f32 = 0.08;
 
-// NOTE: this is interpolating really weirdly.
-// Do it num_bars - 1.
 #[inline]
 fn interpolate_buckets(
     idx: usize,
@@ -71,7 +71,7 @@ fn draw_soundbar(
 
     // TODO: not sure whether desired to use a crosshair or just the mouse pointer.
     // Basically, if -any- rect passes the hit test, then this swaps to the crosshair.
-    let mut show_crosshair = false;
+    let mut show_pointer = false;
 
     if ui.is_rect_visible(rect) {
         let mouse_pos = ui
@@ -100,16 +100,25 @@ fn draw_soundbar(
 
                         let height_t = interpolate_buckets(idx, num_bars, buckets);
                         col.horizontal_centered(|ui| {
-                            draw_soundbar_rect(ui, bar_width, bar_max_height, height_t, color.into(), mouse_pos, &mut show_crosshair);
+                            draw_soundbar_rect(
+                                ui,
+                                bar_width,
+                                bar_max_height,
+                                height_t,
+                                color.into(),
+                                mouse_pos,
+                                &mut show_pointer,
+                            );
                         });
                     }
                 });
-            }).response
+            })
+            .response
         });
     }
 
-    if show_crosshair {
-        response.on_hover_cursor(egui::CursorIcon::Crosshair)
+    if show_pointer {
+        response.on_hover_cursor(egui::CursorIcon::Default)
     } else {
         response
     }
@@ -126,7 +135,7 @@ fn draw_soundbar_rect(
     // Taking this in as RGBA will just create annoying problems.
     color: Hsva,
     mouse_position: Pos2,
-    show_crosshair: &mut bool,
+    show_pointer: &mut bool,
 ) -> Response {
     let bar_height = lerp(
         BAR_MIN_HEIGHT..=bar_max_height.max(BAR_MIN_HEIGHT),
@@ -146,19 +155,33 @@ fn draw_soundbar_rect(
 
     // This is prooobably a little inefficient -> perhaps instead do a single "soundbar" collider
     if ui.is_rect_visible(rect) {
-        let hitbox = rect.scale_from_center2(COLLISION_BOX_SCALE);
+        let mut hitbox = rect.scale_from_center2(COLLISION_BOX_SCALE);
+
+        // Clamp the hitbox height to the height of the widget.
+        if hitbox.height() > bar_max_height {
+            let old_cen = hitbox.center();
+            hitbox.set_height(bar_max_height);
+            hitbox.set_center(old_cen);
+        }
 
         let (width_expand_t, height_expand_t) = if hitbox.contains(mouse_position) {
-            // Set the show-crosshair flag.
-            *show_crosshair = true;
+            // Set the show-pointer flag.
+            *show_pointer = true;
 
             let center = rect.center();
             // Since this interaction thing is intentionally cartoonish, this "interaction limit"
             // serves as the rectangle's "influence aura"
-            let interaction_limit = rect.scale_from_center2(INTERACTION_LIMIT_SCALE);
+            let mut interaction_limit = rect.scale_from_center2(INTERACTION_LIMIT_SCALE);
+
+            if interaction_limit.height() > hitbox.height() {
+                let old_cen = interaction_limit.center();
+                interaction_limit.set_height(hitbox.height());
+                interaction_limit.set_center(old_cen);
+            }
 
             // Compute the closest rect point on both the interaction_limit box and the hitbox
-            let closest_interact_point = closest_point_on_perimeter(interaction_limit, mouse_position);
+            let closest_interact_point =
+                closest_point_on_perimeter(interaction_limit, mouse_position);
             let closest_hitbox_point = closest_point_on_perimeter(hitbox, mouse_position);
             let closest_rect_point = closest_point_on_perimeter(rect, mouse_position);
 
@@ -167,7 +190,6 @@ fn draw_soundbar_rect(
             let d_rect = closest_rect_point.distance_sq(center);
             // Edge 1
             let d_hit = closest_hitbox_point.distance_sq(center);
-
 
             // Measure the squared distance from the centre of the actual rect to the mouse cursor.
             let d_center = center.distance_sq(mouse_position);
@@ -180,37 +202,51 @@ fn draw_soundbar_rect(
             // Smoothstep between the two edges and clamp to 1.0
             let t = ((1.0 - smoothstep(d_rect, d_hit, d_center)) + boost).min(1.0);
 
-
             // Do a "smooth" pass to sculpt t
             let sculpt_t = compose_piecewise(t, 0.9, circular_out, circular_in);
 
-            #[cfg(debug_assertions)]{
-                if t.is_infinite() || t.is_nan() || t.is_sign_negative() {
+            #[cfg(debug_assertions)]
+            {
+                if !t.is_finite() || t.is_sign_negative() {
                     log::info!("Smoothstep bug: {t}");
                 }
 
-                if sculpt_t.is_infinite() || sculpt_t.is_nan() || sculpt_t.is_sign_negative() {
+                if !sculpt_t.is_finite() || sculpt_t.is_sign_negative() {
                     log::info!("Sculpting bug: {sculpt_t}");
                 }
             }
 
             // There is a small discontinuity at one, so just return t if t = 1
-            let horizontal = if sculpt_t == 1.0 { sculpt_t } else { exponential_out(sculpt_t) };
+            let horizontal = if sculpt_t == 1.0 {
+                sculpt_t
+            } else {
+                exponential_out(sculpt_t)
+            };
 
             // Add some additional smoothing to tighten up the shape before putting through the bounce function
             // This is a little arbitrary, but it makes everything extra rubbery.
             // NOTE: this does need some more testing when interacting with sound
             const DAMPING: f32 = 0.75;
-            let vert_pre_smooth = (lerp(circular_in(sculpt_t)..=quartic_in(sculpt_t), sculpt_t) * DAMPING + boost.powi(2)).clamp(0.0, 1.0);
+            let vert_pre_smooth = (lerp(circular_in(sculpt_t)..=quartic_in(sculpt_t), sculpt_t)
+                * DAMPING
+                + boost.powi(2))
+            .clamp(0.0, 1.0);
 
             // NOTE: there are discontinuities that happen when p <= 0 and p >= 1.0 when composing
             // two easing functions at arbitrary p.
-            let vertical = compose_piecewise(vert_pre_smooth, 0.6, ease_out_bounce, ease_out_bounce);
+            let vertical =
+                compose_piecewise(vert_pre_smooth, 0.6, ease_out_bounce, ease_out_bounce);
 
             // Visualize the inner hitbox
-            // #[cfg(debug_assertions)] {
+            // #[cfg(debug_assertions)]
+            // {
             //     let interaction_line_width = 2.0;
-            //     ui.painter().rect_stroke(interaction_limit, 0.0, Stroke::new(interaction_line_width, bar_color), StrokeKind::Middle);
+            //     ui.painter().rect_stroke(
+            //         interaction_limit,
+            //         0.0,
+            //         Stroke::new(interaction_line_width, bar_color),
+            //         StrokeKind::Middle,
+            //     );
             // }
 
             // Return the interpolation
@@ -220,21 +256,27 @@ fn draw_soundbar_rect(
         };
 
         // PERHAPS THESE SHOULD BE SCALES instead of additive.
-        let additional_height = lerp(0.0..=BAR_HEIGHT_EXPANSION, height_expand_t);
+        // Not sure yet, but these work for now.
+
+        let additional_height = lerp(
+            0.0..=BAR_HEIGHT_EXPANSION_PERCENT * bar_max_height,
+            height_expand_t,
+        );
         let additional_width = lerp(0.0..=BAR_WIDTH_EXPANSION, width_expand_t);
         let additional_sat = lerp(0.0..=BAR_SATURATION_INCREASE, height_expand_t);
-
 
         // Bump the saturation a bit based on the height_expand_t, clamped to 1.0;
         let mut bar_color_hsv: Hsva = bar_color.into();
         bar_color_hsv.s = (bar_color_hsv.s + additional_sat).min(1f32);
 
         let expansion = Vec2::new(additional_width, additional_height);
-        // Clamp the height to the maximum to avoid overrunning bounds.
-        // TODO: test this to make sure the clamping isn't too aggressive.
+
         let mut paint_rect = rect.expand2(expansion);
+        // Clamp the height to the maximum to avoid overrunning bounds.
         if paint_rect.height() > bar_max_height {
+            let old_cen = paint_rect.center();
             paint_rect.set_height(bar_max_height);
+            paint_rect.set_center(old_cen);
         }
 
         let rounding = 0.5 * rect.height();
@@ -251,7 +293,12 @@ fn draw_soundbar_rect(
         // #[cfg(debug_assertions)]
         // {
         //     let hitbox_line_width = 1.0;
-        //     ui.painter().rect_stroke(hitbox, 0.0, Stroke::new(hitbox_line_width, bar_color_hsv), StrokeKind::Middle);
+        //     ui.painter().rect_stroke(
+        //         hitbox,
+        //         0.0,
+        //         Stroke::new(hitbox_line_width, bar_color_hsv),
+        //         StrokeKind::Middle,
+        //     );
         // }
     }
 
@@ -316,7 +363,10 @@ where
     F1: FnOnce(f32) -> f32,
     F2: FnOnce(f32) -> f32,
 {
-    debug_assert!(p > 0.0 && p < 1.0, "p not in range to prevent discontinuities");
+    debug_assert!(
+        p > 0.0 && p < 1.0,
+        "p not in range to prevent discontinuities"
+    );
     if t < p {
         p * f1(t / p)
     } else {

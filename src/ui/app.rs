@@ -464,6 +464,7 @@ impl eframe::App for Ribble {
                                         if ui.button("Induce panic").clicked() {
                                             panic!("Panic triggered!");
                                         }
+
                                         // For testing the segfault handler.
                                         if ui.button("Induce segfault").clicked() {
                                             unsafe {
@@ -471,12 +472,24 @@ impl eframe::App for Ribble {
                                             }
                                         }
 
-                                        // For testing tree fallback mechanisms.
+                                        // For testing tree fallback mechanisms on an empty tree.
                                         if ui.button("Clear Tree").clicked() {
                                             self.tree.clear_tree();
                                         }
+
                                         if ui.button("Test Tree Recovery").clicked() {
                                             self.tree.test_tree_recovery();
+                                        }
+
+                                        // For fuzzing the egui layout algorithm to induce
+                                        // conditions that can cause an invalid egui_tiles::Tree.
+                                        if ui.button("Crash egui, lose tree").clicked() {
+                                            egui::Grid::new("sadness").num_columns(2).show(
+                                                ui,
+                                                |ui| {
+                                                    ui.add_space(1.0);
+                                                },
+                                            );
                                         }
                                     });
                                 }

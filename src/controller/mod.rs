@@ -6,8 +6,8 @@ use ribble_whisper::utils::{Receiver, Sender};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
@@ -317,25 +317,29 @@ impl AtomicProgress {
         self
     }
     fn with_maybe_indeterminate(self, maybe_indeterminate: bool) -> Self {
-        self.maybe_indeterminate.store(maybe_indeterminate, Ordering::Release);
+        self.maybe_indeterminate
+            .store(maybe_indeterminate, Ordering::Release);
         self
     }
 
     fn set_maybe_indeterminate(&self, maybe_indeterminate: bool) {
-        self.maybe_indeterminate.store(maybe_indeterminate, Ordering::Release);
+        self.maybe_indeterminate
+            .store(maybe_indeterminate, Ordering::Release);
     }
 
     fn set(&self, pos: u64) {
         self.pos.store(pos, Ordering::Release);
         if self.maybe_indeterminate.load(Ordering::Acquire) {
-            self.capacity.store(pos.saturating_add(1), Ordering::Release);
+            self.capacity
+                .store(pos.saturating_add(1), Ordering::Release);
         }
     }
     fn inc(&self, delta: u64) {
         let old = self.pos.fetch_add(delta, Ordering::Release);
         if self.maybe_indeterminate.load(Ordering::Acquire) {
             let pos = old + delta;
-            self.capacity.store(pos.saturating_add(1), Ordering::Release);
+            self.capacity
+                .store(pos.saturating_add(1), Ordering::Release);
         }
     }
     fn dec(&self, delta: u64) {
@@ -461,7 +465,7 @@ impl Progress {
                 progress.set_maybe_indeterminate(maybe_indeterminate);
                 Progress::Determinate { job_name, progress }
             }
-            Progress::Indeterminate { .. } => { self }
+            Progress::Indeterminate { .. } => self,
         }
     }
 
@@ -602,7 +606,16 @@ pub(crate) enum RotationDirection {
 }
 
 #[atomic_enum]
-#[derive(Default, PartialEq, EnumIter, Display, IntoStaticStr, AsRefStr)]
+#[derive(
+    Default,
+    PartialEq,
+    EnumIter,
+    Display,
+    IntoStaticStr,
+    AsRefStr,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub(crate) enum AnalysisType {
     #[strum(to_string = "Amplitude")]
     #[default]
@@ -706,4 +719,3 @@ impl VisualizerPacket {
         }
     }
 }
-
