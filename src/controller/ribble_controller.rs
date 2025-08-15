@@ -1,6 +1,10 @@
 use crate::controller::audio_backend_proxy::AudioBackendProxy;
 use crate::controller::kernel::Kernel;
-use crate::controller::{AmortizedDownloadProgress, AmortizedProgress, AnalysisType, CompletedRecordingJobs, ConsoleMessage, FileDownload, LatestError, ModelFile, OfflineTranscriberFeedback, Progress, RotationDirection, NUM_VISUALIZER_BUCKETS};
+use crate::controller::{
+    AmortizedDownloadProgress, AmortizedProgress, AnalysisType, CompletedRecordingJobs,
+    ConsoleMessage, FileDownload, LatestError, ModelFile, NUM_VISUALIZER_BUCKETS,
+    OfflineTranscriberFeedback, Progress, RotationDirection,
+};
 use crate::utils::errors::RibbleError;
 use crate::utils::preferences::UserPreferences;
 use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExportFormat};
@@ -20,7 +24,6 @@ fn set_base_directory() -> PathBuf {
         None => PathBuf::from("/"),
     }
 }
-
 
 #[derive(Clone)]
 pub(crate) struct RibbleController {
@@ -62,9 +65,13 @@ impl RibbleController {
     // Only try_send the toast -> this shouldn't ever really block
     pub(crate) fn send_toast(&self, toast: egui_notify::Toast) {
         if let Err(e) = self.toasts_sender.try_send(toast) {
-            log::warn!("Failed to send toast to UI, channel closed or too small.\n\
+            log::warn!(
+                "Failed to send toast to UI, channel closed or too small.\n\
             Error: {}\n\
-            Error source: {:#?}", &e, e.source());
+            Error source: {:#?}",
+                &e,
+                e.source()
+            );
         }
     }
 
@@ -213,6 +220,13 @@ impl RibbleController {
     }
     pub(crate) fn write_recorder_configs(&self, new_configs: RibbleRecordingConfigs) {
         self.kernel.write_recorder_configs(new_configs);
+    }
+
+    pub(crate) fn read_export_format(&self) -> RibbleRecordingExportFormat {
+        self.kernel.read_export_format()
+    }
+    pub(crate) fn write_export_format(&self, export_format: RibbleRecordingExportFormat) {
+        self.kernel.write_export_format(export_format);
     }
 
     pub(crate) fn start_recording(&self) {

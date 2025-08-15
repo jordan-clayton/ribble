@@ -1,13 +1,14 @@
 use crate::controller::{Bus, ConsoleMessage, LatestError};
-use crate::controller::{RibbleMessage, WorkRequest, MAX_NUM_CONSOLE_MESSAGES, MIN_NUM_CONSOLE_MESSAGES};
-use crate::utils::errors::RibbleErrorCategory;
+use crate::controller::{
+    MAX_NUM_CONSOLE_MESSAGES, MIN_NUM_CONSOLE_MESSAGES, RibbleMessage, WorkRequest,
+};
 use arc_swap::ArcSwap;
 use parking_lot::RwLock;
 use ribble_whisper::utils::{Receiver, Sender};
 use std::collections::VecDeque;
 use std::error::Error;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread::JoinHandle;
 use std::time::Instant;
 use twox_hash::XxHash3_64;
@@ -41,7 +42,10 @@ impl ConsoleEngineState {
         // If the message is an error, update the latest error.
         if let ConsoleMessage::Error(msg) = &message {
             let category = msg.into();
-            let id = XxHash3_64::oneshot_with_seed(Self::CONSOLE_ENGINE_SEED, msg.to_string().as_bytes());
+            let id = XxHash3_64::oneshot_with_seed(
+                Self::CONSOLE_ENGINE_SEED,
+                msg.to_string().as_bytes(),
+            );
             let timestamp = Instant::now();
             let new_latest_error = LatestError::new(id, category, timestamp);
             self.latest_error.store(Arc::new(Some(new_latest_error)))
@@ -160,8 +164,11 @@ impl ConsoleEngine {
 
     #[cfg(debug_assertions)]
     pub(super) fn add_placeholder_error(&self) {
+        use crate::utils::errors::RibbleErrorCategory;
         let fake_latest_error = LatestError::new(0, RibbleErrorCategory::Core, Instant::now());
-        self.inner.latest_error.store(Arc::new(Some(fake_latest_error)));
+        self.inner
+            .latest_error
+            .store(Arc::new(Some(fake_latest_error)));
     }
 
     pub(super) fn clear_latest_error(&self) {
@@ -189,9 +196,13 @@ impl ConsoleEngine {
 
         let work_request = WorkRequest::Short(work);
         if let Err(e) = self.work_request_sender.try_send(work_request) {
-            log::error!("Cannot send resize request, channel closed or too small.\n\
+            log::error!(
+                "Cannot send resize request, channel closed or too small.\n\
             Error: {}\n\
-            Error source: {:#?}", &e, e.source());
+            Error source: {:#?}",
+                &e,
+                e.source()
+            );
         }
     }
 }

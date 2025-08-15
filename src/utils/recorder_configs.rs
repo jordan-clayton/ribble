@@ -1,4 +1,5 @@
 use crate::utils::errors::RibbleError;
+use atomic_enum::atomic_enum;
 use ribble_whisper::audio::audio_backend::CaptureSpec;
 use ribble_whisper::audio::microphone::MicCapture;
 use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
@@ -8,11 +9,9 @@ use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
 // typing (& excessive Traits that achieve the same thing), these members
 // implement From to map user-facing selections to internal settings.
 
+// NOTE: Deriving atomic_enum will also derive: Copy, Clone, Debug.
 #[derive(
     Default,
-    Copy,
-    Clone,
-    Debug,
     PartialEq,
     serde::Serialize,
     serde::Deserialize,
@@ -22,6 +21,8 @@ use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
     AsRefStr,
     IntoStaticStr,
 )]
+#[atomic_enum]
+// TODO: refactor this to RibbleExportFormat or something less verbose.
 pub(crate) enum RibbleRecordingExportFormat {
     #[default]
     F32,

@@ -1,12 +1,10 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{CompletedRecordingJobs, ModelFile, OfflineTranscriberFeedback};
-use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::ui::panes::PaneView;
+use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::ui::widgets::recording_modal::build_recording_modal;
 use crate::ui::widgets::toggle_switch::toggle;
-use crate::ui::{
-    GRID_ROW_SPACING_COEFF, MODAL_HEIGHT_PROPORTION, PANE_HEADING_BUTTON_SIZE, PANE_INNER_MARGIN,
-};
+use crate::ui::{GRID_ROW_SPACING_COEFF, MODAL_HEIGHT_PROPORTION, PANE_INNER_MARGIN};
 use crate::utils::realtime_settings::{AudioSampleLen, RealtimeTimeout, VadSampleLen};
 use crate::utils::vad_configs::{VadFrameSize, VadStrictness, VadType};
 use ribble_whisper::whisper::configs::Language;
@@ -164,11 +162,8 @@ impl PaneView for TranscriberPane {
                             .add_enabled(
                                 latest_recording_exists && can_run_transcription,
                                 egui::Button::new("Re-transcribe Last Recording"),
-                            ).on_hover_ui(|ui| {
-                            ui.style_mut().interaction.selectable_labels = true;
-                            ui.label("Offline transcribe latest cached recording.\n\
-                    Generally more accurate due to full audio context.");
-                        })
+                            ).on_hover_text("Offline transcribe latest cached recording.\n\
+                    Generally more accurate due to full audio context.")
                             .clicked()
                         {
                             // NOTE: this might be a little too TOCTOU prone.
@@ -258,31 +253,21 @@ impl PaneView for TranscriberPane {
 
                     ui.heading("Feedback Mode");
                     // FEEDBACK MODE -> possibly hide this, but it seems important to have accessible.
-                    // NOTE: this is dubious, but it's
                     egui::Grid::new("offline_feedback")
                         .num_columns(3)
                         .striped(true)
                         .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
                         .show(ui, |ui| {
                             let mut offline_feedback = controller.read_offline_transcriber_feedback();
-                            ui.label("Feedback mode:").on_hover_ui(|ui| {
-                                ui.style_mut().interaction.selectable_labels = true;
-                                ui.label("Set the feedback mode for file transcription.\n\
+                            ui.label("Feedback mode:").on_hover_text("Set the feedback mode for file transcription.\n\
                             Progressive: Enables live updates (degrades performance).\n\
                             Minimal: Disables live updates.");
-                            });
 
                             // This is a "null" column to try and get the combobox spacing a little
                             // more "nice".
                             let size = ui.spacing().interact_size;
 
                             ui.allocate_space(size);
-
-                            // NOTE: This can be used to crash egui's layout algorithm (intentionally)
-                            // and can semi-reliably induce the weird conditions that cause the tree to become incoherent.
-                            // (If the pane crashes on painting, it seems to be removed from the tree entirely)
-                            // ui.add_space(size.x);
-
                             egui::ComboBox::from_id_salt("feedback_mode_combobox")
                                 .selected_text(offline_feedback.as_ref()).show_ui(ui, |ui| {
                                 for feedback_mode in OfflineTranscriberFeedback::iter() {
@@ -418,10 +403,7 @@ impl PaneView for TranscriberPane {
                                 // ROW: NUM THREADS
                                 let mut n_threads = configs.n_threads();
                                 let thread_range = 1..=controller.max_whisper_threads();
-                                ui.label("No. threads:").on_hover_ui(|ui| {
-                                    ui.style_mut().interaction.selectable_labels = true;
-                                    ui.label("Set the number of threads to allocate to whisper. Recommended: 7.");
-                                });
+                                ui.label("No. threads:").on_hover_text("Set the number of threads to allocate to whisper. Recommended: 7.");
 
                                 let slider = ui.add(egui::Slider::new(&mut n_threads, thread_range).integer());
                                 let keyboard_input = slider.changed() && ui.input(|i| i.keys_down.iter().any(|key| {
@@ -451,10 +433,7 @@ impl PaneView for TranscriberPane {
                                 // NOTE: if it becomes imperative to expose past prompt tokens,
                                 // do so around here, but it shouldn't be relevant.
                                 // ROW: SET TRANSLATE
-                                ui.label("Translate (En):").on_hover_ui(|ui| {
-                                    ui.style_mut().interaction.selectable_labels = true;
-                                    ui.label("Translate the transcription (English only).");
-                                });
+                                ui.label("Translate (En):").on_hover_text("Translate the transcription (English only).");
                                 let mut translate = configs.translate();
                                 if ui.add(egui::Checkbox::without_text(&mut translate)).clicked() {
                                     let new_configs = configs.set_translate(translate);
@@ -463,11 +442,8 @@ impl PaneView for TranscriberPane {
                                 ui.end_row();
 
                                 // ROW: LANGUAGE
-                                ui.label("Language:").on_hover_ui(|ui| {
-                                    ui.style_mut().interaction.selectable_labels = true;
-                                    ui.label("Set the input audio language.\n\
+                                ui.label("Language:").on_hover_text("Set the input audio language.\n\
                                             Set to Auto for automatic language-detection.");
-                                });
 
                                 // NOTE TO SELF: implement Language::default() in Ribble-Whisper;
                                 // It's fine for now: Default = None = Auto anyway.
@@ -492,11 +468,9 @@ impl PaneView for TranscriberPane {
                                 ui.end_row();
 
                                 // ROW: SET GPU
-                                ui.label("Hardware Acceleration:").on_hover_ui(|ui| {
-                                    ui.style_mut().interaction.selectable_labels = true;
-                                    ui.label("Toggles transcription hardware acceleration via the GPU.\n\
-                                            Real-time transcription may not be feasible without hardware acceleration.");
-                                });
+                                ui.label("Hardware Acceleration:").on_hover_text("Toggles transcription hardware acceleration via the GPU.\n\
+                                            Real-time transcription may not be feasible without hardware acceleration."
+                                );
                                 let mut using_gpu = configs.using_gpu();
                                 if ui.add(egui::Checkbox::without_text(&mut using_gpu)).clicked() {
                                     let new_configs = configs.set_gpu(using_gpu);
@@ -505,11 +479,11 @@ impl PaneView for TranscriberPane {
                                 ui.end_row();
 
                                 // ROW: USE NO CONTEXT
-                                ui.label("Use Context:").on_hover_ui(|ui| {
-                                    ui.style_mut().interaction.selectable_labels = true;
-                                    ui.label("Use previous context to inform transcription.\n\
+                                // TODO: this probably should not be exposed -> Revisit once core
+                                // stream loop is tweaked to see whether retaining context is worth
+                                // exposing.
+                                ui.label("Use Context:").on_hover_text("Use previous context to inform transcription.\n\
                                             Generally improves accuracy but may cause artifacts.");
-                                });
 
                                 let mut using_context = !configs.using_no_context();
                                 if ui.add(egui::Checkbox::without_text(&mut using_context)).clicked() {
@@ -519,11 +493,8 @@ impl PaneView for TranscriberPane {
                                 ui.end_row();
 
                                 // ROW: SET FLASH ATTENTION
-                                ui.label("Use Flash Attention:").on_hover_ui(|ui| {
-                                    ui.style_mut().interaction.selectable_labels = true;
-                                    ui.label("Toggles Flash Attention (if supported).\n\
+                                ui.label("Use Flash Attention:").on_hover_text("Toggles Flash Attention (if supported).\n\
                                             Significantly increases performance.");
-                                });
 
                                 let mut using_flash_attention = configs.using_flash_attention();
                                 if ui.add(egui::Checkbox::without_text(&mut using_flash_attention)).clicked() {
@@ -545,11 +516,8 @@ impl PaneView for TranscriberPane {
                                         let test_timeout: u128 = realtime_timeout.into();
                                         assert_eq!(test_timeout, configs.realtime_timeout());
                                     }
-                                    ui.label("Timeout:").on_hover_ui(|ui| {
-                                        ui.style_mut().interaction.selectable_labels = true;
-                                        ui.label("Set the timeout for real-time transcription.\n\
+                                    ui.label("Timeout:").on_hover_text("Set the timeout for real-time transcription.\n\
                                                 Set to infinite for continuous sessions, but note that performance may degrade.");
-                                    });
 
 
                                     egui::ComboBox::from_id_salt("realtime_timeout_combobox")
@@ -578,12 +546,9 @@ impl PaneView for TranscriberPane {
                                         assert_eq!(test_len, configs.audio_sample_len_ms());
                                     }
 
-                                    ui.label("Audio Sample size:").on_hover_ui(|ui| {
-                                        ui.style_mut().interaction.selectable_labels = true;
-                                        ui.label("Sets the audio sampling buffer size.\n\
+                                    ui.label("Audio Sample size:").on_hover_text("Sets the audio sampling buffer size.\n\
                                                 Smaller sizes: lower latency, lower accuracy, higher power draw.\n\
                                                 Larger sizes: higher latency, higher accuracy, lower power draw.");
-                                    });
 
                                     egui::ComboBox::from_id_salt("audio_sample_len")
                                         .selected_text(audio_sample_len.as_ref())
@@ -612,12 +577,9 @@ impl PaneView for TranscriberPane {
                                         assert_eq!(test_len, configs.vad_sample_len());
                                     }
 
-                                    ui.label("VAD Sample size:").on_hover_ui(|ui| {
-                                        ui.style_mut().interaction.selectable_labels = true;
-                                        ui.label("Sets the voice-activity sampling buffer size.\n\
+                                    ui.label("VAD Sample size:").on_hover_text("Sets the voice-activity sampling buffer size.\n\
                                                 Smaller sizes: lower latency, lower accuracy, higher power draw.\n\
                                                 Larger sizes: higher latency, higher accuracy, lower power draw.");
-                                    });
 
                                     egui::ComboBox::from_id_salt("vad_sample_len_combobox")
                                         .selected_text(vad_sample_len.as_ref())
@@ -666,11 +628,8 @@ impl PaneView for TranscriberPane {
                             .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
                             .show(ui, |ui| {
                                 // VAD TYPE
-                                ui.label("VAD algorithm:").on_hover_ui(|ui| {
-                                    ui.style_mut().interaction.selectable_labels = true;
-                                    ui.label("Select which voice detection algorithm to use.\n\
+                                ui.label("VAD algorithm:").on_hover_text("Select which voice detection algorithm to use.\n\
                                 Set to Auto for system defaults.");
-                                });
 
                                 let mut vad_type = vad_configs.vad_type();
                                 ui.horizontal(|ui| {
@@ -678,10 +637,7 @@ impl PaneView for TranscriberPane {
                                         .selected_text(vad_type.as_ref()).show_ui(ui, |ui| {
                                         for vad in VadType::iter() {
                                             if ui.selectable_value(&mut vad_type, vad, vad.as_ref())
-                                                .on_hover_ui(|ui| {
-                                                    ui.style_mut().interaction.selectable_labels = true;
-                                                    ui.label(vad.tooltip());
-                                                })
+                                                .on_hover_text(vad.tooltip())
                                                 .clicked() {
                                                 let new_vad_configs = vad_configs.with_vad_type(vad_type);
                                                 controller.write_vad_configs(new_vad_configs);
@@ -696,12 +652,9 @@ impl PaneView for TranscriberPane {
                                 ui.end_row();
 
                                 // FRAME SIZE
-                                ui.label("Frame size:").on_hover_ui(|ui| {
-                                    ui.style_mut().interaction.selectable_labels = true;
-                                    ui.label("Sets the length of the audio frame used to detect voice.\n\
+                                ui.label("Frame size:").on_hover_text("Sets the length of the audio frame used to detect voice.\n\
                                     Larger sizes may introduce latency but provide better results.\n\
                                     Set to Auto for system defaults.");
-                                });
 
                                 let mut frame_size = vad_configs.frame_size();
                                 egui::ComboBox::from_id_salt("vad_frame_size_combobox")
@@ -716,12 +669,9 @@ impl PaneView for TranscriberPane {
                                 ui.end_row();
 
                                 // STRICTNESS
-                                ui.label("Strictness:").on_hover_ui(|ui| {
-                                    ui.style_mut().interaction.selectable_labels = true;
-                                    ui.label("Sets the voice-detection thresholds.\n\
+                                ui.label("Strictness:").on_hover_text("Sets the voice-detection thresholds.\n\
                                     Higher strictness can improve performance, but may increase false negatives.\n\
                                     Set to Auto for system defaults.");
-                                });
                                 let mut vad_strictness = vad_configs.strictness();
                                 egui::ComboBox::from_id_salt("vad_strictness_combobox")
                                     .selected_text(vad_strictness.as_ref())
@@ -737,11 +687,8 @@ impl PaneView for TranscriberPane {
 
                                 // USE OFFLINE
                                 let mut vad_use_offline = vad_configs.use_vad_offline();
-                                ui.label("File VAD:").on_hover_ui(|ui| {
-                                    ui.style_mut().interaction.selectable_labels = true;
-                                    ui.label("Run VAD for file transcription.\n\
+                                ui.label("File VAD:").on_hover_text("Run VAD for file transcription.\n\
                                     Significantly improves performance but may cause transcription artifacts.");
-                                });
                                 if ui.add(egui::Checkbox::without_text(&mut vad_use_offline)).on_hover_cursor(egui::CursorIcon::Default)
                                     .clicked() {
                                     let new_vad_configs = vad_configs.with_use_vad_offline(vad_use_offline);
@@ -765,8 +712,8 @@ impl PaneView for TranscriberPane {
         // MODALS -> this doesn't need to be in the scroll area.
         if self.recording_modal {
             controller.try_get_completed_recordings(&mut self.recordings_buffer);
-            let handle_recordings = |file_name| {
-                match controller.try_get_recording_path(Arc::clone(&file_name)) {
+            let handle_recordings =
+                |file_name| match controller.try_get_recording_path(Arc::clone(&file_name)) {
                     Some(path) => {
                         controller.set_audio_file_path(path);
                         self.realtime = false;
@@ -777,8 +724,7 @@ impl PaneView for TranscriberPane {
                         let toast = egui_notify::Toast::warning("Failed to find saved recording.");
                         controller.send_toast(toast);
                     }
-                }
-            };
+                };
 
             let modal = build_recording_modal(
                 ui,
@@ -841,10 +787,7 @@ impl PaneView for TranscriberPane {
 
                                             if ui
                                                 .button(link_button)
-                                                .on_hover_ui(|ui| {
-                                                    ui.style_mut().interaction.selectable_labels = true;
-                                                    ui.label("Launch the browser to open a model repository.");
-                                                })
+                                                .on_hover_text("Launch the browser to open a model repository.")
                                                 .clicked()
                                             {
                                                 self.download_modal = false;
@@ -888,10 +831,7 @@ impl PaneView for TranscriberPane {
                                     // Tooltip for default moddels
                                 })
                                     .header_response
-                                    .on_hover_ui(|ui| {
-                                        ui.style_mut().interaction.selectable_labels = true;
-                                        ui.label("A selection of downloadable models sourced from huggingface.");
-                                    });
+                                    .on_hover_text("A selection of downloadable models sourced from huggingface.");
                             });
                     });
                 });

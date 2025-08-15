@@ -7,7 +7,12 @@ use crate::controller::transcriber::TranscriberEngine;
 use crate::controller::visualizer::VisualizerEngine;
 use crate::controller::worker::WorkerEngine;
 use crate::controller::writer::WriterEngine;
-use crate::controller::{AmortizedDownloadProgress, AmortizedProgress, Bus, CompletedRecordingJobs, ConsoleMessage, LatestError, ModelFile, OfflineTranscriberFeedback, Progress, RotationDirection, DEFAULT_PROGRESS_SLAB_CAPACITY, NUM_VISUALIZER_BUCKETS, SMALL_UTILITY_QUEUE_SIZE, UTILITY_QUEUE_SIZE};
+use crate::controller::{
+    AmortizedDownloadProgress, AmortizedProgress, Bus, CompletedRecordingJobs, ConsoleMessage,
+    DEFAULT_PROGRESS_SLAB_CAPACITY, LatestError, ModelFile, NUM_VISUALIZER_BUCKETS,
+    OfflineTranscriberFeedback, Progress, RotationDirection, SMALL_UTILITY_QUEUE_SIZE,
+    UTILITY_QUEUE_SIZE,
+};
 use crate::controller::{AnalysisType, FileDownload};
 use crate::utils::errors::RibbleError;
 use crate::utils::preferences::UserPreferences;
@@ -25,7 +30,6 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
 
 // NOTE: any meaningful/user-commanded background work should clear the "latest error" before starting work.
 // Most are covered, some may be missing, TODO: test.
@@ -70,6 +74,7 @@ impl Kernel {
             offline_transcriber_feedback,
             vad_configs,
             recording_configs,
+            export_format,
             user_preferences,
         } = Self::deserialize_user_data(data_directory);
         let (console_sender, console_receiver) = get_channel(UTILITY_QUEUE_SIZE);
@@ -89,7 +94,7 @@ impl Kernel {
             download_sender,
         );
 
-        let recorder_engine = RecorderEngine::new(recording_configs, &bus);
+        let recorder_engine = RecorderEngine::new(recording_configs, export_format, &bus);
         let console_engine = ConsoleEngine::new(
             console_receiver,
             user_preferences.console_message_size(),
@@ -312,6 +317,13 @@ impl Kernel {
         self.recorder_engine.write_recorder_configs(new_configs);
     }
 
+    pub(super) fn read_export_format(&self) -> RibbleRecordingExportFormat {
+        self.recorder_engine.read_export_format()
+    }
+    pub(super) fn write_export_format(&self, export_format: RibbleRecordingExportFormat) {
+        self.recorder_engine.write_export_format(export_format);
+    }
+
     pub(super) fn start_recording(&self) {
         let backend = Arc::clone(&self.audio_backend);
         // Clear the latest error before starting background work.
@@ -327,7 +339,6 @@ impl Kernel {
         self.writer_engine.is_clearing()
     }
     pub(super) fn clear_recording_cache(&self) {
-
         // Clear the latest error before starting background work.
         self.console_engine.clear_latest_error();
 
@@ -362,7 +373,6 @@ impl Kernel {
         recording_file_name: Arc<str>,
         output_format: RibbleRecordingExportFormat,
     ) {
-
         // Clear the latest error before starting background work.
         self.console_engine.clear_latest_error();
 
@@ -456,6 +466,8 @@ impl Kernel {
             self.transcriber_engine.read_offline_transcriber_feedback();
         let vad_configs = *self.transcriber_engine.read_vad_configs();
         let recording_configs = *self.recorder_engine.read_recorder_configs();
+        let export_format = self.recorder_engine.read_export_format();
+        // TODO: add the recording export format
         let user_preferences = *self.user_preferences.load_full();
 
         let state = KernelState {
@@ -463,6 +475,7 @@ impl Kernel {
             offline_transcriber_feedback,
             vad_configs,
             recording_configs,
+            export_format,
             user_preferences,
         };
 
@@ -470,7 +483,11 @@ impl Kernel {
         match File::create(canonicalized.as_path()) {
             Ok(configs_file) => {
                 let writer = BufWriter::new(configs_file);
-                match ron::Options::default().to_io_writer_pretty(writer, &state, PrettyConfig::default()) {
+                match ron::Options::default().to_io_writer_pretty(
+                    writer,
+                    &state,
+                    PrettyConfig::default(),
+                ) {
                     Ok(_) => {
                         log::info!("User data serialized to: {}", canonicalized.display());
                     }
@@ -530,6 +547,9 @@ struct KernelState {
     vad_configs: VadConfigs,
     #[serde(default)]
     recording_configs: RibbleRecordingConfigs,
+    #[serde(default)]
+    export_format: RibbleRecordingExportFormat,
+    // TODO: add the export format to the KernelState.
     #[serde(default)]
     user_preferences: UserPreferences,
 }

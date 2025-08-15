@@ -1,33 +1,41 @@
 use crate::controller::VisualizerPacket;
 use crate::controller::WriteRequest;
 use crate::controller::{
-    Bus, ConsoleMessage, Progress, ProgressMessage, RibbleMessage, WorkRequest, UTILITY_QUEUE_SIZE,
+    Bus, ConsoleMessage, Progress, ProgressMessage, RibbleMessage, UTILITY_QUEUE_SIZE, WorkRequest,
 };
 use crate::utils::errors::RibbleError;
-use crate::utils::recorder_configs::RibbleRecordingConfigs;
+use crate::utils::recorder_configs::{
+    AtomicRibbleRecordingExportFormat, RibbleRecordingConfigs, RibbleRecordingExportFormat,
+};
 use arc_swap::ArcSwap;
 use crossbeam::channel::TrySendError;
 use ribble_whisper::audio::audio_backend::AudioBackend;
 use ribble_whisper::audio::microphone::MicCapture;
 use ribble_whisper::audio::recorder::ArcChannelSink;
-use ribble_whisper::utils::{get_channel, Sender};
+use ribble_whisper::utils::{Sender, get_channel};
 use std::error::Error;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 struct RecorderEngineState {
     recorder_running: Arc<AtomicBool>,
     recorder_configs: ArcSwap<RibbleRecordingConfigs>,
+    export_format: AtomicRibbleRecordingExportFormat,
     progress_message_sender: Sender<ProgressMessage>,
     write_request_sender: Sender<WriteRequest>,
     visualizer_sample_sender: Sender<VisualizerPacket>,
 }
 
 impl RecorderEngineState {
-    fn new(configs: RibbleRecordingConfigs, bus: &Bus) -> Self {
+    fn new(
+        configs: RibbleRecordingConfigs,
+        export_format: RibbleRecordingExportFormat,
+        bus: &Bus,
+    ) -> Self {
         Self {
             recorder_running: Arc::new(AtomicBool::new(false)),
             recorder_configs: ArcSwap::from(Arc::new(configs)),
+            export_format: AtomicRibbleRecordingExportFormat::new(export_format),
             progress_message_sender: bus.progress_message_sender(),
             write_request_sender: bus.write_request_sender(),
             visualizer_sample_sender: bus.visualizer_sample_sender(),
@@ -120,7 +128,10 @@ impl RecorderEngineState {
 
                     let next_visualizer_sample =
                         VisualizerPacket::new(Arc::clone(&audio), sample_rate as f64);
-                    if let Err(e) = self.visualizer_sample_sender.try_send(next_visualizer_sample) {
+                    if let Err(e) = self
+                        .visualizer_sample_sender
+                        .try_send(next_visualizer_sample)
+                    {
                         log::warn!(
                             "Cannot send new visualizer samples, channel closed or too small.\n\
                             Error: {}\n\
@@ -153,9 +164,13 @@ pub(super) struct RecorderEngine {
 }
 
 impl RecorderEngine {
-    pub(super) fn new(configs: RibbleRecordingConfigs, bus: &Bus) -> Self {
+    pub(super) fn new(
+        configs: RibbleRecordingConfigs,
+        export_format: RibbleRecordingExportFormat,
+        bus: &Bus,
+    ) -> Self {
         Self {
-            inner: Arc::new(RecorderEngineState::new(configs, bus)),
+            inner: Arc::new(RecorderEngineState::new(configs, export_format, bus)),
             work_request_sender: bus.work_request_sender(),
         }
     }
@@ -203,5 +218,14 @@ impl RecorderEngine {
         self.inner
             .recorder_configs
             .store(Arc::new(recorder_configs));
+    }
+
+    pub(super) fn read_export_format(&self) -> RibbleRecordingExportFormat {
+        self.inner.export_format.load(Ordering::Acquire)
+    }
+    pub(super) fn write_export_format(&self, export_format: RibbleRecordingExportFormat) {
+        self.inner
+            .export_format
+            .store(export_format, Ordering::Release);
     }
 }

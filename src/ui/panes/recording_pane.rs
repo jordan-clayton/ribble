@@ -1,13 +1,12 @@
-use crate::controller::ribble_controller::RibbleController;
 use crate::controller::CompletedRecordingJobs;
-use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::controller::ribble_controller::RibbleController;
 use crate::ui::panes::PaneView;
+use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::ui::widgets::recording_modal::build_recording_modal;
 use crate::ui::{GRID_ROW_SPACING_COEFF, PANE_INNER_MARGIN};
 use crate::utils::recorder_configs::{
     RibbleChannels, RibblePeriod, RibbleRecordingExportFormat, RibbleSampleRate,
 };
-use std::path::PathBuf;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 
@@ -19,11 +18,6 @@ pub(crate) struct RecordingPane {
     #[serde(skip)]
     #[serde(default)]
     recording_modal: bool,
-    // TODO: if this becomes genuinely important to store,
-    // stick it... somewhere, like the kernel.
-    #[serde(skip)]
-    #[serde(default)]
-    export_format: RibbleRecordingExportFormat,
 }
 
 impl PaneView for RecordingPane {
@@ -41,13 +35,18 @@ impl PaneView for RecordingPane {
         should_close: &mut bool,
         controller: RibbleController,
     ) -> egui::Response {
+        // Runner flags
         let recorder_running = controller.recorder_running();
         let audio_worker_running = recorder_running || controller.transcriber_running();
+
+        // Configs/Export
         let configs = *controller.read_recorder_configs();
+        let mut export_format = controller.read_export_format();
+
+        // Pane UI
         let pane_col = ui.visuals().panel_fill;
 
-        // TODO: this might not work just yet - test out and remove this todo if it's right.
-        // Create a (hopefully) lower-priority pane-sized interaction hitbox
+        // Lowest-priority pane response (for dragging + passthrough interactions)
         let pane_id = egui::Id::new("recording_pane");
         let resp = ui
             .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
@@ -64,7 +63,10 @@ impl PaneView for RecordingPane {
                     .show(ui, |ui| {
                         ui.vertical_centered_justified(|ui| {
                             if ui
-                                .add_enabled(!audio_worker_running, egui::Button::new("Start recording"))
+                                .add_enabled(
+                                    !audio_worker_running,
+                                    egui::Button::new("Start recording"),
+                                )
                                 .on_hover_cursor(egui::CursorIcon::Default)
                                 .clicked()
                             {
@@ -96,7 +98,6 @@ impl PaneView for RecordingPane {
                                 self.recording_modal = true;
                             }
 
-
                             ui.add_space(button_spacing);
                             ui.separator();
                         });
@@ -107,7 +108,9 @@ impl PaneView for RecordingPane {
                                 egui::Grid::new("recording_configs_grid")
                                     .num_columns(2)
                                     .striped(true)
-                                    .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
+                                    .min_row_height(
+                                        ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF,
+                                    )
                                     .show(ui, |ui| {
                                         ui.label("Sample Rate:");
                                         let mut sample_rate = configs.sample_rate();
@@ -124,9 +127,11 @@ impl PaneView for RecordingPane {
                                                             )
                                                             .clicked()
                                                         {
-                                                            let new_configs =
-                                                                configs.with_sample_rate(sample_rate);
-                                                            controller.write_recorder_configs(new_configs);
+                                                            let new_configs = configs
+                                                                .with_sample_rate(sample_rate);
+                                                            controller.write_recorder_configs(
+                                                                new_configs,
+                                                            );
                                                         }
                                                     }
                                                 })
@@ -154,7 +159,8 @@ impl PaneView for RecordingPane {
                                                     {
                                                         let new_configs =
                                                             configs.with_num_channels(channels);
-                                                        controller.write_recorder_configs(new_configs);
+                                                        controller
+                                                            .write_recorder_configs(new_configs);
                                                     }
                                                 }
                                             })
@@ -176,8 +182,10 @@ impl PaneView for RecordingPane {
                                                         )
                                                         .clicked()
                                                     {
-                                                        let new_configs = configs.with_period(period);
-                                                        controller.write_recorder_configs(new_configs);
+                                                        let new_configs =
+                                                            configs.with_period(period);
+                                                        controller
+                                                            .write_recorder_configs(new_configs);
                                                     }
                                                 }
                                             })
@@ -203,28 +211,43 @@ impl PaneView for RecordingPane {
                             let export_dropdown = ui.collapsing("Export Configs", |ui| {
                                 egui::Grid::new("recording_export_format")
                                     .num_columns(2)
-                                    .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
+                                    .min_row_height(
+                                        ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF,
+                                    )
                                     .show(ui, |ui| {
-                                        ui.label("Export format");
+                                        ui.label("Export format").on_hover_text(
+                                            "Set the (wav) audio file export format. Supported: I16, F32.",
+                                        );
                                         // Recording Format Combobox.
                                         egui::ComboBox::from_id_salt("export_format_combobox")
-                                            .selected_text(self.export_format.as_ref())
+                                            .selected_text(export_format.as_ref())
                                             .show_ui(ui, |ui| {
                                                 for format in RibbleRecordingExportFormat::iter() {
                                                     // NOTE: at the moment, the RecordingExportFormat is not stored anywhere
                                                     // It will initialize to the default upon the pane loading
-                                                    ui.selectable_value(
-                                                        &mut self.export_format,
-                                                        format,
-                                                        format.as_ref(),
-                                                    );
+                                                    if ui
+                                                        .selectable_value(
+                                                            &mut export_format,
+                                                            format,
+                                                            format.as_ref(),
+                                                        )
+                                                        .on_hover_text(format.tooltip())
+                                                        .clicked()
+                                                    {
+                                                        controller
+                                                            .write_export_format(export_format);
+                                                    };
                                                 }
-                                            }).response.on_hover_cursor(egui::CursorIcon::Default);
+                                            })
+                                            .response
+                                            .on_hover_cursor(egui::CursorIcon::Default);
                                         ui.end_row();
                                     });
                             });
 
-                            export_dropdown.header_response.on_hover_cursor(egui::CursorIcon::Default);
+                            export_dropdown
+                                .header_response
+                                .on_hover_cursor(egui::CursorIcon::Default);
                         });
                     });
             });
@@ -232,35 +255,39 @@ impl PaneView for RecordingPane {
         if self.recording_modal {
             controller.try_get_completed_recordings(&mut self.recordings_buffer);
             let handle_recordings = |file_name| {
-                if let Some(_) = controller.try_get_recording_path(Arc::clone(&file_name)) {
-                    match rfd::FileDialog::new()
+                if controller
+                    .try_get_recording_path(Arc::clone(&file_name))
+                    .is_some()
+                {
+                    if let Some(out_path) = rfd::FileDialog::new()
                         .add_filter("wav", &["wav"])
                         .set_directory(controller.base_dir())
-                        .save_file() {
-                        Some(out_path) => {
-                            self.recording_modal = false;
-                            // This is a little bit of a tricky detail of RFD + GTK.
-                            // The extension isn't always appended to the end of the file name,
-                            // so there needs to be an explicit check to ensure.
-                            // MacOs and Windows will both append the proper extension.
-                            #[cfg(target_os = "linux")]
-                            {
-                                let out_path = if out_path.extension().is_some_and(|ext| ext == "wav") {
-                                    out_path
-                                } else {
-                                    out_path.with_extension("wav")
-                                };
-                                controller.export_recording(out_path, file_name, self.export_format);
-                            }
-
-                            #[cfg(not(target_os = "linux"))]
-                            {
-                                controller.export_recording(out_path, file_name, self.export_format);
-                            }
+                        .save_file()
+                    {
+                        self.recording_modal = false;
+                        // This is a little bit of a tricky detail of RFD + GTK.
+                        // The extension isn't always appended to the end of the file name,
+                        // so there needs to be an explicit check to ensure.
+                        // MacOs and Windows will both append the proper extension.
+                        #[cfg(target_os = "linux")]
+                        {
+                            let out_path = if out_path.extension().is_some_and(|ext| ext == "wav") {
+                                out_path
+                            } else {
+                                out_path.with_extension("wav")
+                            };
+                            controller.export_recording(out_path, file_name, export_format);
                         }
-                        None => {}
+
+                        #[cfg(not(target_os = "linux"))]
+                        {
+                            controller.export_recording(out_path, file_name, export_format);
+                        }
                     }
-                } else if let None = controller.try_get_recording_path(Arc::clone(&file_name)) {
+                } else if controller
+                    .try_get_recording_path(Arc::clone(&file_name))
+                    .is_none()
+                {
                     log::warn!("Temporary recording file missing: {file_name}");
                     let toast = egui_notify::Toast::warning("Failed to find saved recording.");
                     controller.send_toast(toast);

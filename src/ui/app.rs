@@ -8,9 +8,11 @@ use crate::controller::audio_backend_proxy::{
     AudioBackendProxy, AudioCaptureRequest, SharedSdl2Capture,
 };
 use crate::controller::ribble_controller::RibbleController;
-use crate::controller::{AmortizedDownloadProgress, AmortizedProgress, LatestError, UI_UPDATE_QUEUE_SIZE};
-use crate::ui::panes::ribble_pane::{ClosableRibbleViewPane, RibblePaneId};
+use crate::controller::{
+    AmortizedDownloadProgress, AmortizedProgress, LatestError, UI_UPDATE_QUEUE_SIZE,
+};
 use crate::ui::panes::RibbleTree;
+use crate::ui::panes::ribble_pane::{ClosableRibbleViewPane, RibblePaneId};
 use crate::ui::widgets::pie_progress::pie_progress;
 use crate::ui::widgets::recording_icon::recording_icon;
 use crate::utils::errors::{RibbleError, RibbleErrorCategory};
@@ -21,13 +23,13 @@ use egui_notify::{Toast, Toasts};
 use egui_theme_lerp::ThemeAnimator;
 use irox_egui_extras::progressbar::ProgressBar;
 use ribble_whisper::audio::audio_backend::{
-    default_backend, AudioBackend, CaptureSpec, Sdl2Backend,
+    AudioBackend, CaptureSpec, Sdl2Backend, default_backend,
 };
 use ribble_whisper::audio::microphone::Sdl2Capture;
 use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::sdl2;
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{get_channel, Receiver};
+use ribble_whisper::utils::{Receiver, get_channel};
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 
@@ -51,8 +53,6 @@ const BOTTOM_PROGRESS_COLUMN_RATIO: f32 = 0.9;
 
 // NOTE: If this works for everything in the app, move it to a common place (mod) or make it public.
 const TOP_BAR_BUTTON_SIZE: f32 = 20.0;
-
-// TODO: ADD A "LATEST ERROR" STATUS BAR SECTION TO THE BOTTOM.
 
 // TODO: keyboard shortcuts?
 
@@ -203,6 +203,10 @@ impl Ribble {
         self.check_join_last_save();
         let controller = self.controller.clone();
 
+        // TODO: This seems to create more problems than it solves.
+        // It might be better to allow the panes to close and let the user retrieve the pane view as
+        // needed.
+        //
         // Run a pass over the tree to make sure all non-closable panes are still in view.
         self.tree.check_insert_non_closable_panes();
 
@@ -240,8 +244,11 @@ impl eframe::App for Ribble {
                     // If there's a problem with communicating to send a handle to the requesting thread,
                     // treat this as an error and close the app after logging.
                     if let Err(e) = sender.try_send(shared_capture) {
-                        log::error!("Cannot return audio device to requesting thread.\n\
-                        Error source: {:#?}", e.source());
+                        log::error!(
+                            "Cannot return audio device to requesting thread.\n\
+                        Error source: {:#?}",
+                            e.source()
+                        );
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 }
@@ -297,8 +304,7 @@ impl eframe::App for Ribble {
                         let header_width = ui.max_rect().width();
                         // Allocate a top "toolbar"-sized toolbar.
                         let desired_size = egui::Vec2::new(header_width, header_height);
-                        let layout =
-                            egui::Layout::left_to_right(egui::Align::Center);
+                        let layout = egui::Layout::left_to_right(egui::Align::Center);
                         ui.allocate_ui_with_layout(desired_size, layout, |ui| {
                             let real_time = self.controller.realtime_running();
                             let offline = self.controller.offline_running();
@@ -309,11 +315,7 @@ impl eframe::App for Ribble {
                             // to get Red-Green-Yellow that "mostly" matches with the user's selected theme.
                             let theme = match self.controller.get_app_theme() {
                                 None => {
-                                    match ui
-                                        .ctx()
-                                        .system_theme()
-                                        .unwrap_or(egui::Theme::Dark)
-                                    {
+                                    match ui.ctx().system_theme().unwrap_or(egui::Theme::Dark) {
                                         egui::Theme::Dark => RibbleAppTheme::Mocha
                                             .app_theme()
                                             .expect("This theme has 1:1 mapping with catppuccin."),
@@ -338,7 +340,11 @@ impl eframe::App for Ribble {
                                 };
                                 (theme.red, msg, device_running)
                             };
-                            ui.add(recording_icon(color.into(), animate, RECORDING_ICON_FLICKER_SPEED));
+                            ui.add(recording_icon(
+                                color.into(),
+                                animate,
+                                RECORDING_ICON_FLICKER_SPEED,
+                            ));
                             ui.monospace(msg);
                         });
                     });
@@ -348,13 +354,13 @@ impl eframe::App for Ribble {
                         let header_width = ui.max_rect().width();
                         // Allocate a top "toolbar"-sized toolbar.
                         let desired_size = egui::Vec2::new(header_width, header_height);
-                        let layout =
-                            egui::Layout::right_to_left(egui::Align::Center);
+                        let layout = egui::Layout::right_to_left(egui::Align::Center);
 
                         // Allocate a top "toolbar"-sized toolbar.
                         ui.allocate_ui_with_layout(desired_size, layout, |ui| {
                             // UH, this does not seem to be respected by egui 0.32.0
                             // Until this bug gets resolved, this needs to use a richtext object instead
+                            // NOTE: The fix for this is coming in egui 0.32.1
 
                             // This -should- hopefully be restored at some point
                             // ui.style_mut().text_styles.insert(
@@ -365,13 +371,15 @@ impl eframe::App for Ribble {
                             // NOTE NOTE NOTE: if memory allocation churn becomes an issue, this is low-hanging fruit to cache
                             // (or just set it back when the error is fixed).
 
-                            let settings_button = egui::RichText::new(HAMBURGER).size(TOP_BAR_BUTTON_SIZE);
+                            let settings_button =
+                                egui::RichText::new(HAMBURGER).size(TOP_BAR_BUTTON_SIZE);
 
                             // Far right hamburger button.
                             ui.menu_button(settings_button, |ui| {
                                 ui.menu_button("Window", |ui| {
-                                    for pane in ClosableRibbleViewPane::iter()
-                                        .filter(|p| !matches!(*p, ClosableRibbleViewPane::UserPreferences)) {
+                                    for pane in ClosableRibbleViewPane::iter().filter(|p| {
+                                        !matches!(*p, ClosableRibbleViewPane::UserPreferences)
+                                    }) {
                                         if ui.button(pane.as_ref()).clicked() {
                                             self.tree.add_new_pane(pane.into());
                                             ui.ctx().request_repaint();
@@ -410,7 +418,8 @@ impl eframe::App for Ribble {
                                 if ui.button("Quit").clicked() {
                                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                                 }
-                                #[cfg(debug_assertions)] {
+                                #[cfg(debug_assertions)]
+                                {
                                     ui.separator();
                                     ui.menu_button("Debug menu", |ui| {
                                         // This mightn't be necessary.
@@ -423,14 +432,17 @@ impl eframe::App for Ribble {
                                             if let Some(id) = self.debug_download_id.take() {
                                                 self.controller.remove_debug_download(id);
                                             }
-                                            self.debug_download_id = Some(self.controller.add_debug_download());
+                                            self.debug_download_id =
+                                                Some(self.controller.add_debug_download());
                                         }
 
                                         if ui.button("Test Indeterminate Download").clicked() {
                                             if let Some(id) = self.debug_download_id.take() {
                                                 self.controller.remove_debug_download(id);
                                             }
-                                            self.debug_download_id = Some(self.controller.add_debug_indeterminate_download());
+                                            self.debug_download_id = Some(
+                                                self.controller.add_debug_indeterminate_download(),
+                                            );
                                         }
 
                                         // This mightn't be necessary.
@@ -479,7 +491,8 @@ impl eframe::App for Ribble {
 
                             let download_button = match self.cached_downloads_progress {
                                 AmortizedDownloadProgress::NoJobs => {
-                                    let no_downloads_button = egui::RichText::new(NO_DOWNLOADS).size(TOP_BAR_BUTTON_SIZE);
+                                    let no_downloads_button =
+                                        egui::RichText::new(NO_DOWNLOADS).size(TOP_BAR_BUTTON_SIZE);
                                     ui.add(egui::Button::selectable(false, no_downloads_button))
                                 }
                                 AmortizedDownloadProgress::Total {
@@ -487,11 +500,13 @@ impl eframe::App for Ribble {
                                     total_size,
                                 } => {
                                     // TODO: this needs to be tested -> It is not known whether or not the drawing behaves as written.
-                                    let resp = ui.add(pie_progress(current as f32, total_size as f32));
+                                    let resp =
+                                        ui.add(pie_progress(current as f32, total_size as f32));
                                     ui.ctx().request_repaint();
                                     resp
                                 }
-                            }.on_hover_ui(|ui| {
+                            }
+                            .on_hover_ui(|ui| {
                                 ui.style_mut().interaction.selectable_labels = true;
                                 ui.label("Show downloads");
                             });
@@ -509,162 +524,196 @@ impl eframe::App for Ribble {
             .min_height(0.0)
             .resizable(false)
             .show(ctx, |ui| {
-                ui.columns_const(|[col1, col2, col3]|
+                ui.columns_const(|[col1, col2, col3]| {
+                    #[cfg(debug_assertions)]
                     {
-                        #[cfg(debug_assertions)]
-                        {
-                            col1.vertical_centered_justified(|ui| {
-                                ui.horizontal(|ui| {
-                                    // FPS counter -> NOTE this is not mean frame time and is not smoothed out
-                                    // TODO: look at maybe implementing smoothing at some point.
-                                    // stable_dt is in seconds
-                                    let dt = ui.ctx().input(|i| { i.stable_dt });
-                                    let dt_ms = dt * 1000.0;
-                                    let fps = 1.0 / dt;
-                                    ui.monospace(format!("FPS: {fps:.2}"));
-                                    ui.monospace(format!("Frame time: {dt_ms:.2} ms"));
-                                });
+                        col1.vertical_centered_justified(|ui| {
+                            ui.horizontal(|ui| {
+                                // FPS counter -> NOTE this is not mean frame time and is not smoothed out
+                                // TODO: look at maybe implementing smoothing at some point.
+                                // stable_dt is in seconds
+                                let dt = ui.ctx().input(|i| i.stable_dt);
+                                let dt_ms = dt * 1000.0;
+                                let fps = 1.0 / dt;
+                                ui.monospace(format!("FPS: {fps:.2}"));
+                                ui.monospace(format!("Frame time: {dt_ms:.2} ms"));
                             });
-                        }
+                        });
+                    }
 
-                        col2.vertical_centered_justified(|ui| {
-                            // LATEST ERROR.
-                            // TODO: if/when getting to cleanup, this could probably be a method.
-                            let mut error_ui_closure = |ui: &mut egui::Ui, error: &LatestError| {
-                                // Try and do a single widget here.
-                                let mut layout_job = egui::text::LayoutJob::default();
-                                let font_id = egui::TextStyle::Monospace.resolve(ui.style());
-                                layout_job.append(ERROR_ICON, 0.0, egui::TextFormat {
+                    col2.vertical_centered_justified(|ui| {
+                        // LATEST ERROR.
+                        // TODO: if/when getting to cleanup, this could probably be a method.
+                        let mut error_ui_closure = |ui: &mut egui::Ui, error: &LatestError| {
+                            // Try and do a single widget here.
+                            let mut layout_job = egui::text::LayoutJob::default();
+                            let font_id = egui::TextStyle::Monospace.resolve(ui.style());
+                            layout_job.append(
+                                ERROR_ICON,
+                                0.0,
+                                egui::TextFormat {
                                     font_id: font_id.clone(),
                                     color: ui.visuals().error_fg_color,
                                     ..Default::default()
-                                });
+                                },
+                            );
 
-                                layout_job.append(" ", 0.0, Default::default());
+                            layout_job.append(" ", 0.0, Default::default());
 
-                                layout_job.append(error.category().as_ref(), 0.0,
-                                                  egui::TextFormat { font_id, ..Default::default() });
+                            layout_job.append(
+                                error.category().as_ref(),
+                                0.0,
+                                egui::TextFormat {
+                                    font_id,
+                                    ..Default::default()
+                                },
+                            );
 
-                                if ui.label(layout_job)
-                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                    .clicked() {
-                                    self.tree.add_new_pane(RibblePaneId::Console);
-                                    ui.ctx().request_repaint();
+                            if ui
+                                .label(layout_job)
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .clicked()
+                            {
+                                self.tree.add_new_pane(RibblePaneId::Console);
+                                ui.ctx().request_repaint();
+                            }
+                        };
+
+                        match self.controller.get_latest_error().as_ref() {
+                            None => {
+                                #[cfg(debug_assertions)]
+                                {
+                                    let dummy_error = LatestError::new(
+                                        1,
+                                        RibbleErrorCategory::ConversionError,
+                                        std::time::Instant::now(),
+                                    );
+                                    error_ui_closure(ui, &dummy_error);
                                 }
-                            };
+                            }
+                            Some(error) => {
+                                error_ui_closure(ui, error);
+                            }
+                        }
+                    });
 
-                            match self.controller.get_latest_error().as_ref() {
-                                None => {
-                                    #[cfg(debug_assertions)]
-                                    {
-                                        let dummy_error = LatestError::new(1, RibbleErrorCategory::ConversionError, std::time::Instant::now());
-                                        error_ui_closure(ui, &dummy_error);
-                                    }
+                    col3.vertical_centered_justified(|ui| {
+                        let interact_size = ui.spacing().interact_size;
+                        let desired_size = egui::vec2(ui.available_width(), interact_size.y);
+                        let layout = egui::Layout::right_to_left(egui::Align::Center);
+
+                        ui.allocate_ui_with_layout(desired_size, layout, |ui| {
+                            if let Some(progress) = self.controller.try_get_amortized_progress() {
+                                self.cached_progress = progress;
+                            }
+
+                            // Print the ribble version
+                            ui.monospace(self.version.semver_string());
+                            // NOTE: this technically spills over into the middle column
+                            // but expect this to never overlap
+                            let desired_size = egui::vec2(
+                                ui.available_width() * BOTTOM_PROGRESS_COLUMN_RATIO,
+                                interact_size.y,
+                            );
+
+                            // NOTE: THIS IS NOT CORRECT YET.
+                            match self.cached_progress {
+                                AmortizedProgress::NoJobs => {
+                                    ui.horizontal(|ui| {
+                                        #[cfg(debug_assertions)]
+                                        {
+                                            let (rect, response) = ui.allocate_exact_size(
+                                                desired_size,
+                                                egui::Sense::click(),
+                                            );
+                                            if ui.is_rect_visible(rect) {
+                                                let color = egui::Color32::from_rgb(255, 0, 0);
+
+                                                ui.painter().rect_stroke(
+                                                    rect,
+                                                    0.0,
+                                                    egui::Stroke::new(1.0, color),
+                                                    egui::StrokeKind::Middle,
+                                                );
+                                            }
+                                            if response
+                                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                                .clicked()
+                                            {
+                                                self.tree.add_new_pane(RibblePaneId::Progress);
+                                            }
+                                            ui.monospace("Working:");
+                                        }
+                                    });
                                 }
-                                Some(error) => {
-                                    error_ui_closure(ui, error);
+                                AmortizedProgress::Determinate {
+                                    current,
+                                    total_size,
+                                } => {
+                                    ui.horizontal(|ui| {
+                                        let progress = current as f32 / total_size as f32;
+
+                                        debug_assert!(!progress.is_nan());
+                                        // TODO: check for infinities/Nan at the call site. (current/total)
+
+                                        let pb = ProgressBar::new(progress)
+                                            .desired_width(desired_size.x)
+                                            .desired_height(desired_size.y * 0.5);
+
+                                        let (rect, resp) = ui.allocate_exact_size(
+                                            desired_size,
+                                            egui::Sense::click(),
+                                        );
+
+                                        if ui.is_rect_visible(rect) {
+                                            ui.put(rect, pb);
+                                        }
+
+                                        // Paint a progress bar
+                                        if resp
+                                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                            .clicked()
+                                        {
+                                            log::info!("Progress bar clicked");
+                                            self.tree.add_new_pane(RibblePaneId::Progress);
+                                        }
+
+                                        ui.monospace("Working:");
+                                        ui.ctx().request_repaint();
+                                    });
+                                }
+                                AmortizedProgress::Indeterminate => {
+                                    ui.horizontal(|ui| {
+                                        let pb = ProgressBar::indeterminate()
+                                            .desired_width(desired_size.x)
+                                            .desired_height(desired_size.y * 0.5);
+
+                                        let (rect, resp) = ui.allocate_exact_size(
+                                            desired_size,
+                                            egui::Sense::click(),
+                                        );
+
+                                        if ui.is_rect_visible(rect) {
+                                            ui.put(rect, pb);
+                                        }
+
+                                        // Paint a progress bar
+                                        if resp
+                                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                            .clicked()
+                                        {
+                                            log::info!("Progress bar clicked");
+                                            self.tree.add_new_pane(RibblePaneId::Progress);
+                                        }
+
+                                        ui.monospace("Working:");
+                                        ui.ctx().request_repaint();
+                                    });
                                 }
                             }
                         });
-
-                        col3.vertical_centered_justified(|ui| {
-                            let interact_size = ui.spacing().interact_size;
-                            let desired_size = egui::vec2(ui.available_width(), interact_size.y);
-                            let layout = egui::Layout::right_to_left(egui::Align::Center);
-
-                            ui.allocate_ui_with_layout(desired_size, layout, |ui| {
-                                if let Some(progress) = self.controller.try_get_amortized_progress() {
-                                    self.cached_progress = progress;
-                                }
-
-                                // Print the ribble version
-                                ui.monospace(self.version.semver_string());
-                                // NOTE: this technically spills over into the middle column
-                                // but expect this to never overlap
-                                let desired_size = egui::vec2(ui.available_width() * BOTTOM_PROGRESS_COLUMN_RATIO, interact_size.y);
-
-                                // NOTE: THIS IS NOT CORRECT YET.
-                                match self.cached_progress {
-                                    AmortizedProgress::NoJobs => {
-                                        ui.horizontal(|ui| {
-                                            #[cfg(debug_assertions)]
-                                            {
-                                                let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
-                                                if ui.is_rect_visible(rect) {
-                                                    let color = egui::Color32::from_rgb(255, 0, 0);
-
-                                                    ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(1.0, color), egui::StrokeKind::Middle);
-                                                }
-                                                if response
-                                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                                    .clicked() {
-                                                    self.tree.add_new_pane(RibblePaneId::Progress);
-                                                }
-                                                ui.monospace("Working:");
-                                            }
-                                        });
-                                    }
-                                    AmortizedProgress::Determinate {
-                                        current,
-                                        total_size,
-                                    } => {
-                                        ui.horizontal(|ui| {
-                                            let progress = current as f32 / total_size as f32;
-
-                                            debug_assert!(!progress.is_nan());
-                                            // TODO: check for infinities/Nan at the call site. (current/total)
-
-                                            let pb = ProgressBar::new(progress)
-                                                .desired_width(desired_size.x)
-                                                .desired_height(desired_size.y * 0.5);
-
-                                            let (rect, resp) = ui.allocate_exact_size(desired_size, egui::Sense::click());
-
-                                            if ui.is_rect_visible(rect) {
-                                                ui.put(rect, pb);
-                                            }
-
-                                            // Paint a progress bar
-                                            if resp
-                                                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                                .clicked() {
-                                                log::info!("Progress bar clicked");
-                                                self.tree.add_new_pane(RibblePaneId::Progress);
-                                            }
-
-
-                                            ui.monospace("Working:");
-                                            ui.ctx().request_repaint();
-                                        });
-                                    }
-                                    AmortizedProgress::Indeterminate => {
-                                        ui.horizontal(|ui| {
-                                            let pb = ProgressBar::indeterminate()
-                                                .desired_width(desired_size.x)
-                                                .desired_height(desired_size.y * 0.5);
-
-                                            let (rect, resp) = ui.allocate_exact_size(desired_size, egui::Sense::click());
-
-                                            if ui.is_rect_visible(rect) {
-                                                ui.put(rect, pb);
-                                            }
-
-                                            // Paint a progress bar
-                                            if resp
-                                                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                                .clicked() {
-                                                log::info!("Progress bar clicked");
-                                                self.tree.add_new_pane(RibblePaneId::Progress);
-                                            }
-
-                                            ui.monospace("Working:");
-                                            ui.ctx().request_repaint();
-                                        });
-                                    }
-                                }
-                            });
-                        });
                     });
+                });
             });
 
         // Remove any and all margins -> these will (are?) handled by the panes themselves
@@ -716,4 +765,3 @@ impl eframe::App for Ribble {
         true
     }
 }
-

@@ -288,8 +288,27 @@ impl TranscriberEngineState {
                             WhisperOutput::TranscriptionSnapshot(snapshot) => {
                                 self.current_snapshot.store(Arc::clone(&snapshot));
                             }
+
                             WhisperOutput::ControlPhrase(control) => {
-                                self.current_control_phrase.store(Arc::new(control));
+                                
+                                #[cfg(debug_assertions)]{
+                                    
+
+                                    self.current_control_phrase.store(Arc::new(control));
+
+                                }
+
+                                // Filter out all "Debug" control phrases in release mode.
+                                #[cfg(not(debug_assertions))]
+                                {
+                                    match &control {
+                                        WhisperControlPhrase::Debug(..) => {},
+                                        _ => {
+                                            self.current_control_phrase.store(Arc::new(control));
+                                        }
+                                    } 
+                                }
+
                             }
                         },
                         Err(_) => {
@@ -641,7 +660,25 @@ impl TranscriberEngineState {
                                 self.current_snapshot.store(Arc::clone(&snapshot));
                             }
                             WhisperOutput::ControlPhrase(control) => {
-                                self.current_control_phrase.store(Arc::new(control));
+                                
+                                #[cfg(debug_assertions)]{
+                                    
+
+                                    self.current_control_phrase.store(Arc::new(control));
+
+                                }
+
+                                // Filter out all "Debug" control phrases in release mode.
+                                #[cfg(not(debug_assertions))]
+                                {
+                                    match &control {
+                                        WhisperControlPhrase::Debug(..) => {},
+                                        _ => {
+                                            self.current_control_phrase.store(Arc::new(control));
+                                        }
+                                    } 
+                                }
+
                             }
                         },
                         Err(_) => {
