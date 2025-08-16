@@ -10,9 +10,6 @@ use ribble_whisper::transcriber::vad::{
 };
 use strum::{AsRefStr, Display, EnumIter, IntoStaticStr};
 
-// NOTE: this should probably be kept/modified separately for Offline/Real-time configurations.
-// Use a toggle in the UI to swap between Real-time VAD and Offline-Vad
-// Offline can turn this off.
 #[derive(Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct VadConfigs {
     vad_type: VadType,
@@ -66,6 +63,8 @@ impl VadConfigs {
         self.use_vad_offline
     }
 
+    // TODO TODO: the probabilities for these are not great and need some tweaking.
+
     // Frame size, Aggressiveness, Probability
     // Since it's not particularly great/meaningful to use 10ms chunks for VAD,
     // Auto picks the largest frame size for WebRtc
@@ -102,55 +101,78 @@ impl VadConfigs {
         (frame_size, aggressiveness, probability)
     }
 
-    pub(crate) fn build_vad(&self) -> Result<RibbleVAD, RibbleError> {
+    pub(crate) fn build_ribble_vad(&self) -> Result<RibbleVAD, RibbleError> {
         match self.vad_type() {
-            VadType::Auto | VadType::Silero => {
-                // Larger sizes may introduce latency and 512 is perfectly sufficient
-                // as an "AUTO" chunk size. This is in contrast with WebRtc for the reasons mentioned
-                // above.
-                let frame_size = match self.frame_size() {
-                    VadFrameSize::Small | VadFrameSize::Auto => DEFAULT_SILERO_CHUNK_SIZE,
-                    VadFrameSize::Medium => 768usize,
-                    VadFrameSize::Large => 1024usize,
-                };
-
-                let probability = match self.strictness() {
-                    VadStrictness::Auto | VadStrictness::Flexible => {
-                        SILERO_VOICE_PROBABILITY_THRESHOLD
-                    }
-                    VadStrictness::Medium => OFFLINE_VOICE_PROBABILITY_THRESHOLD,
-                    VadStrictness::Strict => Self::STRICTEST_PROBABILITY,
-                };
-
-                let vad = SileroBuilder::new()
-                    .with_sample_rate(WHISPER_SAMPLE_RATE as i64)
-                    .with_chunk_size(frame_size)
-                    .with_detection_probability_threshold(probability)
-                    .build()?;
-                Ok(RibbleVAD::Silero(vad))
-            }
-            VadType::WebRtc => {
-                let (frame_size, aggressiveness, probability) = self.prep_webrtc();
-                let vad = WebRtcBuilder::new()
-                    .with_sample_rate(WebRtcSampleRate::R16kHz)
-                    .with_frame_length_millis(frame_size)
-                    .with_filter_aggressiveness(aggressiveness)
-                    .with_detection_probability_threshold(probability)
-                    .build_webrtc()?;
-                Ok(RibbleVAD::WebRtc(vad))
-            }
-            VadType::Earshot => {
-                let (frame_size, aggressiveness, probability) = self.prep_webrtc();
-                let vad = WebRtcBuilder::new()
-                    .with_sample_rate(WebRtcSampleRate::R16kHz)
-                    .with_frame_length_millis(frame_size)
-                    .with_filter_aggressiveness(aggressiveness)
-                    .with_detection_probability_threshold(probability)
-                    .build_earshot()?;
-
-                Ok(RibbleVAD::Earshot(vad))
-            }
+            VadType::Auto | VadType::Silero => Ok(RibbleVAD::Silero(self.build_silero()?)),
+            VadType::WebRtc => Ok(RibbleVAD::WebRtc(self.build_webrtc()?)),
+            VadType::Earshot => Ok(RibbleVAD::Earshot(Box::from(self.build_earshot()?))),
         }
+    }
+
+    // These methods leak the abstraction a bit, but are necessary for pushing the dispatch up
+    // higher and avoids the need for the type-erasure.
+    pub(crate) fn build_silero(&self) -> Result<Silero, RibbleError> {
+        if !matches!(self.vad_type, VadType::Silero | VadType::Auto) {
+            return Err(RibbleError::Core(format!(
+                "Vad type mismatch, cannot build Silero using: {}",
+                self.vad_type.as_ref()
+            )));
+        }
+
+        // Larger sizes may introduce latency and 512 is perfectly sufficient
+        // as an "AUTO" chunk size. This is in contrast with WebRtc for the reasons mentioned
+        // above.
+        let frame_size = match self.frame_size() {
+            VadFrameSize::Small | VadFrameSize::Auto => DEFAULT_SILERO_CHUNK_SIZE,
+            VadFrameSize::Medium => 768usize,
+            VadFrameSize::Large => 1024usize,
+        };
+
+        let probability = match self.strictness() {
+            VadStrictness::Auto | VadStrictness::Flexible => SILERO_VOICE_PROBABILITY_THRESHOLD,
+            VadStrictness::Medium => OFFLINE_VOICE_PROBABILITY_THRESHOLD,
+            VadStrictness::Strict => Self::STRICTEST_PROBABILITY,
+        };
+
+        Ok(SileroBuilder::new()
+            .with_sample_rate(WHISPER_SAMPLE_RATE as i64)
+            .with_chunk_size(frame_size)
+            .with_detection_probability_threshold(probability)
+            .build()?)
+    }
+
+    pub(crate) fn build_webrtc(&self) -> Result<WebRtc, RibbleError> {
+        if !matches!(self.vad_type, VadType::WebRtc) {
+            return Err(RibbleError::Core(format!(
+                "Vad type mismatch, cannot build WebRtc using: {}",
+                self.vad_type.as_ref()
+            )));
+        }
+
+        let (frame_size, aggressiveness, probability) = self.prep_webrtc();
+        Ok(WebRtcBuilder::new()
+            .with_sample_rate(WebRtcSampleRate::R16kHz)
+            .with_frame_length_millis(frame_size)
+            .with_filter_aggressiveness(aggressiveness)
+            .with_detection_probability_threshold(probability)
+            .build_webrtc()?)
+    }
+
+    pub(crate) fn build_earshot(&self) -> Result<Earshot, RibbleError> {
+        if !matches!(self.vad_type, VadType::Earshot) {
+            return Err(RibbleError::Core(format!(
+                "Vad type mismatch, cannot build Earshot using: {}",
+                self.vad_type.as_ref()
+            )));
+        }
+
+        let (frame_size, aggressiveness, probability) = self.prep_webrtc();
+        Ok(WebRtcBuilder::new()
+            .with_sample_rate(WebRtcSampleRate::R16kHz)
+            .with_frame_length_millis(frame_size)
+            .with_filter_aggressiveness(aggressiveness)
+            .with_detection_probability_threshold(probability)
+            .build_earshot()?)
     }
 }
 
@@ -230,10 +252,16 @@ pub(crate) enum VadStrictness {
     Strict,
 }
 
+// NOTE: this enum doesn't really provide the benefit it purports to be, but it does save on mental
+// load
+//
+// This may eventually be preferred, but the going implementation performs the dispatch earlier for
+// speed and to reduce the memory footprint.
+// This enum, even with boxing, is a bit too large for my liking.
 pub(crate) enum RibbleVAD {
     Silero(Silero),
     WebRtc(WebRtc),
-    Earshot(Earshot),
+    Earshot(Box<Earshot>),
 }
 
 impl<T: PcmS16Convertible + RecorderSample> VAD<T> for RibbleVAD {
@@ -241,14 +269,14 @@ impl<T: PcmS16Convertible + RecorderSample> VAD<T> for RibbleVAD {
         match self {
             Self::Silero(vad) => vad.voice_detected(samples),
             Self::WebRtc(vad) => vad.voice_detected(samples),
-            Self::Earshot(vad) => vad.voice_detected(samples),
+            Self::Earshot(vad) => vad.as_mut().voice_detected(samples),
         }
     }
     fn extract_voiced_frames(&mut self, samples: &[T]) -> Box<[T]> {
         match self {
             Self::Silero(vad) => vad.extract_voiced_frames(samples),
             Self::WebRtc(vad) => vad.extract_voiced_frames(samples),
-            Self::Earshot(vad) => vad.extract_voiced_frames(samples),
+            Self::Earshot(vad) => vad.as_mut().extract_voiced_frames(samples),
         }
     }
 }
@@ -258,7 +286,24 @@ impl Resettable for RibbleVAD {
         match self {
             Self::Silero(vad) => vad.reset_session(),
             Self::WebRtc(vad) => vad.reset_session(),
-            Self::Earshot(vad) => vad.reset_session(),
+            Self::Earshot(vad) => vad.as_mut().reset_session(),
         }
     }
+}
+
+// This ZST is just to reduce the size of the option used for "No offline VAD" branch in the
+// transcriber engine.
+pub(crate) struct NopVAD;
+impl<T: PcmS16Convertible + RecorderSample> VAD<T> for NopVAD {
+    fn voice_detected(&mut self, _samples: &[T]) -> bool {
+        false
+    }
+
+    fn extract_voiced_frames(&mut self, _samples: &[T]) -> Box<[T]> {
+        Box::default()
+    }
+}
+
+impl Resettable for NopVAD {
+    fn reset_session(&mut self) {}
 }

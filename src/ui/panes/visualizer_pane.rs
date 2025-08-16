@@ -1,9 +1,9 @@
 use crate::controller::ribble_controller::RibbleController;
-use crate::controller::{AnalysisType, RotationDirection, NUM_VISUALIZER_BUCKETS};
-use crate::ui::panes::ribble_pane::RibblePaneId;
-use crate::ui::panes::PaneView;
-use crate::ui::widgets::soundbar::soundbar;
+use crate::controller::{AnalysisType, NUM_VISUALIZER_BUCKETS, RotationDirection};
 use crate::ui::PANE_INNER_MARGIN;
+use crate::ui::panes::PaneView;
+use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::ui::widgets::soundbar::soundbar;
 use crate::utils::preferences::RibbleAppTheme;
 use egui_colorgradient::ColorInterpolator;
 use std::fmt::Debug;
@@ -11,28 +11,14 @@ use strum::IntoEnumIterator;
 
 const SMOOTHING_CONSTANT: f32 = 8.0;
 
-// TODO: DETERMINE WHAT TO DO RE ENUM SIZE
-// - Currently, VisualizerPane is 296-800 bytes because the slices are being stored on the stack.
-// - This will, most definitely be faster, but RibblePanes then become 296 bytes by default,
-//   Which seems a little wasteful for some which are ZST or much smaller.
-// - Since VisualizerPane -has- to be mutable and there should be no locking in the UI, the options are as follows:
-//      - Do nothing and accept that all panes are 296 bytes.
-//      - Use vectors instead of fixed sized slices (can then make the visualizer resolution tweakable)
-
-// I'm not 100% sure what to do here. Stack allocated buffers will be quicker and -very- cache friendly
-// This should be more efficient.
-// If I move to vectors, the size is ~80-90 bytes, so this will significantly save on memory,
-// but add (maybe) noticeable indirection costs.
-
-// RETURN TO THIS AFTER PROFILING FOR MEMORY.
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct VisualizerPane {
     #[serde(skip)]
     #[serde(default)]
-    visualizer_buckets: [f32; NUM_VISUALIZER_BUCKETS],
+    visualizer_buckets: Box<[f32; NUM_VISUALIZER_BUCKETS]>,
     #[serde(skip)]
     #[serde(default)]
-    presentation_buckets: [f32; NUM_VISUALIZER_BUCKETS],
+    presentation_buckets: Box<[f32; NUM_VISUALIZER_BUCKETS]>,
     // NOTE: this is the only view that's using the color_interpolator
     // If that changes, moved to a shared module in the kernel or otherwise and access via the
     // controller.
@@ -50,9 +36,13 @@ pub(crate) struct VisualizerPane {
 impl Clone for VisualizerPane {
     fn clone(&self) -> Self {
         Self {
-            visualizer_buckets: self.visualizer_buckets,
-            presentation_buckets: self.presentation_buckets,
-            color_interpolator: Some(self.current_theme.color_interpolator().unwrap_or(RibbleAppTheme::Mocha.color_interpolator().unwrap())),
+            visualizer_buckets: self.visualizer_buckets.clone(),
+            presentation_buckets: self.presentation_buckets.clone(),
+            color_interpolator: Some(
+                self.current_theme
+                    .color_interpolator()
+                    .unwrap_or(RibbleAppTheme::Mocha.color_interpolator().unwrap()),
+            ),
             current_theme: self.current_theme,
             has_focus: self.has_focus,
         }
@@ -90,7 +80,6 @@ impl PaneView for VisualizerPane {
         should_close: &mut bool,
         controller: RibbleController,
     ) -> egui::Response {
-
         // If this is painting, a visualizer is in view, so set the visualizer to true to continue
         // processing audio data if it's coming in.
         controller.set_visualizer_visibility(true);
@@ -98,7 +87,7 @@ impl PaneView for VisualizerPane {
         let audio_running = controller.realtime_running() || controller.recorder_running();
         // If the audio is running (and thus the VisualizerEngine is active), try to read the buffer.
         if audio_running {
-            controller.try_read_visualization_buffer(&mut self.visualizer_buckets);
+            controller.try_read_visualization_buffer(self.visualizer_buckets.as_mut());
             // Otherwise, just zero out the visualizer bucket.
         } else {
             self.visualizer_buckets.iter_mut().for_each(|v| *v = 0.0);
@@ -106,7 +95,11 @@ impl PaneView for VisualizerPane {
 
         // Smooth the buffer to prevent the (unintended) jumpiness.
         let dt = ui.ctx().input(|i| i.stable_dt);
-        let repaint = smoothing(&self.visualizer_buckets, &mut self.presentation_buckets, dt);
+        let repaint = smoothing(
+            self.visualizer_buckets.as_ref(),
+            self.presentation_buckets.as_mut(),
+            dt,
+        );
         if repaint {
             ui.ctx().request_repaint();
         }
@@ -142,22 +135,25 @@ impl PaneView for VisualizerPane {
 
         let bg_col = ui.style().visuals.extreme_bg_color;
 
-        egui::Frame::default().inner_margin(PANE_INNER_MARGIN).fill(bg_col).show(ui, |ui| {
-            ui.heading(format!("{visualizer_type}:"));
-            ui.put(pane_max_rect, |ui: &mut egui::Ui| {
-                let color_interpolator = self
-                    .color_interpolator
-                    .as_ref()
-                    .expect("The color interpolator is only None at construction.");
+        egui::Frame::default()
+            .inner_margin(PANE_INNER_MARGIN)
+            .fill(bg_col)
+            .show(ui, |ui| {
+                ui.heading(format!("{visualizer_type}:"));
+                ui.put(pane_max_rect, |ui: &mut egui::Ui| {
+                    let color_interpolator = self
+                        .color_interpolator
+                        .as_ref()
+                        .expect("The color interpolator is only None at construction.");
 
-                // The new implementation is in the "widgets" module.
-                ui.add(soundbar(
-                    pane_max_rect,
-                    &self.presentation_buckets,
-                    color_interpolator,
-                ))
+                    // The new implementation is in the "widgets" module.
+                    ui.add(soundbar(
+                        pane_max_rect,
+                        &self.presentation_buckets,
+                        color_interpolator,
+                    ))
+                });
             });
-        });
 
         if resp.clicked() {
             self.has_focus = true;
@@ -186,7 +182,6 @@ impl PaneView for VisualizerPane {
                 controller.rotate_visualizer_type(RotationDirection::Clockwise);
             }
         }
-
 
         // Add a context menu to make this close-able.
         // If this is no longer close-able, the close button will just nop.

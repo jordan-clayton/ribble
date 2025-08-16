@@ -34,16 +34,6 @@ pub(in crate::ui) trait PaneView {
     }
 }
 
-// These are "Panes" used for the egui_tiles Tree
-// TODO: DECIDE WHAT TO DO HERE.
-// NOTE: currently this Enumeration is size ~246 bytes because of the double buffering in
-// VisualizerEngine.
-// THERE IS A NOTE IN VISUALIZERENGINE to fix this.
-
-// At this time, it's not decided whether the resolution should be tweakable or fixed,
-// and whether to use vectors in the view
-
-// It -might- be more efficient to just leave this be with stack-allocation
 #[derive(serde::Serialize, serde::Deserialize, strum::EnumCount, Clone)]
 #[enum_dispatch]
 pub(in crate::ui) enum RibblePane {
@@ -119,7 +109,9 @@ impl From<ClosableRibbleViewPane> for RibblePane {
             ClosableRibbleViewPane::Downloads => RibblePane::Downloads(DownloadsPane::default()),
             ClosableRibbleViewPane::Progress => RibblePane::Progress(ProgressPane::default()),
             ClosableRibbleViewPane::Visualizer => RibblePane::Visualizer(VisualizerPane::default()),
-            ClosableRibbleViewPane::UserPreferences => RibblePane::UserPreferences(UserPreferencesPane::default())
+            ClosableRibbleViewPane::UserPreferences => {
+                RibblePane::UserPreferences(UserPreferencesPane::default())
+            }
         }
     }
 }
@@ -132,7 +124,7 @@ impl From<ClosableRibbleViewPane> for RibblePaneId {
             ClosableRibbleViewPane::Downloads => RibblePaneId::Downloads,
             ClosableRibbleViewPane::Progress => RibblePaneId::Progress,
             ClosableRibbleViewPane::Visualizer => RibblePaneId::Visualizer,
-            ClosableRibbleViewPane::UserPreferences => RibblePaneId::UserPreferences
+            ClosableRibbleViewPane::UserPreferences => RibblePaneId::UserPreferences,
         }
     }
 }
@@ -142,14 +134,18 @@ impl TryFrom<RibblePaneId> for ClosableRibbleViewPane {
 
     fn try_from(value: RibblePaneId) -> Result<Self, Self::Error> {
         match value {
-            RibblePaneId::Transcriber => { Err(RibbleError::ConversionError("Transcriber Pane is not closable.")) }
-            RibblePaneId::Recording => { Ok(ClosableRibbleViewPane::Recording) }
-            RibblePaneId::Transcription => { Err(RibbleError::ConversionError("Transcription Pane is not closable.")) }
-            RibblePaneId::Visualizer => { Ok(ClosableRibbleViewPane::Visualizer) }
-            RibblePaneId::Progress => { Ok(ClosableRibbleViewPane::Progress) }
-            RibblePaneId::Console => { Ok(ClosableRibbleViewPane::Console) }
-            RibblePaneId::Downloads => { Ok(ClosableRibbleViewPane::Downloads) }
-            RibblePaneId::UserPreferences => { Ok(ClosableRibbleViewPane::UserPreferences) }
+            RibblePaneId::Transcriber => Err(RibbleError::ConversionError(
+                "Transcriber Pane is not closable.",
+            )),
+            RibblePaneId::Recording => Ok(ClosableRibbleViewPane::Recording),
+            RibblePaneId::Transcription => Err(RibbleError::ConversionError(
+                "Transcription Pane is not closable.",
+            )),
+            RibblePaneId::Visualizer => Ok(ClosableRibbleViewPane::Visualizer),
+            RibblePaneId::Progress => Ok(ClosableRibbleViewPane::Progress),
+            RibblePaneId::Console => Ok(ClosableRibbleViewPane::Console),
+            RibblePaneId::Downloads => Ok(ClosableRibbleViewPane::Downloads),
+            RibblePaneId::UserPreferences => Ok(ClosableRibbleViewPane::UserPreferences),
         }
     }
 }

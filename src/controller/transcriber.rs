@@ -9,7 +9,7 @@ use crate::utils::errors::RibbleError;
 use crate::utils::recorder_configs::{
     RibbleChannels, RibblePeriod, RibbleRecordingConfigs, RibbleSampleRate,
 };
-use crate::utils::vad_configs::{RibbleVAD, VadConfigs};
+use crate::utils::vad_configs::{NopVAD, VadConfigs, VadType};
 use arc_swap::ArcSwap;
 use crossbeam::channel::TrySendError;
 use crossbeam::scope;
@@ -25,6 +25,7 @@ use ribble_whisper::transcriber::{
     redirect_whisper_logging_to_hooks, CallbackTranscriber, Transcriber, TranscriptionSnapshot, WhisperCallbacks,
     WhisperControlPhrase, WhisperOutput, WHISPER_SAMPLE_RATE,
 };
+use ribble_whisper::transcriber::vad::VAD;
 use ribble_whisper::utils::callback::{
     ShortCircuitRibbleWhisperCallback, StaticRibbleWhisperCallback,
 };
@@ -104,14 +105,42 @@ impl TranscriberEngineState {
         }
     }
 
-    fn run_realtime_transcription<M, A>(
+    fn build_vad_run_realtime<M, A>(
         &self,
         audio_backend: &A,
         shared_model_retriever: Arc<M>,
+        ) -> Result<RibbleMessage, RibbleError>
+        where M: ModelRetriever + Send + Sync,
+              A: AudioBackend<ArcChannelSink<f32>> + Send + Sync,
+    {
+        let configs = *self.vad_configs.load_full();
+        match configs.vad_type(){
+            VadType::Silero | VadType::Auto => {
+                let vad = configs.build_silero()?;
+                self.run_realtime_transcription(audio_backend, shared_model_retriever, vad)
+            },
+            VadType::WebRtc => {
+                let vad = configs.build_webrtc()?;
+                self.run_realtime_transcription(audio_backend, shared_model_retriever, vad)
+            },
+            VadType::Earshot => {
+                let vad = configs.build_earshot()?;
+                self.run_realtime_transcription(audio_backend, shared_model_retriever, vad)
+            }
+        }
+        
+    }
+
+    fn run_realtime_transcription<M, A, V>(
+        &self,
+        audio_backend: &A,
+        shared_model_retriever: Arc<M>,
+        vad: V
     ) -> Result<RibbleMessage, RibbleError>
     where
         M: ModelRetriever + Send + Sync,
         A: AudioBackend<ArcChannelSink<f32>> + Send + Sync,
+        V: VAD<f32> + Send + Sync
     {
         self.clear_transcription();
 
@@ -149,12 +178,6 @@ impl TranscriberEngineState {
 
         // Transcription channels
         let (text_sender, text_receiver) = get_channel(UTILITY_QUEUE_SIZE);
-        let vad_configs = *self.vad_configs.load_full().clone();
-
-        let vad = vad_configs.build_vad().inspect_err(|_e| {
-            self.cleanup_remove_progress_job(setup_id);
-        })?;
-
         // Set up the mic capture -> the default is "Whisper-ready"
         let spec = CaptureSpec::default();
         let sink = ArcChannelSink::new(audio_sender);
@@ -166,7 +189,7 @@ impl TranscriberEngineState {
         // Get a copy of the configs
         let configs = *self.transcription_configs.load_full();
 
-        let (transcriber, transcriber_handle) = RealtimeTranscriberBuilder::<RibbleVAD, M>::new()
+        let (transcriber, transcriber_handle) = RealtimeTranscriberBuilder::<V, M>::new()
             .with_configs(configs)
             .with_audio_buffer(&audio_ring_buffer)
             .with_output_sender(text_sender)
@@ -374,12 +397,39 @@ impl TranscriberEngineState {
         Ok(RibbleMessage::Console(console_message))
     }
 
-    fn run_offline_transcription<M>(
+    fn build_vad_run_offline<M> (&self, shared_model_retriever: Arc<M>) -> Result<RibbleMessage, RibbleError>
+        where M: ModelRetriever + Sync + Send
+    {
+        let configs = *self.vad_configs.load_full();
+        if configs.use_vad_offline(){
+            match configs.vad_type(){
+                VadType::Silero | VadType::Auto => {
+                    let vad = configs.build_silero()?;
+                    self.run_offline_transcription( shared_model_retriever, Some(vad))
+                },
+                VadType::WebRtc => {
+                    let vad = configs.build_webrtc()?;
+                    self.run_offline_transcription(shared_model_retriever, Some(vad))
+                },
+                VadType::Earshot => {
+                    let vad = configs.build_earshot()?;
+                    self.run_offline_transcription(shared_model_retriever, Some(vad))
+                }
+            }
+
+        } else {
+            self.run_offline_transcription(shared_model_retriever, None::<NopVAD>)
+        }
+    }
+
+    fn run_offline_transcription<M, V>(
         &self,
         shared_model_retriever: Arc<M>,
+        vad: Option<V>
     ) -> Result<RibbleMessage, RibbleError>
     where
         M: ModelRetriever + Sync + Send,
+        V: VAD<f32> + Send + Sync
     {
         // Clear the previous transcription
         self.clear_transcription();
@@ -421,18 +471,6 @@ impl TranscriberEngineState {
                 );
                 None
             }
-        };
-
-        let vad_configs = self.vad_configs.load_full();
-        // Unpack the VAD settings and build a VAD if the user wants to optimize.
-        let vad = if !vad_configs.use_vad_offline() {
-            let vad = vad_configs.build_vad().inspect_err(|_e| {
-                self.cleanup_remove_progress_job(setup_id);
-            })?;
-
-            Some(vad)
-        } else {
-            None
         };
 
         // Get the configs -> dereference and consume into WhisperConfigsV2 to discard unused
@@ -517,7 +555,7 @@ impl TranscriberEngineState {
         self.cleanup_remove_progress_job(load_audio_id);
 
         let (sender, receiver) = get_channel(UTILITY_QUEUE_SIZE);
-        let mut offline_transcriber_builder = OfflineTranscriberBuilder::<RibbleVAD, M>::new()
+        let mut offline_transcriber_builder = OfflineTranscriberBuilder::<V, M>::new()
             .with_configs(configs)
             .with_audio(audio)
             .with_channel_configurations(AudioChannelConfiguration::Mono)
@@ -865,7 +903,7 @@ impl TranscriberEngine {
         self.inner.realtime_running.store(true, Ordering::Release);
         let thread_inner = Arc::clone(&self.inner);
         let worker = std::thread::spawn(move || {
-            thread_inner.run_realtime_transcription(audio_backend.as_ref(), shared_model_retriever)
+            thread_inner.build_vad_run_realtime(audio_backend.as_ref(), shared_model_retriever)
         });
 
         let work_request = WorkRequest::Long(worker);
@@ -891,7 +929,7 @@ impl TranscriberEngine {
 
         // Set up the worker.
         let worker = std::thread::spawn(move || {
-            thread_inner.run_offline_transcription(shared_model_retriever)
+            thread_inner.build_vad_run_offline(shared_model_retriever)
         });
 
         // Send off the request
