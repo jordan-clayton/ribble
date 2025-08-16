@@ -1,7 +1,7 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{CompletedRecordingJobs, ModelFile, OfflineTranscriberFeedback};
-use crate::ui::panes::PaneView;
 use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
 use crate::ui::widgets::recording_modal::build_recording_modal;
 use crate::ui::widgets::toggle_switch::toggle;
 use crate::ui::{GRID_ROW_SPACING_COEFF, MODAL_HEIGHT_PROPORTION, PANE_INNER_MARGIN};
@@ -390,7 +390,6 @@ impl PaneView for TranscriberPane {
                                     // Try and open it in the default file explorer.
                                     // There's a debouncer in the model-bank that will
                                     // keep the list mostly up to date.
-                                    // TODO: SHOW A TOAST ON ERROR.
                                     if let Err(e) = opener::open(model_directory) {
                                         log::warn!("Failed to open model directory. Error: {}\n\
                                         Error source: {:#?}", &e, e.source());
@@ -711,7 +710,9 @@ impl PaneView for TranscriberPane {
 
         // MODALS -> this doesn't need to be in the scroll area.
         if self.recording_modal {
-            controller.try_get_completed_recordings(&mut self.recordings_buffer);
+            controller.try_read_recording_metadata(&mut self.recordings_buffer);
+            // NOTE: this is a very cheap clone, so it should be fine to just cache and pass into the closure.
+            let err_ctx = ui.ctx().clone();
             let handle_recordings =
                 |file_name| match controller.try_get_recording_path(Arc::clone(&file_name)) {
                     Some(path) => {
@@ -723,6 +724,7 @@ impl PaneView for TranscriberPane {
                         log::warn!("Temporary recording file missing: {file_name}");
                         let toast = egui_notify::Toast::warning("Failed to find saved recording.");
                         controller.send_toast(toast);
+                        err_ctx.request_repaint();
                     }
                 };
 

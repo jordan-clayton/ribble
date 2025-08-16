@@ -32,7 +32,7 @@ impl PaneView for ConsolePane {
         controller: RibbleController,
     ) -> egui::Response {
         // Try to read the current messages (non-blocking).
-        controller.try_get_current_messages(&mut self.message_buffer);
+        controller.try_read_console_message_buffer(&mut self.message_buffer);
 
         let pane_id = egui::Id::new("console_pane");
         let resp = ui

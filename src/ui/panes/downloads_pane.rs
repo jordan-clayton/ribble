@@ -31,7 +31,7 @@ impl PaneView for DownloadsPane {
         should_close: &mut bool,
         controller: RibbleController,
     ) -> egui::Response {
-        controller.try_get_current_downloads(&mut self.current_downloads);
+        controller.try_read_download_metadata(&mut self.current_downloads);
         if !self.current_downloads.is_empty() {
             ui.ctx().request_repaint();
         }

@@ -14,7 +14,7 @@ use crate::controller::ribble_controller::RibbleController;
 use crate::ui::panes::ribble_pane::{PaneView, RibblePane, RibblePaneId};
 use crate::utils::errors::RibbleError;
 use eframe::epaint::Hsva;
-use egui::{Painter, Rect, Stroke, StrokeKind, Style, lerp};
+use egui::{lerp, Painter, Rect, Stroke, StrokeKind, Style};
 use egui_tiles::{
     Behavior, Container, ResizeState, SimplificationOptions, Tile, TileId, Tiles, Tree, UiResponse,
 };
@@ -601,16 +601,6 @@ impl Behavior<RibblePane> for RibbleTreeBehavior {
         }
     }
 
-    fn resize_stroke(&self, style: &Style, resize_state: ResizeState) -> Stroke {
-        // This is basically the same as the default, except it uses egui widget visuals
-        // for idle instead of the tab bar color.
-        match resize_state {
-            ResizeState::Idle => style.visuals.widgets.noninteractive.bg_stroke,
-            ResizeState::Hovering => style.visuals.widgets.hovered.fg_stroke,
-            ResizeState::Dragging => style.visuals.widgets.active.fg_stroke,
-        }
-    }
-
     fn tab_title_for_pane(&mut self, pane: &RibblePane) -> egui::WidgetText {
         pane.pane_title()
     }
@@ -704,6 +694,16 @@ impl Behavior<RibblePane> for RibbleTreeBehavior {
                     StrokeKind::Middle,
                 );
             }
+        }
+    }
+
+    fn resize_stroke(&self, style: &Style, resize_state: ResizeState) -> Stroke {
+        // This is basically the same as the default, except it uses egui widget visuals
+        // for idle instead of the tab bar color.
+        match resize_state {
+            ResizeState::Idle => style.visuals.widgets.noninteractive.bg_stroke,
+            ResizeState::Hovering => style.visuals.widgets.hovered.fg_stroke,
+            ResizeState::Dragging => style.visuals.widgets.active.fg_stroke,
         }
     }
 }

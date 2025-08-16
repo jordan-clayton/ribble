@@ -6,8 +6,8 @@ use ribble_whisper::utils::{Receiver, Sender};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
@@ -25,9 +25,7 @@ mod visualizer;
 mod worker;
 mod writer;
 
-// TODO: perhaps make this a "resolution" parameter.
-// It's also more than likely fine to double this, if not quadruple.
-// TODO: test performance with higher resolutions.
+// TODO: choose a resolution constant
 pub(crate) const NUM_VISUALIZER_BUCKETS: usize = 32;
 
 pub const UTILITY_QUEUE_SIZE: usize = 32;
@@ -53,8 +51,6 @@ struct Bus {
     progress_message_sender: Sender<ProgressMessage>,
     work_request_sender: Sender<WorkRequest>,
     write_request_sender: Sender<WriteRequest>,
-    // TODO: future thing -> possibly stick this in a data structure with the sample rate.
-    // Pre-computing and re-initializing the FFT thingy might get a little sticky.
     visualizer_sample_sender: Sender<VisualizerPacket>,
     download_request_sender: Sender<DownloadRequest>,
 }
@@ -144,9 +140,6 @@ pub(crate) enum OfflineTranscriberFeedback {
     Progressive,
 }
 
-// TODO: continue noodling this out.
-// Perhaps set a work category, or keep an Arc<ConsoleMessage>,
-// or maybe copy the error string on error -> OR, just get the error discriminant
 pub(crate) struct LatestError {
     id: u64,
     category: RibbleErrorCategory,
@@ -218,10 +211,6 @@ enum WorkRequest {
     Shutdown,
 }
 
-// TODO: use this for presenting in the UI.
-// It has everything needed for viewing
-// TODO: think about how/where to add the "abort"
-// The UI and the DownloadEngine both interop here.
 #[derive(Clone, Debug)]
 pub(crate) struct FileDownload {
     name: Arc<str>,
@@ -293,10 +282,9 @@ enum ProgressMessage {
     Shutdown,
 }
 
-// TODO: Determine whether this is easier/more logical for downloads
-// If the content-length is blank, the size is unknown.
-// At the moment, the FileDownload assumes the job is determinate.
-// It is undecided atm w.r.t GUI decisions as to whether this is the better solution.
+// NOTE: in cases where a progress bar "should" be determinate but the total capacity is unknown/invalid
+// express this using the maybe_indeterminate so that the capacity + pos increment together.
+// For the interim, this is explicitly set and not determined heuristically.
 #[derive(Debug)]
 pub(crate) struct AtomicProgress {
     pos: AtomicU64,
@@ -372,8 +360,6 @@ pub(crate) enum AmortizedProgress {
     Indeterminate,
 }
 
-// TODO: Look at adding an indeterminate.
-// Perhaps just re-use the AmortizedProgress -> Swap the pie for a spinner on indeterminate.
 #[derive(Copy, Clone, Default)]
 pub(crate) enum AmortizedDownloadProgress {
     #[default]
@@ -400,6 +386,9 @@ impl From<(usize, usize)> for AmortizedDownloadProgress {
     fn from(value: (usize, usize)) -> Self {
         match value {
             (0, 0) => AmortizedDownloadProgress::NoJobs,
+            (current, total_size) if (total_size < current) => {
+                AmortizedDownloadProgress::Total { current: total_size, total_size }
+            }
             (current, total_size) => AmortizedDownloadProgress::Total {
                 current,
                 total_size,
@@ -539,18 +528,16 @@ impl Progress {
         }
     }
 
-    // TODO: remove if never called
-    pub(crate) fn is_finished(&self) -> bool {
-        match self {
-            Progress::Determinate {
-                job_name: _,
-                progress,
-            } => progress.is_finished(),
-            Progress::Indeterminate { .. } => false,
-        }
-    }
+    // pub(crate) fn is_finished(&self) -> bool {
+    //     match self {
+    //         Progress::Determinate {
+    //             job_name: _,
+    //             progress,
+    //         } => progress.is_finished(),
+    //         Progress::Indeterminate { .. } => false,
+    //     }
+    // }
 
-    // TODO: Fix this up: ProgressViews should handle determinate
     pub(crate) fn progress_view(&self) -> Option<ProgressView> {
         match self {
             Progress::Determinate {
@@ -629,7 +616,6 @@ pub(crate) enum AnalysisType {
 impl AnalysisType {
     // NOTE: this is obviously a little un-maintainable and not the greatest solution if the AnalysisTypes grow.
     // If it becomes untenable, look into a macro-based solution.
-    // TODO: write a quick test to stamp out bugs here
     pub(crate) fn rotate(&self, direction: RotationDirection) -> Self {
         match (self, direction) {
             (AnalysisType::AmplitudeEnvelope, RotationDirection::Clockwise) => {

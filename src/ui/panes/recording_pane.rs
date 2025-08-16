@@ -1,11 +1,11 @@
-use crate::controller::CompletedRecordingJobs;
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::panes::PaneView;
+use crate::controller::CompletedRecordingJobs;
 use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
 use crate::ui::widgets::recording_modal::build_recording_modal;
 use crate::ui::{GRID_ROW_SPACING_COEFF, PANE_INNER_MARGIN};
 use crate::utils::recorder_configs::{
-    RibbleChannels, RibblePeriod, RibbleRecordingExportFormat, RibbleSampleRate,
+    RibbleChannels, RibbleExportFormat, RibblePeriod, RibbleSampleRate,
 };
 use std::sync::Arc;
 use strum::IntoEnumIterator;
@@ -222,7 +222,7 @@ impl PaneView for RecordingPane {
                                         egui::ComboBox::from_id_salt("export_format_combobox")
                                             .selected_text(export_format.as_ref())
                                             .show_ui(ui, |ui| {
-                                                for format in RibbleRecordingExportFormat::iter() {
+                                                for format in RibbleExportFormat::iter() {
                                                     // NOTE: at the moment, the RecordingExportFormat is not stored anywhere
                                                     // It will initialize to the default upon the pane loading
                                                     if ui
@@ -253,7 +253,9 @@ impl PaneView for RecordingPane {
             });
 
         if self.recording_modal {
-            controller.try_get_completed_recordings(&mut self.recordings_buffer);
+            controller.try_read_recording_metadata(&mut self.recordings_buffer);
+            // NOTE: this is a very cheap clone, so it should be fine to just cache and pass into the closure.
+            let err_ctx = ui.ctx().clone();
             let handle_recordings = |file_name| {
                 if controller
                     .try_get_recording_path(Arc::clone(&file_name))
@@ -291,6 +293,7 @@ impl PaneView for RecordingPane {
                     log::warn!("Temporary recording file missing: {file_name}");
                     let toast = egui_notify::Toast::warning("Failed to find saved recording.");
                     controller.send_toast(toast);
+                    err_ctx.request_repaint();
                 }
             };
 

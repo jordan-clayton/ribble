@@ -22,46 +22,45 @@ use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
     IntoStaticStr,
 )]
 #[atomic_enum]
-// TODO: refactor this to RibbleExportFormat or something less verbose.
-pub(crate) enum RibbleRecordingExportFormat {
+pub(crate) enum RibbleExportFormat {
     #[default]
     F32,
     I16,
 }
 
-impl RibbleRecordingExportFormat {
+impl RibbleExportFormat {
     pub(crate) fn tooltip(&self) -> &str {
         match self {
-            RibbleRecordingExportFormat::F32 => {
+            RibbleExportFormat::F32 => {
                 "32-bit floating point format. Highest dynamic range but large file size."
             }
 
-            RibbleRecordingExportFormat::I16 => "16-bit signed integer format. Audio CD quality.",
+            RibbleExportFormat::I16 => "16-bit signed integer format. Audio CD quality.",
         }
     }
 
     pub(crate) fn bits_per_sample(&self) -> u16 {
         match self {
-            RibbleRecordingExportFormat::F32 => 32,
-            RibbleRecordingExportFormat::I16 => 16,
+            RibbleExportFormat::F32 => 32,
+            RibbleExportFormat::I16 => 16,
         }
     }
 }
 
-impl From<hound::SampleFormat> for RibbleRecordingExportFormat {
+impl From<hound::SampleFormat> for RibbleExportFormat {
     fn from(data: hound::SampleFormat) -> Self {
         match data {
-            hound::SampleFormat::Float => RibbleRecordingExportFormat::F32,
-            hound::SampleFormat::Int => RibbleRecordingExportFormat::I16,
+            hound::SampleFormat::Float => RibbleExportFormat::F32,
+            hound::SampleFormat::Int => RibbleExportFormat::I16,
         }
     }
 }
 
-impl From<RibbleRecordingExportFormat> for hound::SampleFormat {
-    fn from(data: RibbleRecordingExportFormat) -> Self {
+impl From<RibbleExportFormat> for hound::SampleFormat {
+    fn from(data: RibbleExportFormat) -> Self {
         match data {
-            RibbleRecordingExportFormat::F32 => hound::SampleFormat::Float,
-            RibbleRecordingExportFormat::I16 => hound::SampleFormat::Int,
+            RibbleExportFormat::F32 => hound::SampleFormat::Float,
+            RibbleExportFormat::I16 => hound::SampleFormat::Int,
         }
     }
 }
@@ -268,7 +267,7 @@ impl RibbleRecordingConfigs {
 
     pub(crate) fn into_wav_spec(
         self,
-        format: RibbleRecordingExportFormat,
+        format: RibbleExportFormat,
     ) -> Result<hound::WavSpec, RibbleError> {
         let bits_per_sample = format.bits_per_sample();
         let sample_format = format.into();

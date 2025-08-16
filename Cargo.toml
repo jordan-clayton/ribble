@@ -69,11 +69,6 @@ egui-notify = "0.20.0"
 flexi_logger = "0.31.2"
 image = "0.25.6"
 crash-handler = "0.6.3"
-cfg-if = "1.0.1"
-
-# TODO: benches to resolve performance questions re: visualizer
-[dev-dependencies]
-criterion = "0.7.0"
 
 [features]
 default = []

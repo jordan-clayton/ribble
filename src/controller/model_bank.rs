@@ -354,7 +354,6 @@ impl RibbleModelBank {
     // If that becomes a necessary feature, move to ArcSwap and set up logic for re-spawning the
     // watcher thread -> it's best to leave model management up to the user if they're already
     // swapping directories.
-
     pub(crate) fn download_new_model(&self, url: &str) {
         let model_directory = self.inner.model_directory();
         let download_request = DownloadRequest::new_job(url, model_directory);

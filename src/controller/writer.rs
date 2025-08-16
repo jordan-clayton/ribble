@@ -1,6 +1,8 @@
-use crate::controller::{Bus, CompletedRecordingJobs, ConsoleMessage, RibbleMessage, WorkRequest, WriteRequest};
+use crate::controller::{
+    Bus, CompletedRecordingJobs, ConsoleMessage, RibbleMessage, WorkRequest, WriteRequest,
+};
 use crate::utils::errors::RibbleError;
-use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExportFormat};
+use crate::utils::recorder_configs::{RibbleExportFormat, RibbleRecordingConfigs};
 use hound::{WavReader, WavSpec, WavWriter};
 use indexmap::IndexMap;
 use parking_lot::RwLock;
@@ -13,19 +15,10 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-// TODO: this might need to spawn a debouncer thread;
-// Since the model folder is accessible via the UI,
-// it is possible for a user to navigate to the recordings folder
-// and delete a file willy-nilly.
-//
-// If they try and load said file after it's deleted, they will get
-// annoying UI, but the missing file will be removed by the next repaint.
-//
-// Possible solutions:
-// - Debouncer -> guaranteed coherent, runs on a bg thread, not super expensive but
-//   extra thread overhead.
-// - Filtering (check for file) -> likely coherent, incurs memory allocation each read.
-// - *Going with this so far* Toast + repaint -> informs, very cheap, more UI friction than debouncer
+// NOTE: This does not yet use a debouncer; it's probably unnecessary for what this engine does.
+// If a user gains access to the recordings cache and deletes files, then tries to access,
+// this will prune the entry from the IndexMap.
+// (This is also handled in the GUI).
 
 // NOTE: this is only send when using mpmc (crossbeam)
 // If for whatever reason the std::mpsc is required,
@@ -71,7 +64,8 @@ impl WriterEngineState {
         let latest = self
             .completed_jobs
             .read()
-            .last().map(|(file_name, _)| self.data_directory.join(file_name.as_ref()));
+            .last()
+            .map(|(file_name, _)| self.data_directory.join(file_name.as_ref()));
 
         // If it doesn't exist, internally update the status and return the Option.
         if latest.is_none() {
@@ -148,7 +142,7 @@ impl WriterEngineState {
         outfile_path: PathBuf,
         // ibid -> take a clone of the shared string.
         key: Arc<str>,
-        format: RibbleRecordingExportFormat,
+        format: RibbleExportFormat,
     ) -> Result<RibbleMessage, RibbleError> {
         let tmp_file_path = self.data_directory.join(key.as_ref());
         let check_tmp_file = std::fs::exists(tmp_file_path.as_path());
@@ -157,7 +151,7 @@ impl WriterEngineState {
             return Err(RibbleError::IOError(error));
         }
         // If it's already in floating point, then this can be a direct copy.
-        if matches!(format, RibbleRecordingExportFormat::F32) {
+        if matches!(format, RibbleExportFormat::F32) {
             std::fs::copy(tmp_file_path.as_path(), outfile_path.as_path())?;
 
             let console_message =
@@ -202,8 +196,11 @@ impl WriterEngineState {
         }
     }
 
-    fn handle_new_request(&self, receiver: Receiver<Arc<[f32]>>, spec: RibbleRecordingConfigs) -> Result<RibbleMessage, RibbleError> {
-
+    fn handle_new_request(
+        &self,
+        receiver: Receiver<Arc<[f32]>>,
+        spec: RibbleRecordingConfigs,
+    ) -> Result<RibbleMessage, RibbleError> {
         // The files should look like "tmp_recording_<ticket_no>.wav"
         let ticket_no = self.ticket.fetch_add(1, Ordering::AcqRel);
         let tmp_name = Self::TMP_FILE;
@@ -212,7 +209,7 @@ impl WriterEngineState {
         let path = self.data_directory.join(&file_name);
 
         // Make a new WavWriter
-        let wav_spec = spec.into_wav_spec(RibbleRecordingExportFormat::F32)?;
+        let wav_spec = spec.into_wav_spec(RibbleExportFormat::F32)?;
         let mut writer = WavWriter::create(path, wav_spec)?;
         // NOTE: SDL (current backend sends interleaved data)
         // Wav is also interleaved, so this can just automatically write samples
@@ -284,19 +281,20 @@ impl WriterEngine {
                 match request {
                     WriteRequest::WriteJob { receiver, spec } => {
                         let request_handler_inner = Arc::clone(&thread_inner);
-                        let handle_request =
-                            std::thread::spawn(move || request_handler_inner.handle_new_request(receiver, spec));
+                        let handle_request = std::thread::spawn(move || {
+                            request_handler_inner.handle_new_request(receiver, spec)
+                        });
 
                         let work_request = WorkRequest::Short(handle_request);
 
                         if let Err(e) = thread_inner.work_request_sender.send(work_request) {
                             log::warn!(
-                        "Work engine closed. Cannot send new requests.\nError source: {:#?}",
-                        e.source()
-                    );
+                                "Work engine closed. Cannot send new requests.\nError source: {:#?}",
+                                e.source()
+                            );
                         }
                     }
-                    WriteRequest::Shutdown => { break }
+                    WriteRequest::Shutdown => break,
                 }
             }
         });
@@ -313,7 +311,7 @@ impl WriterEngine {
         out_path: PathBuf,
         // This is the key -> The caller needs to clone it higher up and pass ownership of the new pointer
         job_file_name: Arc<str>,
-        output_format: RibbleRecordingExportFormat,
+        output_format: RibbleExportFormat,
     ) {
         let thread_inner = Arc::clone(&self.inner);
         let worker = std::thread::spawn(move || {
@@ -333,7 +331,7 @@ impl WriterEngine {
     // NOTE: since the IndexMap preserves ordering based on insertion order, this
     // Needs to be reversed so that the information is presented most-recent to least-recent
     // IF this hapeens to be causing any significant lag, reverse the iterator in the ui.
-    pub(super) fn try_get_completed_jobs(
+    pub(super) fn try_read_recording_metadata(
         &self,
         copy_buffer: &mut Vec<(Arc<str>, CompletedRecordingJobs)>,
     ) {
@@ -375,7 +373,11 @@ impl WriterEngine {
     }
 
     pub(super) fn clear_cache(&self) {
-        // TODO: if guarding against grandma clicks isn't necessary, remove this mechanism.
+        // This operation is very, very quick and might actually be delayed by the threading,
+        // but since this is happening asynchronously, the clearing flag is a necessary evil to
+        // prevent spamming.
+
+        // (In practice this finishes running well before the next UI frame is done)
         if self.inner.is_clearing() {
             return;
         }

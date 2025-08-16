@@ -9,14 +9,14 @@ use crate::controller::worker::WorkerEngine;
 use crate::controller::writer::WriterEngine;
 use crate::controller::{
     AmortizedDownloadProgress, AmortizedProgress, Bus, CompletedRecordingJobs, ConsoleMessage,
-    DEFAULT_PROGRESS_SLAB_CAPACITY, LatestError, ModelFile, NUM_VISUALIZER_BUCKETS,
-    OfflineTranscriberFeedback, Progress, RotationDirection, SMALL_UTILITY_QUEUE_SIZE,
+    LatestError, ModelFile, OfflineTranscriberFeedback, Progress,
+    RotationDirection, DEFAULT_PROGRESS_SLAB_CAPACITY, NUM_VISUALIZER_BUCKETS, SMALL_UTILITY_QUEUE_SIZE,
     UTILITY_QUEUE_SIZE,
 };
 use crate::controller::{AnalysisType, FileDownload};
 use crate::utils::errors::RibbleError;
 use crate::utils::preferences::UserPreferences;
-use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExportFormat};
+use crate::utils::recorder_configs::{RibbleExportFormat, RibbleRecordingConfigs};
 use crate::utils::vad_configs::VadConfigs;
 
 use crate::controller::audio_backend_proxy::AudioBackendProxy;
@@ -31,12 +31,9 @@ use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-// NOTE: any meaningful/user-commanded background work should clear the "latest error" before starting work.
-// Most are covered, some may be missing, TODO: test.
 pub(super) struct Kernel {
     data_directory: PathBuf,
     user_preferences: ArcSwap<UserPreferences>,
-    // NOTE: pass this -in- to the RecorderEngine/TranscriberEngine as arguments
     audio_backend: Arc<AudioBackendProxy>,
     transcriber_engine: TranscriberEngine,
     recorder_engine: RecorderEngine,
@@ -58,7 +55,7 @@ impl Kernel {
     const TEMP_AUDIO_DIR_SLUG: &'static str = "recordings";
 
     // NOTE: this needs to take in the audio capture request sender from the app (main thread)
-    // because of SDL invariants.
+    // to uphold SDL invariants.
     pub(super) fn new(
         data_directory: &Path,
         audio_backend: AudioBackendProxy,
@@ -177,19 +174,18 @@ impl Kernel {
         }
     }
 
-    pub(super) fn get_app_theme(&self) -> Option<catppuccin_egui::Theme> {
+    pub(super) fn read_app_theme(&self) -> Option<catppuccin_egui::Theme> {
         self.user_preferences.load().system_theme().app_theme()
     }
 
-    pub(super) fn get_system_visuals(&self) -> Option<egui::Visuals> {
+    pub(super) fn read_system_visuals(&self) -> Option<egui::Visuals> {
         self.user_preferences.load().system_theme().visuals()
     }
 
-    pub(super) fn get_system_gradient(&self) -> Option<egui_colorgradient::Gradient> {
-        self.user_preferences.load().system_theme().gradient()
-    }
+    // pub(super) fn read_system_gradient(&self) -> Option<egui_colorgradient::Gradient> {
+    //     self.user_preferences.load().system_theme().gradient()
+    // }
 
-    // TODO: perhaps these methods should be trait methods if the controller needs to be testable.
     // MODEL MANAGEMENT
     pub(super) fn download_model(&self, url: &str) {
         // Clear the latest error before starting bg work
@@ -319,10 +315,10 @@ impl Kernel {
         self.recorder_engine.write_recorder_configs(new_configs);
     }
 
-    pub(super) fn read_export_format(&self) -> RibbleRecordingExportFormat {
+    pub(super) fn read_export_format(&self) -> RibbleExportFormat {
         self.recorder_engine.read_export_format()
     }
-    pub(super) fn write_export_format(&self, export_format: RibbleRecordingExportFormat) {
+    pub(super) fn write_export_format(&self, export_format: RibbleExportFormat) {
         self.recorder_engine.write_export_format(export_format);
     }
 
@@ -337,9 +333,10 @@ impl Kernel {
     }
 
     // WRITER (RECORDINGS + Export)
-    pub(super) fn is_clearing_recordings(&self) -> bool {
-        self.writer_engine.is_clearing()
-    }
+    //
+    // pub(super) fn is_clearing_recordings(&self) -> bool {
+    //     self.writer_engine.is_clearing()
+    // }
     pub(super) fn clear_recording_cache(&self) {
         // Clear the latest error before starting background work.
         self.console_engine.clear_latest_error();
@@ -353,14 +350,14 @@ impl Kernel {
         self.writer_engine.try_get_latest()
     }
 
-    pub(super) fn get_num_recordings(&self) -> usize {
-        self.writer_engine.get_num_completed()
-    }
-    pub(super) fn try_get_completed_recordings(
+    // pub(super) fn get_num_recordings(&self) -> usize {
+    //     self.writer_engine.get_num_completed()
+    // }
+    pub(super) fn try_read_recording_metadata(
         &self,
         copy_buffer: &mut Vec<(Arc<str>, CompletedRecordingJobs)>,
     ) {
-        self.writer_engine.try_get_completed_jobs(copy_buffer)
+        self.writer_engine.try_read_recording_metadata(copy_buffer)
     }
 
     // NOTE: this consumes a shared string -> clone higher up and consume it
@@ -373,7 +370,7 @@ impl Kernel {
         &self,
         out_path: PathBuf,
         recording_file_name: Arc<str>,
-        output_format: RibbleRecordingExportFormat,
+        output_format: RibbleExportFormat,
     ) {
         // Clear the latest error before starting background work.
         self.console_engine.clear_latest_error();
@@ -392,22 +389,22 @@ impl Kernel {
         self.console_engine.add_placeholder_error()
     }
 
-    pub(super) fn get_latest_error(&self) -> Arc<Option<LatestError>> {
-        self.console_engine.get_latest_error()
+    pub(super) fn read_latest_error(&self) -> Arc<Option<LatestError>> {
+        self.console_engine.read_latest_error()
     }
-    pub(super) fn try_get_current_messages(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
-        self.console_engine.try_get_current_messages(copy_buffer);
+    pub(super) fn try_read_console_message_buffer(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
+        self.console_engine.try_read_message_buffer(copy_buffer);
     }
     pub(super) fn resize_console_message_buffer(&self, new_size: usize) {
         self.console_engine.resize(new_size)
     }
 
     // PROGRESS
-    pub(super) fn try_get_current_jobs(&self, copy_buffer: &mut Vec<Progress>) {
-        self.progress_engine.try_get_current_jobs(copy_buffer);
+    pub(super) fn try_read_progress_metadata(&self, copy_buffer: &mut Vec<Progress>) {
+        self.progress_engine.try_read_progress_metadata(copy_buffer);
     }
 
-    pub(super) fn try_get_amortized_jobs(&self) -> Option<AmortizedProgress> {
+    pub(super) fn try_get_amortized_progress(&self) -> Option<AmortizedProgress> {
         self.progress_engine.try_get_amortized_progress()
     }
 
@@ -427,8 +424,9 @@ impl Kernel {
         self.download_engine.add_fake_indeterminate_download()
     }
 
-    pub(super) fn try_get_current_downloads(&self, copy_buffer: &mut Vec<(usize, FileDownload)>) {
-        self.download_engine.try_get_current_downloads(copy_buffer);
+    pub(super) fn try_read_download_metadata(&self, copy_buffer: &mut Vec<(usize, FileDownload)>) {
+        self.download_engine
+            .try_read_current_download_metadata(copy_buffer);
     }
 
     pub(super) fn try_get_amortized_download_progress(&self) -> Option<AmortizedDownloadProgress> {
@@ -451,12 +449,12 @@ impl Kernel {
             .try_read_visualization_buffer(copy_buffer);
     }
 
-    pub(super) fn get_visualizer_analysis_type(&self) -> AnalysisType {
-        self.visualizer_engine.get_visualizer_analysis_type()
+    pub(super) fn read_visualizer_analysis_type(&self) -> AnalysisType {
+        self.visualizer_engine.read_visualizer_analysis_type()
     }
-    pub(super) fn set_visualizer_analysis_type(&self, new_type: AnalysisType) {
+    pub(super) fn write_visualizer_analysis_type(&self, new_type: AnalysisType) {
         self.visualizer_engine
-            .set_visualizer_analysis_type(new_type);
+            .write_visualizer_analysis_type(new_type);
     }
     pub(super) fn rotate_visualizer_type(&self, direction: RotationDirection) {
         self.visualizer_engine.rotate_visualizer_type(direction);
@@ -469,8 +467,7 @@ impl Kernel {
         let vad_configs = *self.transcriber_engine.read_vad_configs();
         let recording_configs = *self.recorder_engine.read_recorder_configs();
         let export_format = self.recorder_engine.read_export_format();
-        let visualizer_analysis_type = self.visualizer_engine.get_visualizer_analysis_type();
-        // TODO: add the recording export format
+        let visualizer_analysis_type = self.visualizer_engine.read_visualizer_analysis_type();
         let user_preferences = *self.user_preferences.load_full();
 
         let state = KernelState {
@@ -552,7 +549,7 @@ struct KernelState {
     #[serde(default)]
     recording_configs: RibbleRecordingConfigs,
     #[serde(default)]
-    export_format: RibbleRecordingExportFormat,
+    export_format: RibbleExportFormat,
     #[serde(default)]
     visualizer_analysis_type: AnalysisType,
     #[serde(default)]

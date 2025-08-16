@@ -153,12 +153,10 @@ impl ConsoleEngine {
         }
     }
 
-    // TODO: EXPOSE THESE TO THE KERNEL & CONTROLLER AND IMPLEMENT A STATUS BAR IN THE UI.
     // The get-latest is already hashed for ID comparison -> this may or may not be used, but can be used to detect stale errors
     // (the same goes for the timestamp -> At the moment they're a little unnecessary, but that may change in the future.)
-
     // Any meaningful work requested by the owner should clear the latest error.
-    pub(super) fn get_latest_error(&self) -> Arc<Option<LatestError>> {
+    pub(super) fn read_latest_error(&self) -> Arc<Option<LatestError>> {
         self.inner.latest_error.load_full()
     }
 
@@ -177,7 +175,7 @@ impl ConsoleEngine {
 
     // Implementing Clone for ConsoleMessage would get expensive; it's cheaper to just use
     // shared pointers
-    pub(super) fn try_get_current_messages(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
+    pub(super) fn try_read_message_buffer(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
         if let Some(buffer) = self.inner.queue.try_read() {
             copy_buffer.clear();
             copy_buffer.extend(buffer.iter().cloned())

@@ -2,11 +2,11 @@ use crate::ui::app::Ribble;
 use crate::utils::crash_handler::set_up_desktop_crash_handler;
 use crate::utils::errors::RibbleError;
 use crate::utils::migration::{
-    RibbleVersion, Version, clear_old_ribble_state, migrate_model_filenames,
+    clear_old_ribble_state, migrate_model_filenames, RibbleVersion, Version,
 };
 use crash_handler::CrashHandler;
 use directories::ProjectDirs;
-use eframe::{AppCreator, NativeOptions, run_native};
+use eframe::{run_native, AppCreator, NativeOptions};
 use egui::{IconData, ViewportBuilder};
 use flexi_logger::{
     Age, Cleanup, Criterion, Duplicate, FileSpec, Logger, LoggerHandle, Naming, WriteMode,
@@ -49,11 +49,11 @@ pub(crate) struct RibbleRunner<'a> {
 
 impl RibbleRunner<'_> {
     const VERSION_FILE_NAME: &'static str = "version.ron";
-    // TODO: if this constant needs to change, change it
-    // Right now it's good for a "week's worth".
+    // This is a "week's worth" of log files, or 7 launches of the application.
     const MAX_LOG_FILES: usize = 7;
     const LOG_FILE_NAME: &'static str = "ribble_log";
     const EGUI_MEMORY_FILE_NAME: &'static str = "egui.ron";
+    const LOGS_SLUG: &'static str = "logs";
 
     pub(crate) fn new() -> Result<Self, RibbleError> {
         // Set up the project directory
@@ -72,11 +72,17 @@ impl RibbleRunner<'_> {
         );
         debug_assert!(data_directory.is_dir(), "Data dir not a directory.");
 
+        // Create a folder for the logs if it doesn't already exist.
+        let logs_directory = data_directory.join(Self::LOGS_SLUG);
+        if !logs_directory.exists() {
+            std::fs::create_dir_all(logs_directory.as_path())?;
+        }
+
         // Set up the logger - duplicate to stderr in debug mode only to reduce IO.
         let mut logger = Logger::try_with_str("info")?
             .log_to_file(
                 FileSpec::default()
-                    .directory(data_directory.as_path())
+                    .directory(logs_directory.as_path())
                     .basename(Self::LOG_FILE_NAME),
             )
             .write_mode(WriteMode::BufferAndFlush)
@@ -222,7 +228,6 @@ impl Drop for RibbleRunner<'_> {
     }
 }
 
-// TODO: rename this.
 const DEFAULT_WINDOW_SIZE: egui::Vec2 = egui::Vec2::new(1024.0, 768.0);
 
 #[inline]

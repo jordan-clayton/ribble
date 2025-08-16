@@ -3,7 +3,7 @@ use std::f32::consts::PI;
 use crate::controller::NUM_VISUALIZER_BUCKETS;
 use egui::emath::easing::{circular_in, circular_out, cubic_out, exponential_out};
 use egui::epaint::{Hsva, Rgba};
-use egui::{Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2, Widget, lerp};
+use egui::{lerp, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2, Widget};
 use egui_colorgradient::ColorInterpolator;
 
 const BAR_WIDTH_PERCENT: f32 = 0.1;
@@ -65,12 +65,11 @@ fn draw_soundbar(
     let desired_size = Vec2::new(rect_width, rect_height);
 
     let (rect, response) = ui.allocate_exact_size(desired_size, Sense::hover());
-    // Since the actual allocated rect caaaan be slightly smaller or larger,
+    // Since the actual allocated rect can be slightly smaller or larger,
     // the number of bars are calculated from the actual allocated rect.
     let num_bars = ((rect.width() - padding) / bar_plus_padding).trunc() as usize;
 
-    // TODO: not sure whether desired to use a crosshair or just the mouse pointer.
-    // Basically, if -any- rect passes the hit test, then this swaps to the crosshair.
+    // If -any- rect passes the hit test, then this swaps to the crosshair.
     let mut show_pointer = false;
 
     if ui.is_rect_visible(rect) {
@@ -113,7 +112,7 @@ fn draw_soundbar(
                     }
                 });
             })
-            .response
+                .response
         });
     }
 
@@ -153,7 +152,9 @@ fn draw_soundbar_rect(
     low_color.s = MIN_SATURATION;
     let bar_color: Rgba = lerp(low_color.into()..=color.into(), color_t);
 
-    // This is prooobably a little inefficient -> perhaps instead do a single "soundbar" collider
+    // This is probably a little inefficient -> perhaps instead do a single "soundbar" collider
+    // At the moment, this isn't causing an issue with frame times;
+    // consider this "low-hanging fruit" to optimize if there's an actual problem.
     if ui.is_rect_visible(rect) {
         let mut hitbox = rect.scale_from_center2(COLLISION_BOX_SCALE);
 
@@ -230,7 +231,7 @@ fn draw_soundbar_rect(
             let vert_pre_smooth = (lerp(circular_in(sculpt_t)..=quartic_in(sculpt_t), sculpt_t)
                 * DAMPING
                 + boost.powi(2))
-            .clamp(0.0, 1.0);
+                .clamp(0.0, 1.0);
 
             // NOTE: there are discontinuities that happen when p <= 0 and p >= 1.0 when composing
             // two easing functions at arbitrary p.
@@ -289,7 +290,7 @@ fn draw_soundbar_rect(
         );
 
         // Visualize the outer hitbox
-        // TODO: make this a "hitboxes" flag.
+        // TODO: make a "hitboxes" feature flag or similar to eliminate the comment dancing.
         // #[cfg(debug_assertions)]
         // {
         //     let hitbox_line_width = 1.0;

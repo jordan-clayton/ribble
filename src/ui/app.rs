@@ -11,8 +11,8 @@ use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{
     AmortizedDownloadProgress, AmortizedProgress, LatestError, UI_UPDATE_QUEUE_SIZE,
 };
-use crate::ui::panes::RibbleTree;
 use crate::ui::panes::ribble_pane::{ClosableRibbleViewPane, RibblePaneId};
+use crate::ui::panes::RibbleTree;
 use crate::ui::widgets::pie_progress::pie_progress;
 use crate::ui::widgets::recording_icon::recording_icon;
 use crate::utils::errors::{RibbleError, RibbleErrorCategory};
@@ -23,20 +23,16 @@ use egui_notify::{Toast, Toasts};
 use egui_theme_lerp::ThemeAnimator;
 use irox_egui_extras::progressbar::ProgressBar;
 use ribble_whisper::audio::audio_backend::{
-    AudioBackend, CaptureSpec, Sdl2Backend, default_backend,
+    default_backend, AudioBackend, CaptureSpec, Sdl2Backend,
 };
 use ribble_whisper::audio::microphone::Sdl2Capture;
 use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::sdl2;
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{Receiver, get_channel};
+use ribble_whisper::utils::{get_channel, Receiver};
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 
-// TODO: implement a debug menu from which to test some stuff out:
-// e.g. Panics, progress, downloads, etc.
-
-// TODO: FIND AN APPROPRIATE SPOT FOR GUI/STYLING CONSTANTS
 // Icon constants
 const HAMBURGER: &str = "☰";
 const NO_DOWNLOADS: &str = "📥";
@@ -108,7 +104,7 @@ impl Ribble {
         let tree = RibbleTree::new(data_directory, controller.clone());
 
         // Get the system visuals stored in user_prefs
-        let system_visuals = match controller.get_system_visuals() {
+        let system_visuals = match controller.read_system_visuals() {
             Some(visuals) => visuals,
             // None => "System" theme, extract the information from the creation context.
             // The default ThemePreference is ThemePreference::System (macOS, Windows),
@@ -192,10 +188,10 @@ impl Ribble {
     }
 
     fn check_join_last_save(&mut self) {
-        if let Some(handle) = self.periodic_serialize.take() {
-            if let Err(e) = handle.join() {
-                log::error!("Error serializing app state: {e:#?}");
-            }
+        if let Some(handle) = self.periodic_serialize.take()
+            && let Err(e) = handle.join()
+        {
+            log::error!("Error serializing app state: {e:#?}");
         }
     }
 
@@ -264,7 +260,7 @@ impl eframe::App for Ribble {
         }
 
         // Set the system theme.
-        let system_theme = match self.controller.get_system_visuals() {
+        let system_theme = match self.controller.read_system_visuals() {
             None => Self::get_system_visuals(ctx),
             Some(visuals) => visuals,
         };
@@ -313,7 +309,7 @@ impl eframe::App for Ribble {
 
                             // This maps the visuals to a catppuccin theme to make it easier
                             // to get Red-Green-Yellow that "mostly" matches with the user's selected theme.
-                            let theme = match self.controller.get_app_theme() {
+                            let theme = match self.controller.read_app_theme() {
                                 None => {
                                     match ui.ctx().system_theme().unwrap_or(egui::Theme::Dark) {
                                         egui::Theme::Dark => RibbleAppTheme::Mocha
@@ -447,7 +443,7 @@ impl eframe::App for Ribble {
 
                                         // This mightn't be necessary.
                                         // The application is in a mostly-working state,
-                                        // including the console.
+                                        // including the console so this doesn't really need to be implemented.
                                         if ui.button("Test Console").clicked() {
                                             todo!("Test Console");
                                         }
@@ -512,17 +508,16 @@ impl eframe::App for Ribble {
                                     current,
                                     total_size,
                                 } => {
-                                    // TODO: this needs to be tested -> It is not known whether or not the drawing behaves as written.
                                     let resp =
                                         ui.add(pie_progress(current as f32, total_size as f32));
                                     ui.ctx().request_repaint();
                                     resp
                                 }
                             }
-                            .on_hover_ui(|ui| {
-                                ui.style_mut().interaction.selectable_labels = true;
-                                ui.label("Show downloads");
-                            });
+                                .on_hover_ui(|ui| {
+                                    ui.style_mut().interaction.selectable_labels = true;
+                                    ui.label("Show downloads");
+                                });
 
                             if download_button.clicked() {
                                 self.tree.add_new_pane(RibblePaneId::Downloads);
@@ -556,7 +551,7 @@ impl eframe::App for Ribble {
 
                     col2.vertical_centered_justified(|ui| {
                         // LATEST ERROR.
-                        // TODO: if/when getting to cleanup, this could probably be a method.
+                        // TODO: this might work better as a method; consider refactoring later.
                         let mut error_ui_closure = |ui: &mut egui::Ui, error: &LatestError| {
                             // Try and do a single widget here.
                             let mut layout_job = egui::text::LayoutJob::default();
@@ -592,7 +587,7 @@ impl eframe::App for Ribble {
                             }
                         };
 
-                        match self.controller.get_latest_error().as_ref() {
+                        match self.controller.read_latest_error().as_ref() {
                             None => {
                                 #[cfg(debug_assertions)]
                                 {
@@ -665,9 +660,7 @@ impl eframe::App for Ribble {
                                 } => {
                                     ui.horizontal(|ui| {
                                         let progress = current as f32 / total_size as f32;
-
                                         debug_assert!(!progress.is_nan());
-                                        // TODO: check for infinities/Nan at the call site. (current/total)
 
                                         let pb = ProgressBar::new(progress)
                                             .desired_width(desired_size.x)
@@ -729,8 +722,6 @@ impl eframe::App for Ribble {
                 });
             });
 
-        // Remove any and all margins -> these will (are?) handled by the panes themselves
-        // TODO: update this comment once that's implemented.
         let mut frame = egui::Frame::central_panel(ctx.style().as_ref());
         frame.inner_margin = egui::Margin::ZERO;
 
@@ -745,15 +736,6 @@ impl eframe::App for Ribble {
             if start_transition {
                 self.theme_animator.start();
             }
-            // TODO: RE: egui_tiles --
-            // The panel split doesn't have a lot of contrast and is difficult to see
-            // especially on dark backgrounds.
-            // This needs to be addressed: consider using some sort of extreme fg color or
-            // the outline color
-            // NOTE: this is only a problem with the system dark-mode.
-
-            // The Light mode and catppuccin themes both are fine, but this should probably be set
-            // to a different color regardless if at all possible.
             self.tree.ui(ui);
         });
 

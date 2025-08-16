@@ -1,26 +1,24 @@
 use crate::controller::VisualizerPacket;
 use crate::controller::WriteRequest;
 use crate::controller::{
-    Bus, ConsoleMessage, Progress, ProgressMessage, RibbleMessage, UTILITY_QUEUE_SIZE, WorkRequest,
+    Bus, ConsoleMessage, Progress, ProgressMessage, RibbleMessage, WorkRequest, UTILITY_QUEUE_SIZE,
 };
 use crate::utils::errors::RibbleError;
-use crate::utils::recorder_configs::{
-    AtomicRibbleRecordingExportFormat, RibbleRecordingConfigs, RibbleRecordingExportFormat,
-};
+use crate::utils::recorder_configs::{AtomicRibbleExportFormat, RibbleExportFormat, RibbleRecordingConfigs};
 use arc_swap::ArcSwap;
 use crossbeam::channel::TrySendError;
 use ribble_whisper::audio::audio_backend::AudioBackend;
 use ribble_whisper::audio::microphone::MicCapture;
 use ribble_whisper::audio::recorder::ArcChannelSink;
-use ribble_whisper::utils::{Sender, get_channel};
+use ribble_whisper::utils::{get_channel, Sender};
 use std::error::Error;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 struct RecorderEngineState {
     recorder_running: Arc<AtomicBool>,
     recorder_configs: ArcSwap<RibbleRecordingConfigs>,
-    export_format: AtomicRibbleRecordingExportFormat,
+    export_format: AtomicRibbleExportFormat,
     progress_message_sender: Sender<ProgressMessage>,
     write_request_sender: Sender<WriteRequest>,
     visualizer_sample_sender: Sender<VisualizerPacket>,
@@ -29,13 +27,13 @@ struct RecorderEngineState {
 impl RecorderEngineState {
     fn new(
         configs: RibbleRecordingConfigs,
-        export_format: RibbleRecordingExportFormat,
+        export_format: RibbleExportFormat,
         bus: &Bus,
     ) -> Self {
         Self {
             recorder_running: Arc::new(AtomicBool::new(false)),
             recorder_configs: ArcSwap::from(Arc::new(configs)),
-            export_format: AtomicRibbleRecordingExportFormat::new(export_format),
+            export_format: AtomicRibbleExportFormat::new(export_format),
             progress_message_sender: bus.progress_message_sender(),
             write_request_sender: bus.write_request_sender(),
             visualizer_sample_sender: bus.visualizer_sample_sender(),
@@ -166,7 +164,7 @@ pub(super) struct RecorderEngine {
 impl RecorderEngine {
     pub(super) fn new(
         configs: RibbleRecordingConfigs,
-        export_format: RibbleRecordingExportFormat,
+        export_format: RibbleExportFormat,
         bus: &Bus,
     ) -> Self {
         Self {
@@ -220,10 +218,10 @@ impl RecorderEngine {
             .store(Arc::new(recorder_configs));
     }
 
-    pub(super) fn read_export_format(&self) -> RibbleRecordingExportFormat {
+    pub(super) fn read_export_format(&self) -> RibbleExportFormat {
         self.inner.export_format.load(Ordering::Acquire)
     }
-    pub(super) fn write_export_format(&self, export_format: RibbleRecordingExportFormat) {
+    pub(super) fn write_export_format(&self, export_format: RibbleExportFormat) {
         self.inner
             .export_format
             .store(export_format, Ordering::Release);

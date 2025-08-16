@@ -21,11 +21,11 @@ use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::audio::{AudioChannelConfiguration, WhisperAudioSample};
 use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
+use ribble_whisper::transcriber::vad::VAD;
 use ribble_whisper::transcriber::{
     redirect_whisper_logging_to_hooks, CallbackTranscriber, Transcriber, TranscriptionSnapshot, WhisperCallbacks,
     WhisperControlPhrase, WhisperOutput, WHISPER_SAMPLE_RATE,
 };
-use ribble_whisper::transcriber::vad::VAD;
 use ribble_whisper::utils::callback::{
     ShortCircuitRibbleWhisperCallback, StaticRibbleWhisperCallback,
 };
@@ -109,38 +109,38 @@ impl TranscriberEngineState {
         &self,
         audio_backend: &A,
         shared_model_retriever: Arc<M>,
-        ) -> Result<RibbleMessage, RibbleError>
-        where M: ModelRetriever + Send + Sync,
-              A: AudioBackend<ArcChannelSink<f32>> + Send + Sync,
+    ) -> Result<RibbleMessage, RibbleError>
+    where
+        M: ModelRetriever + Send + Sync,
+        A: AudioBackend<ArcChannelSink<f32>> + Send + Sync,
     {
         let configs = *self.vad_configs.load_full();
-        match configs.vad_type(){
+        match configs.vad_type() {
             VadType::Silero | VadType::Auto => {
                 let vad = configs.build_silero()?;
                 self.run_realtime_transcription(audio_backend, shared_model_retriever, vad)
-            },
+            }
             VadType::WebRtc => {
                 let vad = configs.build_webrtc()?;
                 self.run_realtime_transcription(audio_backend, shared_model_retriever, vad)
-            },
+            }
             VadType::Earshot => {
                 let vad = configs.build_earshot()?;
                 self.run_realtime_transcription(audio_backend, shared_model_retriever, vad)
             }
         }
-        
     }
 
     fn run_realtime_transcription<M, A, V>(
         &self,
         audio_backend: &A,
         shared_model_retriever: Arc<M>,
-        vad: V
+        vad: V,
     ) -> Result<RibbleMessage, RibbleError>
     where
         M: ModelRetriever + Send + Sync,
         A: AudioBackend<ArcChannelSink<f32>> + Send + Sync,
-        V: VAD<f32> + Send + Sync
+        V: VAD<f32> + Send + Sync,
     {
         self.clear_transcription();
 
@@ -313,25 +313,20 @@ impl TranscriberEngineState {
                             }
 
                             WhisperOutput::ControlPhrase(control) => {
-                                
                                 #[cfg(debug_assertions)]{
-                                    
-
                                     self.current_control_phrase.store(Arc::new(control));
-
                                 }
 
                                 // Filter out all "Debug" control phrases in release mode.
                                 #[cfg(not(debug_assertions))]
                                 {
                                     match &control {
-                                        WhisperControlPhrase::Debug(..) => {},
+                                        WhisperControlPhrase::Debug(..) => {}
                                         _ => {
                                             self.current_control_phrase.store(Arc::new(control));
                                         }
-                                    } 
+                                    }
                                 }
-
                             }
                         },
                         Err(_) => {
@@ -397,26 +392,26 @@ impl TranscriberEngineState {
         Ok(RibbleMessage::Console(console_message))
     }
 
-    fn build_vad_run_offline<M> (&self, shared_model_retriever: Arc<M>) -> Result<RibbleMessage, RibbleError>
-        where M: ModelRetriever + Sync + Send
+    fn build_vad_run_offline<M>(&self, shared_model_retriever: Arc<M>) -> Result<RibbleMessage, RibbleError>
+    where
+        M: ModelRetriever + Sync + Send,
     {
         let configs = *self.vad_configs.load_full();
-        if configs.use_vad_offline(){
-            match configs.vad_type(){
+        if configs.use_vad_offline() {
+            match configs.vad_type() {
                 VadType::Silero | VadType::Auto => {
                     let vad = configs.build_silero()?;
-                    self.run_offline_transcription( shared_model_retriever, Some(vad))
-                },
+                    self.run_offline_transcription(shared_model_retriever, Some(vad))
+                }
                 VadType::WebRtc => {
                     let vad = configs.build_webrtc()?;
                     self.run_offline_transcription(shared_model_retriever, Some(vad))
-                },
+                }
                 VadType::Earshot => {
                     let vad = configs.build_earshot()?;
                     self.run_offline_transcription(shared_model_retriever, Some(vad))
                 }
             }
-
         } else {
             self.run_offline_transcription(shared_model_retriever, None::<NopVAD>)
         }
@@ -425,11 +420,11 @@ impl TranscriberEngineState {
     fn run_offline_transcription<M, V>(
         &self,
         shared_model_retriever: Arc<M>,
-        vad: Option<V>
+        vad: Option<V>,
     ) -> Result<RibbleMessage, RibbleError>
     where
         M: ModelRetriever + Sync + Send,
-        V: VAD<f32> + Send + Sync
+        V: VAD<f32> + Send + Sync,
     {
         // Clear the previous transcription
         self.clear_transcription();
@@ -449,7 +444,6 @@ impl TranscriberEngineState {
         let (id_sender, id_receiver) = get_channel(1);
         let setup_progress_message = ProgressMessage::Request {
             job: setup_progress,
-            // TODO: rename this; it's confusing.
             id_return_sender: id_sender,
         };
 
@@ -698,25 +692,20 @@ impl TranscriberEngineState {
                                 self.current_snapshot.store(Arc::clone(&snapshot));
                             }
                             WhisperOutput::ControlPhrase(control) => {
-                                
                                 #[cfg(debug_assertions)]{
-                                    
-
                                     self.current_control_phrase.store(Arc::new(control));
-
                                 }
 
                                 // Filter out all "Debug" control phrases in release mode.
                                 #[cfg(not(debug_assertions))]
                                 {
                                     match &control {
-                                        WhisperControlPhrase::Debug(..) => {},
+                                        WhisperControlPhrase::Debug(..) => {}
                                         _ => {
                                             self.current_control_phrase.store(Arc::new(control));
                                         }
-                                    } 
+                                    }
                                 }
-
                             }
                         },
                         Err(_) => {

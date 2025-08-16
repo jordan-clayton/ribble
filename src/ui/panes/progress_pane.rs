@@ -32,7 +32,7 @@ impl PaneView for ProgressPane {
     ) -> egui::Response {
         let panel_color = ui.visuals().panel_fill;
         // Get the current list of jobs.
-        controller.try_get_current_jobs(&mut self.current_jobs);
+        controller.try_read_progress_metadata(&mut self.current_jobs);
 
         // If there are progress bars, request a repaint.
         if !self.current_jobs.is_empty() {

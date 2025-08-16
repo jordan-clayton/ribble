@@ -1,9 +1,9 @@
 use crate::controller::ribble_controller::RibbleController;
-use crate::controller::{AnalysisType, NUM_VISUALIZER_BUCKETS, RotationDirection};
-use crate::ui::PANE_INNER_MARGIN;
-use crate::ui::panes::PaneView;
+use crate::controller::{AnalysisType, RotationDirection, NUM_VISUALIZER_BUCKETS};
 use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
 use crate::ui::widgets::soundbar::soundbar;
+use crate::ui::PANE_INNER_MARGIN;
 use crate::utils::preferences::RibbleAppTheme;
 use egui_colorgradient::ColorInterpolator;
 use std::fmt::Debug;
@@ -125,7 +125,7 @@ impl PaneView for VisualizerPane {
             "Failed to set color interpolator."
         );
 
-        let mut visualizer_type = controller.get_visualizer_analysis_type();
+        let mut visualizer_type = controller.read_visualizer_analysis_type();
 
         let pane_id = egui::Id::new("visualizer_pane");
         let pane_max_rect = ui.max_rect();
@@ -191,7 +191,7 @@ impl PaneView for VisualizerPane {
                     .selectable_value(&mut visualizer_type, analysis_type, analysis_type.as_ref())
                     .clicked()
                 {
-                    controller.set_visualizer_analysis_type(visualizer_type);
+                    controller.write_visualizer_analysis_type(visualizer_type);
                 }
             }
 

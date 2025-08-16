@@ -106,7 +106,7 @@ impl ProgressEngine {
         Self { inner, work_thread }
     }
 
-    pub(super) fn try_get_current_jobs(&self, copy_buffer: &mut Vec<Progress>) {
+    pub(super) fn try_read_progress_metadata(&self, copy_buffer: &mut Vec<Progress>) {
         if let Some(jobs) = self.inner.current_jobs.try_read() {
             copy_buffer.clear();
             copy_buffer.extend(jobs.iter().map(|(_, progress)| progress.clone()))
@@ -133,10 +133,14 @@ impl ProgressEngine {
                     }
                 }
 
-                Some(AmortizedProgress::Determinate {
-                    current,
-                    total_size,
-                })
+                if total_size < current || total_size == 0 {
+                    Some(AmortizedProgress::Indeterminate)
+                } else {
+                    Some(AmortizedProgress::Determinate {
+                        current,
+                        total_size,
+                    })
+                }
             }
         } else {
             None

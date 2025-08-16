@@ -2,12 +2,12 @@ use crate::controller::audio_backend_proxy::AudioBackendProxy;
 use crate::controller::kernel::Kernel;
 use crate::controller::{
     AmortizedDownloadProgress, AmortizedProgress, AnalysisType, CompletedRecordingJobs,
-    ConsoleMessage, FileDownload, LatestError, ModelFile, NUM_VISUALIZER_BUCKETS,
-    OfflineTranscriberFeedback, Progress, RotationDirection,
+    ConsoleMessage, FileDownload, LatestError, ModelFile, OfflineTranscriberFeedback,
+    Progress, RotationDirection, NUM_VISUALIZER_BUCKETS,
 };
 use crate::utils::errors::RibbleError;
 use crate::utils::preferences::UserPreferences;
-use crate::utils::recorder_configs::{RibbleRecordingConfigs, RibbleRecordingExportFormat};
+use crate::utils::recorder_configs::{RibbleExportFormat, RibbleRecordingConfigs};
 use crate::utils::vad_configs::VadConfigs;
 use ribble_whisper::transcriber::{TranscriptionSnapshot, WhisperControlPhrase};
 use ribble_whisper::utils::Sender;
@@ -91,19 +91,19 @@ impl RibbleController {
         self.kernel.write_user_preferences(new_prefs);
     }
 
-    pub(crate) fn get_app_theme(&self) -> Option<catppuccin_egui::Theme> {
-        self.kernel.get_app_theme()
+    pub(crate) fn read_app_theme(&self) -> Option<catppuccin_egui::Theme> {
+        self.kernel.read_app_theme()
     }
 
-    pub(crate) fn get_system_visuals(&self) -> Option<egui::Visuals> {
-        self.kernel.get_system_visuals()
+    pub(crate) fn read_system_visuals(&self) -> Option<egui::Visuals> {
+        self.kernel.read_system_visuals()
     }
 
     // NOTE: this will allocate and should not be called every frame,
     // Either use an internal setter, or swap on transition.
-    pub(crate) fn get_system_gradient(&self) -> Option<egui_colorgradient::Gradient> {
-        self.kernel.get_system_gradient()
-    }
+    // pub(crate) fn get_system_gradient(&self) -> Option<egui_colorgradient::Gradient> {
+    //     self.kernel.read_system_gradient()
+    // }
 
     // MODEL MANAGEMENT
     pub(crate) fn download_model(&self, url: &str) {
@@ -163,12 +163,12 @@ impl RibbleController {
         self.kernel.transcriber_running()
     }
 
-    pub(crate) fn stop_realtime(&self) {
-        self.kernel.stop_realtime()
-    }
-    pub(crate) fn stop_offline(&self) {
-        self.kernel.stop_realtime()
-    }
+    // pub(crate) fn stop_realtime(&self) {
+    //     self.kernel.stop_realtime()
+    // }
+    // pub(crate) fn stop_offline(&self) {
+    //     self.kernel.stop_realtime()
+    // }
 
     // It's easiest from the transcription windows to just kill both.
     pub(crate) fn stop_transcription(&self) {
@@ -222,10 +222,10 @@ impl RibbleController {
         self.kernel.write_recorder_configs(new_configs);
     }
 
-    pub(crate) fn read_export_format(&self) -> RibbleRecordingExportFormat {
+    pub(crate) fn read_export_format(&self) -> RibbleExportFormat {
         self.kernel.read_export_format()
     }
-    pub(crate) fn write_export_format(&self, export_format: RibbleRecordingExportFormat) {
+    pub(crate) fn write_export_format(&self, export_format: RibbleExportFormat) {
         self.kernel.write_export_format(export_format);
     }
 
@@ -238,30 +238,30 @@ impl RibbleController {
     }
 
     // WRITER (RECORDINGS + Export)
-    pub(crate) fn is_clearing_recordings(&self) -> bool {
-        self.kernel.is_clearing_recordings()
-    }
+    // pub(crate) fn is_clearing_recordings(&self) -> bool {
+    //     self.kernel.is_clearing_recordings()
+    // }
     pub(crate) fn clear_recording_cache(&self) {
         self.kernel.clear_recording_cache()
     }
-    pub(crate) fn try_get_latest_recording(&self) -> Option<PathBuf> {
-        self.kernel.try_get_latest_recording()
-    }
+    // pub(crate) fn try_get_latest_recording(&self) -> Option<PathBuf> {
+    //     self.kernel.try_get_latest_recording()
+    // }
 
     // NOTE: if lock-contention is ever an issue (if this method even gets used),
     // swap to a try_get and respond accordingly in the UI.
-    pub(crate) fn get_num_recordings(&self) -> usize {
-        self.kernel.get_num_recordings()
-    }
+    // pub(crate) fn get_num_recordings(&self) -> usize {
+    //     self.kernel.get_num_recordings()
+    // }
 
     pub(crate) fn latest_recording_exists(&self) -> bool {
         self.kernel.latest_recording_exists()
     }
-    pub(crate) fn try_get_completed_recordings(
+    pub(crate) fn try_read_recording_metadata(
         &self,
         copy_buffer: &mut Vec<(Arc<str>, CompletedRecordingJobs)>,
     ) {
-        self.kernel.try_get_completed_recordings(copy_buffer)
+        self.kernel.try_read_recording_metadata(copy_buffer)
     }
 
     pub(crate) fn try_get_recording_path(&self, file_name: Arc<str>) -> Option<PathBuf> {
@@ -273,7 +273,7 @@ impl RibbleController {
         &self,
         out_path: PathBuf,
         recording_file_name: Arc<str>,
-        output_format: RibbleRecordingExportFormat,
+        output_format: RibbleExportFormat,
     ) {
         self.kernel
             .export_recording(out_path, recording_file_name, output_format);
@@ -281,8 +281,8 @@ impl RibbleController {
 
     // CONSOLE
 
-    pub(crate) fn get_latest_error(&self) -> Arc<Option<LatestError>> {
-        self.kernel.get_latest_error()
+    pub(crate) fn read_latest_error(&self) -> Arc<Option<LatestError>> {
+        self.kernel.read_latest_error()
     }
 
     #[cfg(debug_assertions)]
@@ -293,8 +293,8 @@ impl RibbleController {
     pub(crate) fn add_placeholder_error(&self) {
         self.kernel.add_placeholder_error()
     }
-    pub(crate) fn try_get_current_messages(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
-        self.kernel.try_get_current_messages(copy_buffer);
+    pub(crate) fn try_read_console_message_buffer(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
+        self.kernel.try_read_console_message_buffer(copy_buffer);
     }
 
     // Resizing happens on a background thread, so it's okay to call this with some level of
@@ -302,17 +302,18 @@ impl RibbleController {
     // writing on a drag-finished event.
     // There is a tiny, tiny chance that the short-queue gets slammed -> if so, increase the size,
     // or handle priority better/classify jobs better.
-    pub(crate) fn resize_console_message_buffer(&self, new_size: usize) {
-        self.kernel.resize_console_message_buffer(new_size);
-    }
+    // NOTE: this is called internally when writing the User prefs.
+    // pub(crate) fn resize_console_message_buffer(&self, new_size: usize) {
+    //     self.kernel.resize_console_message_buffer(new_size);
+    // }
 
     // PROGRESS
-    pub(crate) fn try_get_current_jobs(&self, copy_buffer: &mut Vec<Progress>) {
-        self.kernel.try_get_current_jobs(copy_buffer);
+    pub(crate) fn try_read_progress_metadata(&self, copy_buffer: &mut Vec<Progress>) {
+        self.kernel.try_read_progress_metadata(copy_buffer);
     }
 
     pub(crate) fn try_get_amortized_progress(&self) -> Option<AmortizedProgress> {
-        self.kernel.try_get_amortized_jobs()
+        self.kernel.try_get_amortized_progress()
     }
 
     // DOWNLOADER
@@ -331,8 +332,8 @@ impl RibbleController {
         self.kernel.add_debug_indeterminate_download()
     }
 
-    pub(crate) fn try_get_current_downloads(&self, copy_buffer: &mut Vec<(usize, FileDownload)>) {
-        self.kernel.try_get_current_downloads(copy_buffer);
+    pub(crate) fn try_read_download_metadata(&self, copy_buffer: &mut Vec<(usize, FileDownload)>) {
+        self.kernel.try_read_download_metadata(copy_buffer);
     }
 
     pub(crate) fn try_get_amortized_download_progress(&self) -> Option<AmortizedDownloadProgress> {
@@ -354,12 +355,12 @@ impl RibbleController {
         self.kernel.try_read_visualization_buffer(copy_buffer);
     }
 
-    pub(crate) fn get_visualizer_analysis_type(&self) -> AnalysisType {
-        self.kernel.get_visualizer_analysis_type()
+    pub(crate) fn read_visualizer_analysis_type(&self) -> AnalysisType {
+        self.kernel.read_visualizer_analysis_type()
     }
 
-    pub(crate) fn set_visualizer_analysis_type(&self, new_type: AnalysisType) {
-        self.kernel.set_visualizer_analysis_type(new_type);
+    pub(crate) fn write_visualizer_analysis_type(&self, new_type: AnalysisType) {
+        self.kernel.write_visualizer_analysis_type(new_type);
     }
 
     pub(crate) fn rotate_visualizer_type(&self, direction: RotationDirection) {

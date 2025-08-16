@@ -1,5 +1,5 @@
 use crate::controller::{
-    AnalysisType, AtomicAnalysisType, NUM_VISUALIZER_BUCKETS, RotationDirection, VisualizerPacket,
+    AnalysisType, AtomicAnalysisType, RotationDirection, VisualizerPacket, NUM_VISUALIZER_BUCKETS,
 };
 use crate::utils::errors::RibbleError;
 use crossbeam::channel::Receiver;
@@ -8,8 +8,8 @@ use realfft::RealFftPlanner;
 use std::error::Error;
 use std::f32::consts::PI;
 use std::ops::Deref;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
 
@@ -45,7 +45,8 @@ impl VisualizerEngineState {
         }
     }
 
-    // TODO: if deciding to store the sample rate, remove this argument
+    // TODO: remove sample_rate if/when cached in the state.
+    // Sample rate (should be) is known when recording starts/a write request is sent.
     fn run_analysis(&self, sample: &[f32], sample_rate: f64) -> Result<(), RibbleError> {
         match self.analysis_type.load(Ordering::Acquire) {
             AnalysisType::AmplitudeEnvelope => self.amplitude_envelope(sample),
@@ -70,7 +71,6 @@ impl VisualizerEngineState {
         }
     }
 
-    // TODO: look at precomputing the frame size/FFT planner, etc.
     fn power_analysis(&self, samples: &[f32]) -> Result<(), RibbleError> {
         // True = apply gain
         let mut window = hann_window(samples, true);
@@ -206,15 +206,12 @@ impl VisualizerEngineState {
     fn spectrum_density(&self, samples: &[f32], sample_rate: f64) -> Result<(), RibbleError> {
         // I don't remember why I'm not applying gain here...
         let mut window = hann_window(samples, false);
-        // TODO: look at precomputing on changing settings/running transcriber, etc.
         let (frame_size, step_size) =
             compute_welch_frames(window.len() as f32, Self::POWER_OVERLAP);
 
         Self::fit_frames(&mut window, frame_size);
 
         let frames = window.windows(frame_size).step_by(step_size);
-        // TODO: the FFT stuff can be precomputed upon changing the analysis type + Sample Rate
-        // Not quite sure how to handle this just yet.
 
         let fft = self.planner.write().plan_fft_forward(frame_size);
         let mut input = fft.make_input_vec();
@@ -314,8 +311,6 @@ fn hann_window(samples: &[f32], apply_gain: bool) -> Vec<f32> {
         .collect()
 }
 
-// (Frame size, step size)
-// TODO: This should probably be pre-computed whenever the visualizer is changed.
 fn compute_welch_frames(sample_len: f32, overlap_ratio: f32) -> (usize, usize) {
     let frame_size =
         sample_len / (1f32 + (NUM_VISUALIZER_BUCKETS as f32 - 1f32) * (1f32 - overlap_ratio));
@@ -324,7 +319,7 @@ fn compute_welch_frames(sample_len: f32, overlap_ratio: f32) -> (usize, usize) {
 }
 
 // TODO: kernel-exposed methods for updating sample rate/buffer size
-// For precomputing an FFTplanner state that can be ArcSwapped
+// For precomputing an FFTplanner state + cached sample rate/frequencies
 pub(super) struct VisualizerEngine {
     inner: Arc<VisualizerEngineState>,
     work_thread: Option<JoinHandle<()>>,
@@ -397,11 +392,11 @@ impl VisualizerEngine {
         }
     }
 
-    pub(super) fn get_visualizer_analysis_type(&self) -> AnalysisType {
+    pub(super) fn read_visualizer_analysis_type(&self) -> AnalysisType {
         self.inner.analysis_type.load(Ordering::Acquire)
     }
 
-    pub(super) fn set_visualizer_analysis_type(&self, new_type: AnalysisType) {
+    pub(super) fn write_visualizer_analysis_type(&self, new_type: AnalysisType) {
         self.inner.analysis_type.store(new_type, Ordering::Release);
     }
 

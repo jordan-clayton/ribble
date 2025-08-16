@@ -1,7 +1,7 @@
 use crate::controller::{Bus, ConsoleMessage, RibbleMessage, RibbleWork, WorkRequest};
 use crate::utils::errors::RibbleError;
 use crossbeam::scope;
-use ribble_whisper::utils::{get_channel, Receiver, Sender};
+use ribble_whisper::utils::{Receiver, Sender, get_channel};
 use std::error::Error;
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -9,9 +9,7 @@ use std::thread::JoinHandle;
 struct WorkerInner {
     incoming_requests: Receiver<WorkRequest>,
     console_message_sender: Sender<ConsoleMessage>,
-    // Inner channel to forward incoming jobs to a joiner.
-    // TODO: If double-buffering is not sufficient, look at implementing a priority system
-    // Possibly look at rayon for work-stealing if thrashing starts to become an issue.
+    // If double-buffering is insufficient, swap to priority or look at work-stealing.
     short_incoming: Receiver<RibbleWork>,
     short_outgoing: Sender<RibbleWork>,
     long_incoming: Receiver<RibbleWork>,
@@ -83,7 +81,10 @@ pub(super) struct WorkerEngine {
 }
 
 impl WorkerEngine {
-    pub(super) fn new(incoming_request: Receiver<WorkRequest>, bus: &Bus) -> Result<Self, RibbleError> {
+    pub(super) fn new(
+        incoming_request: Receiver<WorkRequest>,
+        bus: &Bus,
+    ) -> Result<Self, RibbleError> {
         let inner = Arc::new(WorkerInner::new(incoming_request, bus));
         let thread_inner = Arc::clone(&inner);
 
@@ -169,21 +170,31 @@ impl WorkerEngine {
         }));
 
         // If the worker thread fails to spin up, return an error at construction time.
-        if work_thread.as_ref().is_some_and(|thread| thread.is_finished()) {
+        if work_thread
+            .as_ref()
+            .is_some_and(|thread| thread.is_finished())
+        {
             let inner = work_thread.take().unwrap();
             return match inner.join() {
                 Ok(_) => {
-                    let err = RibbleError::Core("Worker thread returned before construction finished.".to_string());
+                    let err = RibbleError::Core(
+                        "Worker thread returned before construction finished.".to_string(),
+                    );
                     Err(err)
                 }
                 Err(e) => {
-                    let err = RibbleError::ThreadPanic(format!("Worker thread panicked at construction.\nError: {e:#?}"));
+                    let err = RibbleError::ThreadPanic(format!(
+                        "Worker thread panicked at construction.\nError: {e:#?}"
+                    ));
                     Err(err)
                 }
             };
         }
 
-        Ok(Self { _inner: inner, work_thread })
+        Ok(Self {
+            _inner: inner,
+            work_thread,
+        })
     }
 }
 
@@ -192,9 +203,9 @@ impl Drop for WorkerEngine {
         log::info!("Dropping WorkerEngine.");
         if let Some(handle) = self.work_thread.take() {
             log::info!("Joining WorkerEngine work thread.");
-            handle
-                .join()
-                .expect("The worker thread is not expected to panic and should run without issues.");
+            handle.join().expect(
+                "The worker thread is not expected to panic and should run without issues.",
+            );
             log::info!("WorkerEngine work thread joined.");
         }
     }

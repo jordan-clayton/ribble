@@ -1,4 +1,7 @@
-use crate::controller::{AmortizedDownloadProgress, AtomicProgress, Bus, ConsoleMessage, DownloadRequest, FileDownload, Progress, ProgressMessage, RibbleMessage, WorkRequest};
+use crate::controller::{
+    AmortizedDownloadProgress, AtomicProgress, Bus, ConsoleMessage, DownloadRequest, FileDownload,
+    Progress, ProgressMessage, RibbleMessage, WorkRequest,
+};
 use crate::utils::errors::RibbleError;
 use parking_lot::RwLock;
 use ribble_whisper::downloader::downloaders::sync_download_request;
@@ -47,7 +50,6 @@ impl DownloadEngineState {
             ))
                 .into());
         }
-
 
         // If the content-length is missing, sync_downloader defaults to "1" as an "indeterminate"
         // There is a mechanism to set maybe_indeterminate to keep the total_size() as current() + 1
@@ -220,7 +222,10 @@ impl DownloadEngine {
     }
 
     // FileDownload is a cheap clone (mostly copy); this should be harmlesss to call in the UI.
-    pub(super) fn try_get_current_downloads(&self, copy_buffer: &mut Vec<(usize, FileDownload)>) {
+    pub(super) fn try_read_current_download_metadata(
+        &self,
+        copy_buffer: &mut Vec<(usize, FileDownload)>,
+    ) {
         if let Some(guard) = self.inner.file_downloads.try_read() {
             copy_buffer.clear();
             // Filter out aborted downloads and return a cloned list.
@@ -235,7 +240,11 @@ impl DownloadEngine {
 
     pub(super) fn try_get_amortized_download_progress(&self) -> Option<AmortizedDownloadProgress> {
         if let Some(jobs) = self.inner.file_downloads.try_read() {
-            // This will coerce into NoJobs if the accumulator ends up (0, 0) (i.e. no jobs).
+            // This will coerce into NoJobs if the accumulator ends up (0, 0), (i.e. no jobs).
+            // It will also fall back if total < current to use total for both (i.e. invalid download/no content length).
+
+            // There are guards against issues with content-length such that the fallback should never hit,
+            // but in case it does, this will provide a "best-effort" attempt to communicate information.
             let download_progress: AmortizedDownloadProgress = jobs
                 .iter()
                 .fold((0usize, 0usize), |(current, total), (_, file_download)| {
@@ -278,7 +287,11 @@ impl DownloadEngine {
     #[cfg(debug_assertions)]
     pub(super) fn add_fake_indeterminate_download(&self) -> usize {
         use crate::controller::ProgressView;
-        let progress = Arc::new(AtomicProgress::new().with_capacity(1).with_maybe_indeterminate(true));
+        let progress = Arc::new(
+            AtomicProgress::new()
+                .with_capacity(1)
+                .with_maybe_indeterminate(true),
+        );
         progress.set(99);
         // This is expected to sit at 99%, with the "current" at 100.
         let fake_progress = ProgressView::new(progress);
@@ -290,7 +303,13 @@ impl DownloadEngine {
 
     #[cfg(debug_assertions)]
     pub(super) fn remove_fake_download(&self, download_id: usize) {
-        if self.inner.file_downloads.write().try_remove(download_id).is_none() {
+        if self
+            .inner
+            .file_downloads
+            .write()
+            .try_remove(download_id)
+            .is_none()
+        {
             log::warn!("File download metadata missing for (fake) id: {download_id}");
         }
     }

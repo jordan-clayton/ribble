@@ -42,9 +42,8 @@ impl RibbleAppTheme {
             // through one of the public functions.
             // Since set_style_theme() only extracts the visuals anyway, it's fine to just use
             // egui's default visuals (dark mode) -- these should all be consistent with which style they modify.
-            //
-            // TODO: fork catppuccin_egui and expose the method directly to cut down on
-            // indirection.
+            // There are plans to fork catppuccin_egui at a later date; for now, things are fine.
+
             RibbleAppTheme::Latte => {
                 Self::tweak_catppuccin_visuals(catppuccin_egui::LATTE)
             }
