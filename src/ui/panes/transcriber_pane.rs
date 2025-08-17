@@ -17,7 +17,6 @@ use strum::IntoEnumIterator;
 const LINK_ICON: &str = "🌐";
 const LINK_BUTTON_SIZE: f32 = 18.0;
 
-// TODO: remove the selectable labels -> they're annoying and stick around too long.
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(in crate::ui) struct TranscriberPane {
@@ -173,7 +172,6 @@ impl PaneView for TranscriberPane {
                     });
                 } else {
                     // OFFLINE RUNNER BUTTONS
-                    // TODO: This needs some tlc -> the buttons are a bit funky.
                     // Get the audio file information.
                     let current_audio_path = controller.read_current_audio_file_path();
 
@@ -212,7 +210,7 @@ impl PaneView for TranscriberPane {
                             .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
                             .show(ui, |ui| {
                                 ui.label("Current audio file:");
-                                // TODO: determine whether to truncate.
+                                // This will wrap--that's probably fine.
                                 ui.label(audio_file_label_text);
                                 // THIS COULD BE AN "X" instead of clear.
                                 let desired_size = egui::Vec2::new(ui.available_width(), ui.spacing().interact_size.y);
@@ -224,7 +222,6 @@ impl PaneView for TranscriberPane {
                                 });
                             });
 
-                        // TODO: determine whether to add button spacing between the grid or not.
                         ui.add_space(button_spacing);
                         if ui.add_enabled(!transcription_running, egui::Button::new("Open file")).clicked() {
                             let file_dialog = rfd::FileDialog::new()

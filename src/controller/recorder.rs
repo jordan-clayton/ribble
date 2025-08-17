@@ -85,9 +85,8 @@ impl RecorderEngineState {
         let (audio_sender, audio_receiver) = get_channel::<Arc<[f32]>>(UTILITY_QUEUE_SIZE);
         let sink = ArcChannelSink::new(audio_sender);
         let spec = (*self.recorder_configs.load_full()).into();
-        let mic = audio_backend.open_capture(spec, sink).or_else(|e| {
+        let mic = audio_backend.open_capture(spec, sink).inspect_err(|_e| {
             self.cleanup_remove_progress_job(setup_id);
-            Err(e)
         })?;
         let (write_sender, write_receiver) = get_channel::<Arc<[f32]>>(UTILITY_QUEUE_SIZE);
         let confirmed_specs = RibbleRecordingConfigs::from_mic_capture(&mic);
@@ -184,7 +183,7 @@ impl RecorderEngine {
         // Spawn a (long job) thread and send it off to the worker to join it.
         let worker = std::thread::spawn(move || {
             thread_inner.run_recorder_loop(audio_backend.as_ref())?;
-            let message = String::from("Finished recording!");
+            let message = String::from("Recording finished!");
             let console_message = ConsoleMessage::Status(message);
             Ok(RibbleMessage::Console(console_message))
         });

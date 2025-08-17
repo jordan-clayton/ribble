@@ -44,17 +44,12 @@ impl PaneView for ProgressPane {
             .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::Grab);
 
-        // TODO: this requires testing -> check that the bars fill.
         egui::Frame::default().fill(panel_color).inner_margin(PANE_INNER_MARGIN).show(ui, |ui| {
             ui.heading("Progress:");
             egui::ScrollArea::vertical()
                 .auto_shrink([false; 2])
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
-                    // NOTE: since grids don't automatically expand to remaining space, this needs
-                    // to be calculated manually.
-                    // TODO: check this and see if the width should be queried in the grid method.
-                    // This should work as anticipated though.
                     let grid_width = ui.available_width();
                     egui::Grid::new("progress_grid")
                         .num_columns(1)
@@ -62,13 +57,11 @@ impl PaneView for ProgressPane {
                         .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
                         .striped(true)
                         .show(ui, |ui| {
-                            // NOTE: this will need to be tested -> it is most likely to work though.
                             for prog_job in self.current_jobs.iter() {
                                 let mut pb = match prog_job.progress() {
                                     Some(progress) => ProgressBar::new(progress)
                                         .desired_width(grid_width)
                                         .text_left(prog_job.job_name().to_string())
-                                        // TODO: bring this fix to all progress bars.
                                         .text_right(format!("{:.2}%", progress * 100f32)),
                                     None => ProgressBar::indeterminate()
                                         .desired_width(grid_width)

@@ -247,7 +247,7 @@ impl WriterEngineState {
         let hours = (secs / 60) / 60;
 
         let console_message = ConsoleMessage::Status(format!(
-            "Finished Recording. Total duration: {hours}:{minutes}:{seconds}"
+            "Total recording duration: {hours:02}:{minutes:02}:{seconds:02}"
         ));
 
         // Update the latest_exists flag --> if the transcription was written, it has to exist

@@ -183,11 +183,24 @@ impl DownloadEngineState {
             log::warn!("Download metadata missing for id: {download_id}");
         }
     }
+
+    // These will get removed if they happen to be downloading on a background thread.
+    fn stop_downloads(&self) {
+        for (_, download) in self.file_downloads.read().iter() {
+            download.should_abort.store(true, Ordering::Release);
+        }
+    }
 }
 
 pub(super) struct DownloadEngine {
     inner: Arc<DownloadEngineState>,
     work_thread: Option<JoinHandle<()>>,
+}
+
+impl DownloadEngine {
+    pub(crate) fn stop_downloads(&self) {
+        self.inner.stop_downloads();
+    }
 }
 
 impl DownloadEngine {

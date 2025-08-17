@@ -51,7 +51,7 @@ fn draw_progress_pie(ui: &mut Ui, current: f32, total_size: f32) -> Response {
 
         // Fill the inside.
         let t = (current / total_size).clamp(0.0, 1.0);
-        let nearest_idx = (t * (RESOLUTION) as f32).round() as usize;
+        let nearest_idx = (t * RESOLUTION as f32).round() as usize;
         let last_vertex = nearest_idx.min(vertices.len() - 1);
 
         // If the last vertex is the final vertex, omit the centre vertex to avoid

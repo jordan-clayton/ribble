@@ -386,7 +386,7 @@ impl From<(usize, usize)> for AmortizedDownloadProgress {
     fn from(value: (usize, usize)) -> Self {
         match value {
             (0, 0) => AmortizedDownloadProgress::NoJobs,
-            (current, total_size) if (total_size < current) => {
+            (current, total_size) if total_size < current => {
                 AmortizedDownloadProgress::Total { current: total_size, total_size }
             }
             (current, total_size) => AmortizedDownloadProgress::Total {
@@ -604,13 +604,14 @@ pub(crate) enum RotationDirection {
     serde::Deserialize,
 )]
 pub(crate) enum AnalysisType {
-    #[strum(to_string = "Amplitude")]
+    #[strum(to_string = "Amplitude Envelope")]
     #[default]
     AmplitudeEnvelope = 0,
     Waveform,
-    Power,
-    #[strum(to_string = "Spectrum Density")]
-    SpectrumDensity,
+    #[strum(to_string = "Power Spectral Density")]
+    PowerSpectralDensity,
+    #[strum(to_string = "Log Spectrum")]
+    LogSpectrum,
 }
 
 impl AnalysisType {
@@ -622,19 +623,19 @@ impl AnalysisType {
                 AnalysisType::Waveform
             }
             (AnalysisType::AmplitudeEnvelope, RotationDirection::CounterClockwise) => {
-                AnalysisType::SpectrumDensity
+                AnalysisType::LogSpectrum
             }
-            (AnalysisType::Waveform, RotationDirection::Clockwise) => AnalysisType::Power,
+            (AnalysisType::Waveform, RotationDirection::Clockwise) => AnalysisType::PowerSpectralDensity,
             (AnalysisType::Waveform, RotationDirection::CounterClockwise) => {
                 AnalysisType::AmplitudeEnvelope
             }
-            (AnalysisType::Power, RotationDirection::Clockwise) => AnalysisType::SpectrumDensity,
-            (AnalysisType::Power, RotationDirection::CounterClockwise) => AnalysisType::Waveform,
-            (AnalysisType::SpectrumDensity, RotationDirection::Clockwise) => {
+            (AnalysisType::PowerSpectralDensity, RotationDirection::Clockwise) => AnalysisType::LogSpectrum,
+            (AnalysisType::PowerSpectralDensity, RotationDirection::CounterClockwise) => AnalysisType::Waveform,
+            (AnalysisType::LogSpectrum, RotationDirection::Clockwise) => {
                 AnalysisType::AmplitudeEnvelope
             }
-            (AnalysisType::SpectrumDensity, RotationDirection::CounterClockwise) => {
-                AnalysisType::Power
+            (AnalysisType::LogSpectrum, RotationDirection::CounterClockwise) => {
+                AnalysisType::PowerSpectralDensity
             }
         }
     }

@@ -33,11 +33,11 @@ impl RibbleAppTheme {
     // viewport.
     // Rather than taking in an egui::context, it's easiest to just get the input state in the paint
     // loop.
-    pub(crate) fn visuals(&self) -> Option<egui::Visuals> {
+    pub(crate) fn visuals(&self) -> Option<Visuals> {
         match self {
             RibbleAppTheme::System => None,
-            RibbleAppTheme::Light => Some(egui::Visuals::light()),
-            RibbleAppTheme::Dark => Some(egui::Visuals::dark()),
+            RibbleAppTheme::Light => Some(Visuals::light()),
+            RibbleAppTheme::Dark => Some(Visuals::dark()),
             // NOTE: atm, catppuccin::Theme::visuals(...) isn't public, so this has to be done
             // through one of the public functions.
             // Since set_style_theme() only extracts the visuals anyway, it's fine to just use

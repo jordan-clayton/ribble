@@ -158,6 +158,16 @@ impl Kernel {
             bus,
         })
     }
+
+    // If the app is being closed and there are background loops running, the program can deadlock.
+    // This is a "kill everything" so that cleanup can happen on drop.
+    pub(super) fn stop_work(&self) {
+        self.transcriber_engine.stop_offline();
+        self.transcriber_engine.stop_realtime();
+        self.recorder_engine.stop_recording();
+        self.download_engine.stop_downloads();
+    }
+
     // USER PREFERENCES
     pub(super) fn read_user_preferences(&self) -> Arc<UserPreferences> {
         self.user_preferences.load_full()

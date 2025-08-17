@@ -30,6 +30,8 @@ const BAR_SATURATION_INCREASE: f32 = 0.5;
 const MIN_SATURATION: f32 = 0.3;
 const COLOR_CHANGE_DAMPING: f32 = 0.08;
 
+// This -could- be made generic, or this could instead repurpose a generic
+// bucket interpolation function.
 #[inline]
 fn interpolate_buckets(
     idx: usize,

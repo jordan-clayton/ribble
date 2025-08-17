@@ -58,6 +58,10 @@ impl RibbleController {
         })
     }
 
+    pub(crate) fn stop_work(&self) {
+        self.kernel.stop_work();
+    }
+
     pub(crate) fn base_dir(&self) -> &Path {
         self.base_dir.as_path()
     }

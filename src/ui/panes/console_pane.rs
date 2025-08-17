@@ -5,7 +5,6 @@ use crate::ui::panes::PaneView;
 use crate::ui::PANE_INNER_MARGIN;
 use std::sync::Arc;
 
-// TODO: TEST THIS.
 const SPACING_COEFF: f32 = 1.5;
 #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ConsolePane {

@@ -22,12 +22,16 @@ struct VisualizerEngineState {
 }
 
 impl VisualizerEngineState {
-    const POWER_OVERLAP: f32 = 0.5;
+    // The same overlap is used for both power and spectrum density, so just call it "FFT"
+    const FFT_RESOLUTION: f32 = 512.0;
+    const FFT_OVERLAP: f32 = 0.5;
     const AMPLITUDE_OVERLAP: f32 = 0.25;
-    const POWER_GAIN: f32 = 30.0;
-    const WAVEFORM_GAIN: f32 = Self::POWER_GAIN / 2.0;
+    const AMPLITUDE_GAMMA: f32 = 0.6;
 
-    // This could be made an option, I suppose?
+    // ~ -12 dBFS
+    const WAVEFORM_REF: f32 = 0.25;
+    const WAVEFORM_KNEE: f32 = 2.0;
+
     fn new(
         incoming_samples: Receiver<VisualizerPacket>,
         starting_analysis_type: AnalysisType,
@@ -50,9 +54,9 @@ impl VisualizerEngineState {
     fn run_analysis(&self, sample: &[f32], sample_rate: f64) -> Result<(), RibbleError> {
         match self.analysis_type.load(Ordering::Acquire) {
             AnalysisType::AmplitudeEnvelope => self.amplitude_envelope(sample),
-            AnalysisType::Waveform => self.normalized_waveform(sample),
-            AnalysisType::Power => self.power_analysis(sample),
-            AnalysisType::SpectrumDensity => self.spectrum_density(sample, sample_rate),
+            AnalysisType::Waveform => self.waveform_oscillation(sample),
+            AnalysisType::PowerSpectralDensity => self.power_analysis(sample, sample_rate),
+            AnalysisType::LogSpectrum => self.log_spectrum_normalized(sample, sample_rate),
         }
     }
 
@@ -71,38 +75,25 @@ impl VisualizerEngineState {
         }
     }
 
-    fn power_analysis(&self, samples: &[f32]) -> Result<(), RibbleError> {
-        // True = apply gain
-        let mut window = hann_window(samples, true);
+    // This is Power Spectrum Density estimate.
+    fn power_analysis(&self, samples: &[f32], sample_rate: f64) -> Result<(), RibbleError> {
+        let mut n_frames = 0;
+        let mut power_samples = self.log_spectrum(samples, sample_rate, &mut n_frames)?;
 
-        let (frame_size, step_size) =
-            compute_welch_frames(window.len() as f32, Self::POWER_OVERLAP);
+        debug_assert!(n_frames > 0, "Log spectrum issue, n_frames either unset or incorrect");
 
-        Self::fit_frames(&mut window, frame_size);
+        // Find the maximum (average) if it's greater than 1.
+        let max = power_samples.iter().copied().fold(n_frames as f32, f32::max) / n_frames as f32;
 
-        let frames = window.windows(frame_size).step_by(step_size);
-
-        let fft = self.planner.write().plan_fft_forward(frame_size);
-        let mut input = fft.make_input_vec();
-        let mut output = fft.make_output_vec();
-        let mut power_samples = [0.0; NUM_VISUALIZER_BUCKETS];
-        for (i, frame) in frames.enumerate() {
-            input.copy_from_slice(frame);
-            fft.process(&mut input, &mut output)?;
-            let power =
-                output.iter().map(|c| c.norm_sqr()).sum::<f32>() / (frame.len() as f32).powi(2);
-            let log_power = if power > 0.0 { power.log10() } else { 0.0 };
-            power_samples[i] = log_power
-        }
+        power_samples.iter_mut().for_each(|s| {
+            // Do the welch average
+            let avg = *s / n_frames as f32;
+            // Normalize with the maximum
+            *s = avg / max;
+        });
 
         // Double-check for NaN/Inf
         debug_assert!(power_samples.iter().all(|f| f.is_finite()));
-
-        let max_amp = power_samples.iter().copied().fold(1.0, f32::max);
-
-        for amp in power_samples.iter_mut() {
-            *amp = (*amp / max_amp).max(0.0);
-        }
 
         debug_assert!(
             power_samples.iter().all(|n| *n >= 0.0 && *n <= 1.0),
@@ -121,26 +112,25 @@ impl VisualizerEngineState {
         Ok(())
     }
 
-    fn normalized_waveform(&self, samples: &[f32]) -> Result<(), RibbleError> {
-        let (frame_size, step_size) = compute_welch_frames(samples.len() as f32, 0f32);
-        // Apply a gain and normalize the audio signal.
-        let mut window = samples
-            .iter()
-            .map(|s| (*s * Self::WAVEFORM_GAIN) / Self::WAVEFORM_GAIN)
-            .collect::<Vec<_>>();
+    fn waveform_oscillation(&self, samples: &[f32]) -> Result<(), RibbleError> {
+        // This is in time domain, so it doesn't require high resolution
+        let (frame_size, step_size) = compute_welch_frames(samples.len() as f32, NUM_VISUALIZER_BUCKETS as f32, 0f32);
 
+        if frame_size == 0 {
+            return Err(RibbleError::Core("Empty samples sent for waveform analysis".to_string()));
+        }
+        let mut window = samples
+            .to_vec();
+
+        // Do any padding to make sure things fit properly
+        // This duplicates the last bit of the signal instead of zero-padding.
         Self::fit_frames(&mut window, frame_size);
 
         let waveform = window
             .windows(frame_size)
             .step_by(step_size)
             .map(|win| {
-                let sum = win.iter().sum::<f32>();
-                let avg = sum / win.len() as f32;
-
-                // Remapping will stick 0 @ 0.5, which isn't really ideal for the "soundbar" widget
-                // Instead, treat -1/1 as a "maximum deviation" from silence.
-                avg.abs().clamp(0.0, 1.0)
+                win.iter().map(|f| f.abs()).reduce(f32::max).unwrap_or(0.0)
             })
             .collect::<Vec<_>>();
 
@@ -162,35 +152,33 @@ impl VisualizerEngineState {
         Ok(())
     }
 
+    // This is the time-domain RMS.
     fn amplitude_envelope(&self, samples: &[f32]) -> Result<(), RibbleError> {
+        // This is in time domain, so it doesn't require high resolution
         let (frame_size, step_size) =
-            compute_welch_frames(samples.len() as f32, Self::AMPLITUDE_OVERLAP);
-        let mut window = samples
-            .iter()
-            .map(|s| *s * Self::WAVEFORM_GAIN)
-            .collect::<Vec<_>>();
+            compute_welch_frames(samples.len() as f32, NUM_VISUALIZER_BUCKETS as f32, Self::AMPLITUDE_OVERLAP);
 
+        if frame_size == 0 {
+            return Err(RibbleError::Core("Empty samples sent for amplitude analysis".to_string()));
+        }
+
+        let mut window = samples.to_vec();
+
+        // Do any padding to make sure things fit properly
+        // This duplicates the last bit of the signal instead of zero-padding.
         Self::fit_frames(&mut window, frame_size);
 
-        let mut amp_envelope = window
+        let amp_envelope = window
             .windows(frame_size)
             .step_by(step_size)
             .map(|win| {
+                // This is just RMS, already normalized to 0 and 1
                 (win.iter().copied().map(|n| n.powi(2)).sum::<f32>() / (win.len() as f32)).sqrt()
             })
             .collect::<Vec<_>>();
 
         // Assert no nan/infinite
         debug_assert!(amp_envelope.iter().all(|f| f.is_finite()));
-
-        // Grab the maximum rms
-        let max_rms = amp_envelope.iter().copied().fold(1f32, f32::max);
-
-        // Normalize the RMS.
-        for rms in amp_envelope.iter_mut() {
-            *rms /= max_rms;
-        }
-
         debug_assert_eq!(
             amp_envelope.len(),
             NUM_VISUALIZER_BUCKETS,
@@ -203,23 +191,27 @@ impl VisualizerEngineState {
         Ok(())
     }
 
-    fn spectrum_density(&self, samples: &[f32], sample_rate: f64) -> Result<(), RibbleError> {
-        // I don't remember why I'm not applying gain here...
-        let mut window = hann_window(samples, false);
-        let (frame_size, step_size) =
-            compute_welch_frames(window.len() as f32, Self::POWER_OVERLAP);
+    // This does the FFT computation and maps everything to frequency space.
+    fn log_spectrum(&self, samples: &[f32], sample_rate: f64, n_frames: &mut usize) -> Result<[f32; NUM_VISUALIZER_BUCKETS], RibbleError> {
+        let mut window = hann_window(samples);
+        let frame_size = Self::FFT_RESOLUTION as usize;
+        let step_size = compute_welch_step(frame_size as f32, Self::FFT_OVERLAP);
 
+
+        // Do any padding to make sure things fit properly
+        // This duplicates the last bit of the signal instead of zero-padding.
         Self::fit_frames(&mut window, frame_size);
 
         let frames = window.windows(frame_size).step_by(step_size);
+        *n_frames = frames.len();
 
         let fft = self.planner.write().plan_fft_forward(frame_size);
         let mut input = fft.make_input_vec();
         let mut output = fft.make_output_vec();
         let mut spectrum_samples = [0.0; NUM_VISUALIZER_BUCKETS];
 
-        let frame_size = output.len();
-        let min_freq = sample_rate / (frame_size as f64);
+        let fft_frame_size = output.len();
+        let min_freq = sample_rate / (fft_frame_size as f64);
         let max_freq = sample_rate / 2.0;
 
         let log_min = min_freq.log10();
@@ -243,7 +235,7 @@ impl VisualizerEngineState {
 
             for (i, &value) in output.iter().enumerate() {
                 // Convert each bin index to a frequency
-                let freq = (i as f64) * sample_rate / (frame_size as f64);
+                let freq = (i as f64) * sample_rate / (fft_frame_size as f64);
                 // Check if the frequency falls within log_range
                 if freq < min_freq || freq > max_freq {
                     continue;
@@ -252,7 +244,7 @@ impl VisualizerEngineState {
                 debug_assert!(freq.is_finite(), "Frequency inf or NaN: {freq}");
                 debug_assert!(value.is_finite(), "Complex value inf or NaN: {value}");
 
-                // Find the bucket.
+                // Find the bucket and increment it by the value.norm_sqr() (power estimate).
                 let closest =
                     bucket_edges.binary_search_by(|edge| edge.partial_cmp(&freq).unwrap());
                 let bucket = match closest {
@@ -265,24 +257,31 @@ impl VisualizerEngineState {
             }
         }
 
-        let max_amp = spectrum_samples.iter().copied().fold(1f32, f32::max);
+        Ok(spectrum_samples)
+    }
 
+
+    // This is for visualizing the frequency distribution
+    fn log_spectrum_normalized(&self, samples: &[f32], sample_rate: f64) -> Result<(), RibbleError> {
+        let mut _n_frames = 0;
+        // Power analysis does welch averaging, this method does not.
+        // Since the frame len is computed in log_spectrum and the code is mostly identical up to
+        // the spectrum samples, it's easiest to just send a mut ref and just ignore it.
+        let mut spectrum_samples = self.log_spectrum(samples, sample_rate, &mut _n_frames)?;
+        let max_amp = spectrum_samples.iter().copied().fold(1f32, f32::max);
         // Normalize the buckets
         for res in spectrum_samples.iter_mut() {
             *res /= max_amp;
         }
-
         debug_assert_eq!(
             spectrum_samples.len(),
             NUM_VISUALIZER_BUCKETS,
             "Failed to fit spectrum_density into buckets"
         );
-
         debug_assert!(
             spectrum_samples.iter().all(|n| *n <= 1.0 && *n >= 0.0),
             "Failed to normalize in spectrum density calculations"
         );
-
         // To avoid an out-of-range memcpy (in release), limit the slice to the buffer size.
         self.buffer
             .write()
@@ -291,35 +290,54 @@ impl VisualizerEngineState {
     }
 }
 
-// TODO: probably better to just include a gain multiplier as an argument to the function to
-// encapsulate the constants within the struct.
-fn hann_window(samples: &[f32], apply_gain: bool) -> Vec<f32> {
+fn hann_window(samples: &[f32]) -> Vec<f32> {
     let len = samples.len() as f32;
-    let multiplier = if apply_gain {
-        VisualizerEngineState::POWER_GAIN
-    } else {
-        1.0
-    };
     samples
         .iter()
         .enumerate()
         .map(|(i, f)| {
             let t = (i as f32) / len;
             let hann = 0.5 * (1.0 - (2.0 * PI * t).cos());
-            *f * hann * multiplier
+            *f * hann
         })
         .collect()
 }
 
-fn compute_welch_frames(sample_len: f32, overlap_ratio: f32) -> (usize, usize) {
+// This is only good for the time-domain functions.
+// TODO: rename this or refactor.
+fn compute_welch_frames(sample_len: f32, output_len: f32, overlap_ratio: f32) -> (usize, usize) {
     let frame_size =
-        sample_len / (1f32 + (NUM_VISUALIZER_BUCKETS as f32 - 1f32) * (1f32 - overlap_ratio));
+        sample_len / (1f32 + (output_len - 1f32) * (1f32 - overlap_ratio));
     let step_size = frame_size * (1f32 - overlap_ratio);
     (frame_size.round() as usize, step_size.round() as usize)
 }
+#[inline]
+fn compute_welch_step(frame_size: f32, overlap_ratio: f32) -> usize {
+    (frame_size * (1f32 - overlap_ratio)).round() as usize
+}
 
-// TODO: kernel-exposed methods for updating sample rate/buffer size
-// For precomputing an FFTplanner state + cached sample rate/frequencies
+// If this can be used elsewhere, expose publicly and possibly move somewhere else.
+// NOTE: if fully unused, just remove.
+#[inline]
+fn interpolate_buckets(src: &[f32], dst: &mut [f32]) {
+    let src_len = src.len();
+    let dst_len = dst.len();
+
+    let last_index = src_len - 1;
+    for (i, val) in dst.iter_mut().enumerate() {
+        let t = i as f32 / (dst_len - 1) as f32;
+        let frac_idx = last_index as f32 * t;
+
+        let bucket_t = frac_idx.fract();
+        let floor = ((frac_idx).floor() as usize).min(last_index);
+        let ceil = ((frac_idx).ceil() as usize).min(last_index);
+
+        *val = egui::lerp(src[floor]..=src[ceil], bucket_t);
+    }
+}
+
+// TODO: kernel-exposed methods for updating sample rate/buffer size for precomputing FFT planner state.
+// At the moment, it's not necessary to actually precompute; it's just low-hanging optimization fruit.
 pub(super) struct VisualizerEngine {
     inner: Arc<VisualizerEngineState>,
     work_thread: Option<JoinHandle<()>>,

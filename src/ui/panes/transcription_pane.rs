@@ -1,6 +1,6 @@
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::panes::PaneView;
 use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
 use crate::ui::{PANE_HEADING_BUTTON_SIZE, PANE_INNER_MARGIN};
 use egui_notify::Toast;
 
@@ -47,8 +47,6 @@ impl PaneView for TranscriptionPane {
         let transcription_empty = transcription_snapshot.confirmed().is_empty()
             && transcription_snapshot.string_segments().is_empty();
 
-        // TODO: this might not work just yet - test out and remove this todo if it's right.
-        // Create a (hopefully) lower-priority pane-sized interaction hitbox
         let pane_id = egui::Id::new("transcription_pane");
         // NOTE: This might fix things if it's an interact_bg and not "interact"
         let resp = ui
@@ -76,7 +74,6 @@ impl PaneView for TranscriptionPane {
                                 let layout = egui::Layout::left_to_right(egui::Align::Center);
                                 ui.allocate_ui_with_layout(desired_size, layout, |ui| {
                                     ui.heading("Transcription:");
-                                    // TODO: Remember to strip out debug messages in release mode in TranscriberEngine.
                                     ui.label(control_phrase.to_string());
                                 });
                             });
@@ -140,8 +137,8 @@ impl PaneView for TranscriptionPane {
                                         },
                                     );
                                 })
-                                .response
-                                .on_hover_cursor(egui::CursorIcon::Default);
+                                    .response
+                                    .on_hover_cursor(egui::CursorIcon::Default);
                             })
                         });
                     });

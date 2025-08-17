@@ -18,6 +18,7 @@ use crate::ui::widgets::recording_icon::recording_icon;
 use crate::utils::errors::{RibbleError, RibbleErrorCategory};
 use crate::utils::migration::{RibbleVersion, Version};
 use crate::utils::preferences::RibbleAppTheme;
+use eframe::glow::Context;
 use eframe::Storage;
 use egui_notify::{Toast, Toasts};
 use egui_theme_lerp::ThemeAnimator;
@@ -25,7 +26,7 @@ use irox_egui_extras::progressbar::ProgressBar;
 use ribble_whisper::audio::audio_backend::{
     default_backend, AudioBackend, CaptureSpec, Sdl2Backend,
 };
-use ribble_whisper::audio::microphone::Sdl2Capture;
+use ribble_whisper::audio::microphone::{MicCapture, Sdl2Capture};
 use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::sdl2;
 use ribble_whisper::utils::errors::RibbleWhisperError;
@@ -165,14 +166,23 @@ impl Ribble {
     // Until it's absolutely certain that this implementation works as intended,
     // this function is going to panic to ensure the device is always cleaned up on the main
     // thread.
-    fn close_audio_device(&mut self, device_id: usize) {
+    fn try_close_audio_device(&mut self, device_id: usize) {
         // This will panic if the device is not in the slab.
-        let shared_device = self.current_devices.remove(device_id);
-        let _strong_count = Arc::strong_count(&shared_device);
+        // Use try_remove in case the device has already been removed.
+        // This shouldn't ever happen--but this needs to be tested first.
+        if let Some(shared_device) = self.current_devices.try_remove(device_id) {
+            Self::consume_audio_device(shared_device)
+        } else {
+            log::warn!("Device id missing from opened device buffer.");
+        }
+    }
+
+    fn consume_audio_device(device: Arc<Sdl2Capture<ArcChannelSink<f32>>>) {
+        let _strong_count = Arc::strong_count(&device);
 
         // This will consume the inner from the Arc and leave the pointer empty.
         // It only returns Some(..) when the refcount is exactly 1
-        let device = Arc::into_inner(shared_device);
+        let device = Arc::into_inner(device);
 
         assert!(
             device.is_some(),
@@ -221,11 +231,9 @@ impl Ribble {
 
 impl Drop for Ribble {
     fn drop(&mut self) {
-        log::info!("Dropping Ribble App; joining/running Ribble save.");
+        log::info!("Dropping Ribble App, joining egui save thread.");
         self.check_join_last_save();
-        log::info!("Final app save called.");
-        // NOTE: the kernel and the RibbleTree both serialize on drop.
-        // This is just to join the last eframe::App save() call.
+        log::info!("Egui save thread joined.");
     }
 }
 
@@ -249,7 +257,7 @@ impl eframe::App for Ribble {
                     }
                 }
                 AudioCaptureRequest::Close(device_id) => {
-                    self.close_audio_device(device_id);
+                    self.try_close_audio_device(device_id);
                 }
             }
         }
@@ -754,6 +762,55 @@ impl eframe::App for Ribble {
     // Instead of one gigantic point of failure, Ribble stores its state across multiple files in the data directory.
     fn save(&mut self, _storage: &mut dyn Storage) {
         self.serialize_app_state();
+    }
+
+    // Called after the last "save" (will save internally again on drop)
+    // If the user closes the window while background threads are still running,
+    // the program will deadlock.
+    fn on_exit(&mut self, _gl: Option<&Context>) {
+        log::info!("Starting runtime cleanup.");
+        self.controller.stop_work();
+        // WAIT until the last SDL device gets dropped on the main thread before dropping everything.
+        // Check requests for an audio handle and produce an AudioDevice for capture.
+
+        // It should never be possible for there to be more than one audio device,
+        // and this loop will never service requests for a new audio device.
+
+        // However, since this does block, use a short timeout to prevent the program hanging on close.
+        while let Ok(request) = self
+            .capture_requests
+            .recv_timeout(std::time::Duration::from_millis(100))
+        {
+            if let AudioCaptureRequest::Close(device_id) = request {
+                self.try_close_audio_device(device_id);
+                if self.current_devices.is_empty() {
+                    log::info!("Dropped last audio device.");
+                    break;
+                }
+            }
+        }
+
+        // It is unlikely for this branch to be taken, but if it is, try and consume the remaining devices.
+        if !self.current_devices.is_empty() {
+            log::warn!("Audio devices still in use. Background work might be deadlocked.");
+            for device in self.current_devices.drain() {
+                device.pause();
+
+                #[cfg(debug_assertions)]
+                {
+                    // This method will (intentionally) panic and should be used to tease out remaining
+                    // logic problems/race conditions.
+
+                    // If this ever happens to actually panic, a better solution is required to ensure SDL
+                    // devices are always successfully dropped on the main thread.
+                    // (i.e. some way to short-circuit the background workers)
+                    Self::consume_audio_device(device);
+                }
+            }
+            log::info!("Remaining audio devices successfully dropped.");
+        }
+
+        log::info!("Finished runtime cleanup.");
     }
 
     fn persist_egui_memory(&self) -> bool {
