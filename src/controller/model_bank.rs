@@ -1,9 +1,12 @@
-use crate::controller::{Bus, ConsoleMessage, DownloadRequest, ModelFile, RibbleMessage, WorkRequest, SMALL_UTILITY_QUEUE_SIZE};
+use crate::controller::{
+    Bus, ConsoleMessage, DownloadRequest, ModelFile, Progress, ProgressMessage, RibbleMessage,
+    SMALL_UTILITY_QUEUE_SIZE, WorkRequest,
+};
 use crate::utils::errors::RibbleError;
 use indexmap::IndexMap;
 use parking_lot::RwLock;
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{get_channel, Receiver, Sender};
+use ribble_whisper::utils::{Receiver, Sender, get_channel};
 use ribble_whisper::whisper::model::{ModelId, ModelLocation, ModelRetriever};
 use std::error::Error;
 use std::ffi::OsStr;
@@ -15,7 +18,9 @@ use std::thread::JoinHandle;
 use twox_hash::XxHash3_64;
 
 use notify_debouncer_full::notify::{EventKind, RecommendedWatcher, RecursiveMode};
-use notify_debouncer_full::{new_debouncer, DebounceEventResult, DebouncedEvent, Debouncer, RecommendedCache};
+use notify_debouncer_full::{
+    DebounceEventResult, DebouncedEvent, Debouncer, RecommendedCache, new_debouncer,
+};
 
 const MODEL_ID_SEED: u64 = 0;
 const MODEL_FILE_EXTENSION: &str = "bin";
@@ -26,7 +31,7 @@ const MAX_DEBOUNCE_TIME: u64 = 2000;
 
 const PACKED_MODELS: [&[u8]; 2] = [
     include_bytes!("../models/ggml-base-q5_1.bin"),
-    include_bytes!("../models/ggml-tiny-q5_1.bin")
+    include_bytes!("../models/ggml-tiny-q5_1.bin"),
 ];
 
 struct RibbleModelBankState {
@@ -59,7 +64,7 @@ impl RibbleModelBankState {
                 model_map,
                 model_directory_watcher: watcher,
             }
-                .init()
+            .init()
         }
     }
 
@@ -121,7 +126,9 @@ impl RibbleModelBankState {
             // Map into metadata.
             .map(|entry| {
                 (
-                    ModelFile::File(Arc::from(entry.path().file_name().unwrap().to_str().unwrap())),
+                    ModelFile::File(Arc::from(
+                        entry.path().file_name().unwrap().to_str().unwrap(),
+                    )),
                     entry.metadata().unwrap().len(),
                 )
             })
@@ -132,7 +139,7 @@ impl RibbleModelBankState {
             let packed = ModelFile::Packed(idx);
             let size = model.len() as u64;
             entries.push((packed, size))
-        };
+        }
 
         // Sort by file size.
         entries.sort_by(|(_, size1), (_, size2)| size1.cmp(size2));
@@ -143,9 +150,10 @@ impl RibbleModelBankState {
         // Fill the model bank.
         for (model_file, _) in entries {
             let model_key = match &model_file {
-                ModelFile::Packed(idx) => {
-                    XxHash3_64::oneshot_with_seed(MODEL_ID_SEED, ModelFile::PACKED_NAMES[*idx].as_bytes())
-                }
+                ModelFile::Packed(idx) => XxHash3_64::oneshot_with_seed(
+                    MODEL_ID_SEED,
+                    ModelFile::PACKED_NAMES[*idx].as_bytes(),
+                ),
                 ModelFile::File(file_name) => {
                     XxHash3_64::oneshot_with_seed(MODEL_ID_SEED, file_name.as_ref().as_bytes())
                 }
@@ -161,16 +169,15 @@ impl RibbleModelBankState {
     }
 
     fn retrieve_model(&self, model_id: ModelId) -> Option<ModelLocation> {
-        self.model_map.read().get(&model_id).map(|model| {
-            match model {
-                ModelFile::Packed(idx) => {
-                    ModelLocation::StaticBuffer(PACKED_MODELS[*idx])
-                }
+        self.model_map
+            .read()
+            .get(&model_id)
+            .map(|model| match model {
+                ModelFile::Packed(idx) => ModelLocation::StaticBuffer(PACKED_MODELS[*idx]),
                 ModelFile::File(name) => {
                     ModelLocation::DynamicFilePath(self.model_directory().join(name.as_ref()))
                 }
-            }
-        })
+            })
     }
 
     // NOTE: this code can probably stay, though it should be impossible for this to return false based on
@@ -241,22 +248,19 @@ impl RibbleModelBankState {
         };
 
         if swap {
-            Ok({
-                write_guard
-                    .swap_remove(&model_id).map(|_| model_id)
-            })
+            Ok(write_guard.swap_remove(&model_id).map(|_| model_id))
         } else {
-            Ok({
-                write_guard
-                    .shift_remove(&model_id).map(|_| model_id)
-            })
+            Ok(write_guard.shift_remove(&model_id).map(|_| model_id))
         }
     }
 }
 
+// TODO: this should snag a copy of the progress sender to send progress messages for file-copy and
+// otherwise.
 pub(crate) struct RibbleModelBank {
     inner: Arc<RibbleModelBankState>,
     work_sender: Sender<WorkRequest>,
+    progress_message_sender: Sender<ProgressMessage>,
     download_sender: Sender<DownloadRequest>,
     worker_thread: Option<JoinHandle<()>>,
     debouncer: Option<Debouncer<RecommendedWatcher, RecommendedCache>>,
@@ -275,14 +279,14 @@ impl RibbleModelBank {
             event_sender,
         )?;
 
-
         let thread_inner = Arc::clone(&inner);
         let file_directory = model_directory.to_path_buf();
 
         // NOTE: the debouncer needs to be stored -> it will close on drop,
         // but since the inner thread is joined and blocks on the debouncer queue, it needs to be
         // stopped either by dropping or explicitly.
-        debouncer.watch(file_directory.as_path(), RecursiveMode::NonRecursive)
+        debouncer
+            .watch(file_directory.as_path(), RecursiveMode::NonRecursive)
             .expect("The debouncer is expected to watch without any issues.");
 
         let work_thread = std::thread::spawn(move || {
@@ -314,8 +318,10 @@ impl RibbleModelBank {
         // and the model bank should fail to construct.
         if work_thread.is_finished() {
             let res = work_thread.join().map_err(|e| {
-                RibbleError::ThreadPanic(format!("Failed to create debouncer thread.\n\
-                Error: {e:#?}"))
+                RibbleError::ThreadPanic(format!(
+                    "Failed to create debouncer thread.\n\
+                Error: {e:#?}"
+                ))
             });
 
             return match res {
@@ -323,15 +329,14 @@ impl RibbleModelBank {
                     let err = RibbleError::Core("Debouncer thread quit early".to_string());
                     Err(err)
                 }
-                Err(e) => {
-                    Err(e)
-                }
+                Err(e) => Err(e),
             };
         }
 
         Ok(Self {
             inner,
             work_sender: bus.work_request_sender(),
+            progress_message_sender: bus.progress_message_sender(),
             download_sender: bus.download_request_sender(),
             worker_thread: Some(work_thread),
             debouncer: Some(debouncer),
@@ -369,8 +374,12 @@ impl RibbleModelBank {
     }
 
     // This will make a work request to copy the file over.
+    // TODO: this should have an indeterminate progress bar.
     pub(crate) fn copy_model_to_bank(&self, model_file_path: PathBuf) {
         let model_directory = self.inner.model_directory().to_path_buf();
+        // NOTE: this could be owned in the inner state struct (which is Send),
+        // but it's easy to just make a short-lived copy to give to the thread.
+        let progress_sender = self.progress_message_sender.clone();
         let worker = std::thread::spawn(move || {
             if !model_file_path.is_file() {
                 let err =
@@ -378,14 +387,59 @@ impl RibbleModelBank {
                 return Err(err);
             }
 
+            let copy_progress = Progress::new_indeterminate("Copying model");
+            let (id_sender, id_receiver) = get_channel(1);
+            let copy_progress_message = ProgressMessage::Request {
+                job: copy_progress,
+                id_return_sender: id_sender,
+            };
+
+            if let Err(e) = progress_sender.send(copy_progress_message) {
+                log::warn!(
+                    "Progress channel closed, cannot get id in model bank copy routine.\n\
+                Error source: {:#?}",
+                    e.source()
+                );
+            }
+
+            let mut copy_job_id = match id_receiver.recv() {
+                Ok(id) => Some(id),
+                Err(e) => {
+                    log::warn!(
+                        "Progress Engine did not complete rendezvous for copy model job. \n\
+                    Error source: {:#?}",
+                        e.source()
+                    );
+                    None
+                }
+            };
+
+            let remove_progress_job = |progress_job_id: &mut Option<usize>| {
+                if let Some(id) = progress_job_id.take() {
+                    let remove_msg = ProgressMessage::Remove { job_id: id };
+
+                    if let Err(e) = progress_sender.send(remove_msg) {
+                        log::warn!(
+                            "Progress channel closed, cannot send remove copy progress message.\n\
+                        Error source: {:#?}",
+                            e.source()
+                        );
+                    }
+                }
+            };
+
             let extension = model_file_path
                 .extension()
                 .ok_or(RibbleError::Core(format!(
                     "Invalid file: {:#?}",
                     model_file_path.display()
-                )))?;
+                )))
+                .inspect_err(|_e| {
+                    remove_progress_job(&mut copy_job_id);
+                })?;
 
             if extension != MODEL_FILE_EXTENSION {
+                remove_progress_job(&mut copy_job_id);
                 let err =
                     RibbleError::Core(format!("Invalid file_type: {:#?}", extension.display()));
                 return Err(err);
@@ -396,11 +450,17 @@ impl RibbleModelBank {
                 .ok_or(RibbleError::Core(format!(
                     "Invalid file path: {:#?}",
                     model_file_path.display()
-                )))?;
+                )))
+                .inspect_err(|_e| remove_progress_job(&mut copy_job_id))?;
 
             let dest = model_directory.join(file_name);
 
-            fs::copy(model_file_path.as_path(), dest.as_path())?;
+            fs::copy(model_file_path.as_path(), dest.as_path()).inspect_err(|_e| {
+                remove_progress_job(&mut copy_job_id);
+            })?;
+
+            remove_progress_job(&mut copy_job_id);
+
             let console_message = ConsoleMessage::Status(format!(
                 "Saved model: {:#?} to models directory.",
                 file_name.display()

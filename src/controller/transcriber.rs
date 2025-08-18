@@ -2,7 +2,7 @@ use crate::controller::VisualizerPacket;
 use crate::controller::WriteRequest;
 use crate::controller::{
     AtomicOfflineTranscriberFeedback, Bus, ConsoleMessage, OfflineTranscriberFeedback, Progress,
-    ProgressMessage, RibbleMessage, WorkRequest, UTILITY_QUEUE_SIZE,
+    ProgressMessage, RibbleMessage, UTILITY_QUEUE_SIZE, WorkRequest,
 };
 use crate::utils::dc_block::DCBlock;
 use crate::utils::errors::RibbleError;
@@ -23,22 +23,22 @@ use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
 use ribble_whisper::transcriber::vad::VAD;
 use ribble_whisper::transcriber::{
-    redirect_whisper_logging_to_hooks, CallbackTranscriber, Transcriber, TranscriptionSnapshot, WhisperCallbacks,
-    WhisperControlPhrase, WhisperOutput, WHISPER_SAMPLE_RATE,
+    CallbackTranscriber, Transcriber, TranscriptionSnapshot, WHISPER_SAMPLE_RATE, WhisperCallbacks,
+    WhisperControlPhrase, WhisperOutput, redirect_whisper_logging_to_hooks,
 };
 use ribble_whisper::utils::callback::{
     ShortCircuitRibbleWhisperCallback, StaticRibbleWhisperCallback,
 };
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{get_channel, Sender};
+use ribble_whisper::utils::{Sender, get_channel};
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model::ModelRetriever;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 struct TranscriberEngineState {
@@ -392,7 +392,10 @@ impl TranscriberEngineState {
         Ok(RibbleMessage::Console(console_message))
     }
 
-    fn build_vad_run_offline<M>(&self, shared_model_retriever: Arc<M>) -> Result<RibbleMessage, RibbleError>
+    fn build_vad_run_offline<M>(
+        &self,
+        shared_model_retriever: Arc<M>,
+    ) -> Result<RibbleMessage, RibbleError>
     where
         M: ModelRetriever + Sync + Send,
     {
@@ -917,9 +920,8 @@ impl TranscriberEngine {
         let thread_inner = Arc::clone(&self.inner);
 
         // Set up the worker.
-        let worker = std::thread::spawn(move || {
-            thread_inner.build_vad_run_offline(shared_model_retriever)
-        });
+        let worker =
+            std::thread::spawn(move || thread_inner.build_vad_run_offline(shared_model_retriever));
 
         // Send off the request
         let work_request = WorkRequest::Long(worker);

@@ -1,7 +1,7 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{CompletedRecordingJobs, ModelFile, OfflineTranscriberFeedback};
-use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::ui::panes::PaneView;
+use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::ui::widgets::recording_modal::build_recording_modal;
 use crate::ui::widgets::toggle_switch::toggle;
 use crate::ui::{GRID_ROW_SPACING_COEFF, MODAL_HEIGHT_PROPORTION, PANE_INNER_MARGIN};
@@ -16,7 +16,6 @@ use strum::IntoEnumIterator;
 // Icon button for opening a link to huggingface/a readme explainer
 const LINK_ICON: &str = "🌐";
 const LINK_BUTTON_SIZE: f32 = 18.0;
-
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(in crate::ui) struct TranscriberPane {
@@ -346,7 +345,7 @@ impl PaneView for TranscriberPane {
                                 ui.label("Load Model:").on_hover_text("Load a downloaded model into Ribble.");
                                 if ui.button("Load").clicked() {
                                     let file_dialog = rfd::FileDialog::new()
-                                        .add_filter("ggml-model", &[".bin"])
+                                        .add_filter("ggml-model", &["bin"])
                                         .set_directory(controller.base_dir());
 
                                     // If there is path, it is a ".bin".

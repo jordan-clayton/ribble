@@ -11,26 +11,26 @@ use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{
     AmortizedDownloadProgress, AmortizedProgress, LatestError, UI_UPDATE_QUEUE_SIZE,
 };
-use crate::ui::panes::ribble_pane::{ClosableRibbleViewPane, RibblePaneId};
 use crate::ui::panes::RibbleTree;
+use crate::ui::panes::ribble_pane::{ClosableRibbleViewPane, RibblePaneId};
 use crate::ui::widgets::pie_progress::pie_progress;
 use crate::ui::widgets::recording_icon::recording_icon;
 use crate::utils::errors::{RibbleError, RibbleErrorCategory};
 use crate::utils::migration::{RibbleVersion, Version};
 use crate::utils::preferences::RibbleAppTheme;
-use eframe::glow::Context;
 use eframe::Storage;
+use eframe::glow::Context;
 use egui_notify::{Toast, Toasts};
 use egui_theme_lerp::ThemeAnimator;
 use irox_egui_extras::progressbar::ProgressBar;
 use ribble_whisper::audio::audio_backend::{
-    default_backend, AudioBackend, CaptureSpec, Sdl2Backend,
+    AudioBackend, CaptureSpec, Sdl2Backend, default_backend,
 };
 use ribble_whisper::audio::microphone::{MicCapture, Sdl2Capture};
 use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::sdl2;
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{get_channel, Receiver};
+use ribble_whisper::utils::{Receiver, get_channel};
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 
@@ -522,10 +522,10 @@ impl eframe::App for Ribble {
                                     resp
                                 }
                             }
-                                .on_hover_ui(|ui| {
-                                    ui.style_mut().interaction.selectable_labels = true;
-                                    ui.label("Show downloads");
-                                });
+                            .on_hover_ui(|ui| {
+                                ui.style_mut().interaction.selectable_labels = true;
+                                ui.label("Show downloads");
+                            });
 
                             if download_button.clicked() {
                                 self.tree.add_new_pane(RibblePaneId::Downloads);
