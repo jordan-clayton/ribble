@@ -27,34 +27,27 @@ atomic_enum = "0.3.0"
 catppuccin-egui = { version = "5.6.0", default-features = false, features = ["egui32"] }
 crossbeam = "0.8.4"
 directories = "6.0.0"
-eframe = { version = "0.32.0", features = ["persistence", "wgpu", "x11", "wayland", "default_fonts"] }
-egui = { version = "0.32.0", features = ["persistence", "serde"] }
+eframe = { version = "0.32.1", features = ["persistence", "wgpu", "x11", "wayland", "default_fonts"] }
+egui = { version = "0.32.1", features = ["persistence", "serde"] }
 # This needs to be added to gain access to the default Vulkan/Gles backends in egui.
 # TODO: look at wgpu - might need to strip unused backends if they're being pulled in
 # The binary is gigantic atm.
 wgpu = "=25.0.2"
 hound = "3.5.1"
-realfft = "3.3.0"
-rfd = "0.15.3"
-serde = { version = "1.0.204", features = ["derive"] }
+realfft = "3.5.0"
+rfd = "0.15.4"
+serde = { version = "1.0.209", features = ["derive"] }
 strum = "0.27.1"
 # TODO: determine whether to include integrity checking utilities; might be out of scope
-ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.1.3", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler", "sdl2-static", "ribble-logging"] }
+# Also This might need to pull whisper-rs from the main branch.
+ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.2.0", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler", "sdl2-static", "ribble-logging"] }
 log = "0.4.22"
 ron = "0.10.1"
 irox-egui-extras = { path = "external/irox/libraries/egui_extras" }
 slab = "0.4.9"
 parking_lot = { version = "0.12.4", features = ["deadlock_detection"] }
 arc-swap = "1.7.1"
-
-# Until voice_activity_detector is updated to address breaking changes in the
-# ort crate, these two crates need to be pinned to the following versions.
-# In-case the pinning in ribble_whisper isn't respected, or I somehow make a goof-up, 
-# These will remain here until they can confidently be removed.
-# (Or, if/when Ribble-Whisper compiles and dynamically loads the runtime)
-ort-sys = "=2.0.0-rc.9"
-ort = { version = "=2.0.0-rc.9", features = ["ndarray"] }
-thiserror = "2.0.12"
+thiserror = "2.0.15"
 indexmap = { version = "2.10.0", features = ["serde", "rayon"] }
 twox-hash = { version = "2.1.1", features = ["xxhash3_64"] }
 enum_dispatch = "0.3.13"
@@ -62,7 +55,7 @@ mimalloc = "0.1.47"
 egui_tiles = { version = "0.13.0", features = ["serde"] }
 opener = { version = "0.8.2", features = ["reveal"] }
 egui-theme-lerp = "0.3.0"
-notify-debouncer-full = { version = "0.5.0", features = ["crossbeam-channel"] }
+notify-debouncer-full = { version = "0.6.0", features = ["crossbeam-channel"] }
 unit-prefix = "0.5.1"
 egui-colorgradient = "0.2.0"
 egui-notify = "0.20.0"

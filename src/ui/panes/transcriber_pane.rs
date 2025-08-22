@@ -1,10 +1,11 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{CompletedRecordingJobs, ModelFile, OfflineTranscriberFeedback};
-use crate::ui::panes::PaneView;
 use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
 use crate::ui::widgets::recording_modal::build_recording_modal;
 use crate::ui::widgets::toggle_switch::toggle;
 use crate::ui::{GRID_ROW_SPACING_COEFF, MODAL_HEIGHT_PROPORTION, PANE_INNER_MARGIN};
+use crate::utils::audio_gain::MAX_AUDIO_GAIN_DB;
 use crate::utils::realtime_settings::{AudioSampleLen, RealtimeTimeout, VadSampleLen};
 use crate::utils::vad_configs::{VadFrameSize, VadStrictness, VadType};
 use ribble_whisper::whisper::configs::Language;
@@ -101,6 +102,7 @@ impl PaneView for TranscriberPane {
             .on_hover_cursor(egui::CursorIcon::Grab);
 
         let pane_col = ui.visuals().panel_fill;
+        let latest_recording_exists = controller.latest_recording_exists();
 
         // MAIN PANEL FRAME
         egui::Frame::default().fill(pane_col).inner_margin(PANE_INNER_MARGIN).show(ui, |ui| {
@@ -154,7 +156,6 @@ impl PaneView for TranscriberPane {
                             controller.stop_transcription();
                         }
                         ui.add_space(button_spacing);
-                        let latest_recording_exists = controller.latest_recording_exists();
 
                         if ui
                             .add_enabled(
@@ -215,14 +216,18 @@ impl PaneView for TranscriberPane {
                                 let desired_size = egui::Vec2::new(ui.available_width(), ui.spacing().interact_size.y);
                                 let layout = egui::Layout::right_to_left(egui::Align::Center);
                                 ui.allocate_ui_with_layout(desired_size, layout, |ui| {
-                                    if ui.button("Clear").clicked() {
+                                    if ui.button("Clear")
+                                        .on_hover_cursor(egui::CursorIcon::Default)
+                                        .clicked() {
                                         controller.clear_audio_file_path();
                                     }
                                 });
                             });
 
                         ui.add_space(button_spacing);
-                        if ui.add_enabled(!transcription_running, egui::Button::new("Open file")).clicked() {
+                        if ui.add_enabled(!transcription_running, egui::Button::new("Open file"))
+                            .on_hover_cursor(egui::CursorIcon::Default)
+                            .clicked() {
                             let file_dialog = rfd::FileDialog::new()
                                 .add_filter("all supported",
                                             &["wav", "mpa", "mp2", "mp3", "mp4", "m4v", "ogg", "mkv", "aif", "aiff", "aifc", "caf", "alac", "flac"])
@@ -240,7 +245,9 @@ impl PaneView for TranscriberPane {
                             }
                         }
                         ui.add_space(button_spacing);
-                        if ui.add_enabled(!transcription_running, egui::Button::new("Load recording")).clicked() {
+                        if ui.add_enabled(!transcription_running && latest_recording_exists, egui::Button::new("Load recording"))
+                            .on_hover_cursor(egui::CursorIcon::Default)
+                            .clicked() {
                             self.recording_modal = true;
                         }
                     });
@@ -271,7 +278,7 @@ impl PaneView for TranscriberPane {
                                         controller.write_offline_transcriber_feedback(offline_feedback);
                                     }
                                 }
-                            });
+                            }).response.on_hover_cursor(egui::CursorIcon::Default);
                             ui.end_row();
                         });
                 }
@@ -282,7 +289,7 @@ impl PaneView for TranscriberPane {
                 // CONFIGS GRIDS
                 ui.heading("Configs:");
                 // Disable the configs interaction if the main runner is running
-                ui.collapsing("Transcription Configs", |ui| {
+                let transcription_configs_dropdown = ui.collapsing("Transcription Configs", |ui| {
                     ui.add_enabled_ui(!audio_worker_running, |ui| {
                         egui::Grid::new("transcription_configs_grid")
                             .num_columns(2)
@@ -401,7 +408,8 @@ impl PaneView for TranscriberPane {
                                 ui.label("No. threads:").on_hover_text("Set the number of threads to allocate to whisper. Recommended: 7.");
 
                                 let slider = ui.add(egui::Slider::new(&mut n_threads, thread_range).integer());
-                                let keyboard_input = slider.changed() && ui.input(|i| i.keys_down.iter().any(|key| {
+                                // TODO: factor this out into a function: it's highly duplicated and error-prone code
+                                let keyboard_input = ui.input(|i| i.keys_down.iter().any(|key| {
                                     // NOTE: there is no "is_numeric() or similar in egui, afaik.
                                     // To avoid unnecessary/excess caching (and allow the slider to work as intended),
                                     // Check for a (numeric) key input on the slider, and write on a
@@ -469,20 +477,6 @@ impl PaneView for TranscriberPane {
                                 let mut using_gpu = configs.using_gpu();
                                 if ui.add(egui::Checkbox::without_text(&mut using_gpu)).clicked() {
                                     let new_configs = configs.set_gpu(using_gpu);
-                                    controller.write_transcription_configs(new_configs);
-                                }
-                                ui.end_row();
-
-                                // ROW: USE NO CONTEXT
-                                // TODO: this probably should not be exposed -> Revisit once core
-                                // stream loop is tweaked to see whether retaining context is worth
-                                // exposing.
-                                ui.label("Use Context:").on_hover_text("Use previous context to inform transcription.\n\
-                                            Generally improves accuracy but may cause artifacts.");
-
-                                let mut using_context = !configs.using_no_context();
-                                if ui.add(egui::Checkbox::without_text(&mut using_context)).clicked() {
-                                    let new_configs = configs.set_use_no_context(!using_context);
                                     controller.write_transcription_configs(new_configs);
                                 }
                                 ui.end_row();
@@ -611,6 +605,10 @@ impl PaneView for TranscriberPane {
                             });
                     });
                 });
+                transcription_configs_dropdown
+                    .header_response
+                    .on_hover_cursor(egui::CursorIcon::Default);
+
 
                 ui.add_space(button_spacing);
                 ui.separator();
@@ -647,21 +645,25 @@ impl PaneView for TranscriberPane {
                                 ui.end_row();
 
                                 // FRAME SIZE
-                                ui.label("Frame size:").on_hover_text("Sets the length of the audio frame used to detect voice.\n\
+                                // Silero v5 requires fixed buffer size based on sample rate, so this has to conditionally render.
+                                // NOTE: if Silero is chosen as the default VAD impl, this will need some more thought.
+                                if !matches!(vad_configs.vad_type(), VadType::Silero) {
+                                    ui.label("Frame size:").on_hover_text("Sets the length of the audio frame used to detect voice.\n\
                                     Larger sizes may introduce latency but provide better results.\n\
                                     Set to Auto for system defaults.");
 
-                                let mut frame_size = vad_configs.frame_size();
-                                egui::ComboBox::from_id_salt("vad_frame_size_combobox")
-                                    .selected_text(frame_size.as_ref()).show_ui(ui, |ui| {
-                                    for size in VadFrameSize::iter() {
-                                        if ui.selectable_value(&mut frame_size, size, size.as_ref()).clicked() {
-                                            let new_vad_configs = vad_configs.with_frame_size(frame_size);
-                                            controller.write_vad_configs(new_vad_configs);
+                                    let mut frame_size = vad_configs.frame_size();
+                                    egui::ComboBox::from_id_salt("vad_frame_size_combobox")
+                                        .selected_text(frame_size.as_ref()).show_ui(ui, |ui| {
+                                        for size in VadFrameSize::iter() {
+                                            if ui.selectable_value(&mut frame_size, size, size.as_ref()).clicked() {
+                                                let new_vad_configs = vad_configs.with_frame_size(frame_size);
+                                                controller.write_vad_configs(new_vad_configs);
+                                            }
                                         }
-                                    }
-                                }).response.on_hover_cursor(egui::CursorIcon::Default);
-                                ui.end_row();
+                                    }).response.on_hover_cursor(egui::CursorIcon::Default);
+                                    ui.end_row();
+                                }
 
                                 // STRICTNESS
                                 ui.label("Strictness:").on_hover_text("Sets the voice-detection thresholds.\n\
@@ -679,6 +681,9 @@ impl PaneView for TranscriberPane {
                                         }
                                     }).response.on_hover_cursor(egui::CursorIcon::Default);
                                 ui.end_row();
+
+                                // TODO: THINK ABOUT A TOGGLE FOR PROPORTION THRESHOLD, BIND IT BETWEEN
+                                // 0.2-0.5 or so? Not sure yet.
 
                                 // USE OFFLINE
                                 let mut vad_use_offline = vad_configs.use_vad_offline();
@@ -701,6 +706,56 @@ impl PaneView for TranscriberPane {
                     });
                 });
                 vd_configs.header_response.on_hover_cursor(egui::CursorIcon::Default);
+                ui.separator();
+                // AUDIO GAIN SETTINGS
+                let audio_gain_configs = ui.collapsing("Audio gain", |ui| {
+                    let audio_gain_configs = *controller.read_audio_gain_configs();
+
+                    ui.add_enabled_ui(!audio_worker_running, |ui| {
+                        egui::Grid::new("audio_gain_configs_grid").striped(true).num_columns(2)
+                            .show(ui, |ui| {
+                                let mut db = audio_gain_configs.db();
+                                let db_range = 0.0..=MAX_AUDIO_GAIN_DB;
+                                ui.label("Audio gain:").on_hover_text("TOOLTIP");
+                                ui.horizontal(|ui| {
+                                    let slider = ui.add(egui::Slider::new(&mut db, db_range));
+                                    // TODO: factor this out into a function
+                                    let keyboard_input = ui.input(|i| i.keys_down.iter().any(|key| {
+                                        matches!(key, egui::Key::Num0 |
+                                        egui::Key::Num1 |
+                                        egui::Key::Num2 |
+                                        egui::Key::Num3 |
+                                        egui::Key::Num4 |
+                                        egui::Key::Num5 |
+                                        egui::Key::Num6 |
+                                        egui::Key::Num7 |
+                                        egui::Key::Num8 |
+                                        egui::Key::Num9
+                                    )
+                                    }));
+
+                                    if slider.drag_stopped() || (slider.changed() && keyboard_input) {
+                                        let new_configs = audio_gain_configs.with_decibels(db);
+                                        controller.write_audio_gain_configs(new_configs);
+                                    }
+                                    // Tiny hack to paint the grid color to the edge of the pane.
+                                    ui.add_space(ui.available_width());
+                                });
+                                ui.end_row();
+
+                                ui.label("File gain:").on_hover_text("Apply gain to files before transcribing?\n\
+                                Audio will be normalized to the highest peak");
+
+                                let mut use_offline = audio_gain_configs.use_offline();
+                                if ui.add(egui::Checkbox::without_text(&mut use_offline)).clicked() {
+                                    let new_configs = audio_gain_configs.with_use_offline(use_offline);
+                                    controller.write_audio_gain_configs(new_configs);
+                                }
+                                ui.end_row();
+                            });
+                    });
+                });
+                audio_gain_configs.header_response.on_hover_cursor(egui::CursorIcon::Default);
             });
         });
 

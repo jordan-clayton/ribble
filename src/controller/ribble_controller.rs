@@ -5,6 +5,7 @@ use crate::controller::{
     ConsoleMessage, FileDownload, LatestError, ModelFile, OfflineTranscriberFeedback,
     Progress, RotationDirection, NUM_VISUALIZER_BUCKETS,
 };
+use crate::utils::audio_gain::AudioGainConfigs;
 use crate::utils::errors::RibbleError;
 use crate::utils::preferences::UserPreferences;
 use crate::utils::recorder_configs::{RibbleExportFormat, RibbleRecordingConfigs};
@@ -156,6 +157,13 @@ impl RibbleController {
         new_feedback: OfflineTranscriberFeedback,
     ) {
         self.kernel.write_offline_transcriber_feedback(new_feedback);
+    }
+
+    pub(crate) fn read_audio_gain_configs(&self) -> Arc<AudioGainConfigs> {
+        self.kernel.read_audio_gain_configs()
+    }
+    pub(crate) fn write_audio_gain_configs(&self, new_settings: AudioGainConfigs) {
+        self.kernel.write_audio_gain_configs(new_settings);
     }
     pub(crate) fn realtime_running(&self) -> bool {
         self.kernel.realtime_running()

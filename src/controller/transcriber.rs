@@ -2,8 +2,9 @@ use crate::controller::VisualizerPacket;
 use crate::controller::WriteRequest;
 use crate::controller::{
     AtomicOfflineTranscriberFeedback, Bus, ConsoleMessage, OfflineTranscriberFeedback, Progress,
-    ProgressMessage, RibbleMessage, UTILITY_QUEUE_SIZE, WorkRequest,
+    ProgressMessage, RibbleMessage, WorkRequest, UTILITY_QUEUE_SIZE,
 };
+use crate::utils::audio_gain::AudioGainConfigs;
 use crate::utils::dc_block::DCBlock;
 use crate::utils::errors::RibbleError;
 use crate::utils::recorder_configs::{
@@ -23,23 +24,20 @@ use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
 use ribble_whisper::transcriber::vad::VAD;
 use ribble_whisper::transcriber::{
-    CallbackTranscriber, Transcriber, TranscriptionSnapshot, WHISPER_SAMPLE_RATE, WhisperCallbacks,
-    WhisperControlPhrase, WhisperOutput, redirect_whisper_logging_to_hooks,
+    redirect_whisper_logging_to_hooks, CallbackTranscriber, Transcriber, TranscriptionSnapshot, WhisperCallbacks,
+    WhisperControlPhrase, WhisperOutput, WHISPER_SAMPLE_RATE,
 };
-use ribble_whisper::utils::callback::{
-    ShortCircuitRibbleWhisperCallback, StaticRibbleWhisperCallback,
-};
+use ribble_whisper::utils::callback::{RibbleWhisperCallback, StaticRibbleWhisperCallback};
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{Sender, get_channel};
+use ribble_whisper::utils::{get_channel, Sender};
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model::ModelRetriever;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Instant;
 
 struct TranscriberEngineState {
     transcription_configs: ArcSwap<WhisperRealtimeConfigs>,
@@ -48,7 +46,7 @@ struct TranscriberEngineState {
     offline_running: Arc<AtomicBool>,
     current_audio_file_path: ArcSwap<Option<PathBuf>>,
     offline_transcriber_feedback: Arc<AtomicOfflineTranscriberFeedback>,
-    feedback_callback_rate: Arc<AtomicU64>,
+    audio_gain_settings: ArcSwap<AudioGainConfigs>,
     current_snapshot: ArcSwap<TranscriptionSnapshot>,
     current_control_phrase: ArcSwap<WhisperControlPhrase>,
     progress_message_sender: Sender<ProgressMessage>,
@@ -57,23 +55,26 @@ struct TranscriberEngineState {
 }
 
 impl TranscriberEngineState {
-    // At the moment, there isn't a noticeable penalty to 1500ms.
-    // There also isn't a significant penalty for 500ms for short transcriptions.
-    const DEFAULT_FEEDBACK_RATE_MILLIS: u64 = 1500;
     fn new(
-        configs: WhisperRealtimeConfigs,
-        v_configs: VadConfigs,
-        feedback_type: OfflineTranscriberFeedback,
+        start_configs: Option<WhisperRealtimeConfigs>,
+        start_v_configs: Option<VadConfigs>,
+        start_feedback_type: Option<OfflineTranscriberFeedback>,
+        start_audio_gain_settings: Option<AudioGainConfigs>,
+
+        // TODO: figure this out once mapped out
+        // audio_gain_settings: Option<AudioGainSettings>
         bus: &Bus,
     ) -> Self {
-        let transcription_configs = ArcSwap::new(Arc::new(configs));
-        let vad_configs = ArcSwap::new(Arc::new(v_configs));
+        let transcription_configs = ArcSwap::new(Arc::new(start_configs.unwrap_or_default()));
+        let vad_configs = ArcSwap::new(Arc::new(start_v_configs.unwrap_or_default()));
         let realtime_running = Arc::new(AtomicBool::new(false));
         let offline_running = Arc::new(AtomicBool::new(false));
         let current_audio_file_path = ArcSwap::new(Arc::new(None));
-        let transcriber_feedback = AtomicOfflineTranscriberFeedback::new(feedback_type);
+        let transcriber_feedback =
+            AtomicOfflineTranscriberFeedback::new(start_feedback_type.unwrap_or_default());
         let offline_transcriber_feedback = Arc::new(transcriber_feedback);
-        let feedback_callback_rate = Arc::new(AtomicU64::new(Self::DEFAULT_FEEDBACK_RATE_MILLIS));
+        let audio_gain_settings =
+            ArcSwap::new(Arc::new(start_audio_gain_settings.unwrap_or_default()));
         let current_snapshot = ArcSwap::new(Arc::new(TranscriptionSnapshot::default()));
         let current_control_phrase = ArcSwap::new(Arc::new(WhisperControlPhrase::default()));
         Self {
@@ -83,7 +84,7 @@ impl TranscriberEngineState {
             offline_running,
             current_audio_file_path,
             offline_transcriber_feedback,
-            feedback_callback_rate,
+            audio_gain_settings,
             current_snapshot,
             current_control_phrase,
             progress_message_sender: bus.progress_message_sender(),
@@ -116,7 +117,7 @@ impl TranscriberEngineState {
     {
         let configs = *self.vad_configs.load_full();
         match configs.vad_type() {
-            VadType::Silero | VadType::Auto => {
+            VadType::Silero => {
                 let vad = configs.build_silero()?;
                 self.run_realtime_transcription(audio_backend, shared_model_retriever, vad)
             }
@@ -124,8 +125,12 @@ impl TranscriberEngineState {
                 let vad = configs.build_webrtc()?;
                 self.run_realtime_transcription(audio_backend, shared_model_retriever, vad)
             }
-            VadType::Earshot => {
-                let vad = configs.build_earshot()?;
+            // VadType::Earshot => {
+            //     let vad = configs.build_earshot()?;
+            //     self.run_realtime_transcription(audio_backend, shared_model_retriever, vad)
+            // }
+            VadType::Auto => {
+                let vad = configs.build_auto()?;
                 self.run_realtime_transcription(audio_backend, shared_model_retriever, vad)
             }
         }
@@ -189,6 +194,14 @@ impl TranscriberEngineState {
         // Get a copy of the configs
         let configs = *self.transcription_configs.load_full();
 
+        // Extract the gain configs, build a gain struct and see if it has a multiplier.
+        let audio_gain = self.audio_gain_settings.load_full().build_audio_gain();
+        let audio_gain = if audio_gain.no_gain() {
+            None
+        } else {
+            Some(audio_gain)
+        };
+
         let (transcriber, transcriber_handle) = RealtimeTranscriberBuilder::<V, M>::new()
             .with_configs(configs)
             .with_audio_buffer(&audio_ring_buffer)
@@ -243,6 +256,7 @@ impl TranscriberEngineState {
 
             // Spawn the scoped worker threads
             let _audio_fanout_thread = s.spawn(move |_| {
+                let mut rolling_peak: f32 = 1.0;
                 while a_thread_run_transcription.load(Ordering::Acquire) {
                     match audio_receiver.recv() {
                         Ok(audio) => {
@@ -251,14 +265,25 @@ impl TranscriberEngineState {
                             }
 
                             // Run a cheap DCBlock filter before pushing to the ring buffer
-                            let mut dc_block =
+                            let dc_block =
                                 DCBlock::new().with_sample_rate(WHISPER_SAMPLE_RATE as f32);
 
-                            let filtered = audio
-                                .iter()
-                                .copied()
-                                .map(|f| dc_block.process(f))
-                                .collect::<Vec<_>>();
+                            // TODO: it might be more efficient to pre-calculate the expected peak
+                            // using the audio gain multiplier.
+                            let filtered: Vec<f32> = if let Some(gain) = audio_gain {
+                                let block_filter = dc_block.process_signal_map(audio.iter());
+                                let mut out: Vec<f32> = gain.apply_gain_map(block_filter).collect();
+                                rolling_peak = out.iter().copied().fold(rolling_peak, |acc, f| {
+                                    f32::max(acc, f.abs())
+                                }).max(1.0);
+                                out.iter_mut().for_each(|f| *f /= rolling_peak);
+                                debug_assert!(out.iter().all(|f| f.is_finite() && *f >= -1.0 && *f <= 1.0));
+                                out
+                            } else {
+                                let mapped: Vec<f32> = dc_block.process_signal_map(audio.iter()).collect();
+                                debug_assert!(mapped.iter().all(|f| f.is_finite() && *f >= -1.0 && *f <= 1.0));
+                                mapped
+                            };
 
                             // Write into the ringbuffer
                             audio_ring_buffer.push_audio(&filtered);
@@ -300,7 +325,6 @@ impl TranscriberEngineState {
 
             let transcription_thread =
                 s.spawn(move |_| transcriber.process_audio(t_thread_run_transcription));
-
             // For updating the inner transcription
             // It's easiest to just duplicate the logic across transcription impls; otherwise it
             // becomes a huge lifetime headache.
@@ -358,7 +382,7 @@ impl TranscriberEngineState {
             // Since the type is opaque here (scope return), it's not entirely known as to what the error is.
             // The easiest thing to do here is to wrap it in a "ThreadPanic", as even if the exit is
             // somewhat graceful, an error has forced the transcriber to stop early.
-            .map_err(|e| RibbleError::ThreadPanic(format!("{e:?}")));
+            .map_err(|e| RibbleError::ThreadPanic(format!("Possible cause {e:#?}")));
 
         mic.pause();
         // Send the device back to be closed
@@ -366,8 +390,6 @@ impl TranscriberEngineState {
         // back to be dropped.
         //
         // Until a different/better backend solution is written, this will have to do.
-        // NOTE: THE COMPILER MAY FIND THIS TO BE A USE-AFTER-MOVE
-        // It shouldn't be -> the early return only happens if there is an error.
         audio_backend.close_capture(mic);
 
         // Unwrap the result -after- closing the microphone capture.
@@ -402,7 +424,7 @@ impl TranscriberEngineState {
         let configs = *self.vad_configs.load_full();
         if configs.use_vad_offline() {
             match configs.vad_type() {
-                VadType::Silero | VadType::Auto => {
+                VadType::Silero => {
                     let vad = configs.build_silero()?;
                     self.run_offline_transcription(shared_model_retriever, Some(vad))
                 }
@@ -410,8 +432,13 @@ impl TranscriberEngineState {
                     let vad = configs.build_webrtc()?;
                     self.run_offline_transcription(shared_model_retriever, Some(vad))
                 }
-                VadType::Earshot => {
-                    let vad = configs.build_earshot()?;
+                // VadType::Earshot => {
+                //     let vad = configs.build_earshot()?;
+                //     self.run_offline_transcription(shared_model_retriever, Some(vad))
+                // }
+
+                VadType::Auto => {
+                    let vad = configs.build_auto()?;
                     self.run_offline_transcription(shared_model_retriever, Some(vad))
                 }
             }
@@ -439,7 +466,10 @@ impl TranscriberEngineState {
             Ok(path.clone())
         } else {
             Err(RibbleError::Core("Audio file path not loaded.".to_string()))
-        }?;
+        }
+            .inspect_err(|_e| {
+                self.realtime_running.store(false, Ordering::Release);
+            })?;
 
         // Send a progress job so the UI can be updated.
         let setup_progress = Progress::new_indeterminate("Setting up offline transcription.");
@@ -476,6 +506,7 @@ impl TranscriberEngineState {
 
         let n_frames = audio_file_num_frames(audio_file_path.as_path()).inspect_err(|_e| {
             self.cleanup_remove_progress_job(setup_id);
+            self.offline_running.store(false, Ordering::Release);
         })?;
 
         let load_audio_progress = Progress::new_determinate("Loading audio", n_frames);
@@ -531,17 +562,52 @@ impl TranscriberEngineState {
                 .inspect_err(|_e| {
                     self.cleanup_remove_progress_job(setup_id);
                     self.cleanup_remove_progress_job(load_audio_id);
+                    self.offline_running.store(false, Ordering::Release);
                 })?;
+
+        // Check for gain.
+        let audio_gain_settings = self.audio_gain_settings.load_full();
+        let audio_gain = if audio_gain_settings.use_offline() && !audio_gain_settings.no_gain() {
+            Some(audio_gain_settings.build_audio_gain())
+        } else {
+            None
+        };
 
         let audio = match loaded_audio {
             WhisperAudioSample::F32(audio) => {
-                let mut dc_block = DCBlock::new().with_sample_rate(WHISPER_SAMPLE_RATE as f32);
+                // TODO: determine whether to -actually- run the dc_block or not.
+                // PERHAPS IT COULD BE A TOGGLE.
+                let dc_block = DCBlock::new().with_sample_rate(WHISPER_SAMPLE_RATE as f32);
 
-                let filtered = audio
-                    .iter()
-                    .copied()
-                    .map(|f| dc_block.process(f))
-                    .collect::<Vec<_>>();
+                let filtered: Vec<f32> = if let Some(gain) = audio_gain {
+                    // TODO: it might be more efficient to pre-calculate the expected peak
+                    // using the audio gain multiplier.
+                    let block_filter = dc_block.process_signal_map(audio.iter());
+                    let mut out: Vec<f32> = gain.apply_gain_map(block_filter).collect();
+                    let peak = out
+                        .iter()
+                        .copied()
+                        .fold(1.0, |acc, f| f32::max(acc, f.abs()))
+                        .max(1.0);
+                    // Uh, so the peak is really high and I'm not sure wtf is up.
+                    #[cfg(debug_assertions)]
+                    {
+                        let first_outlier = out.iter().position(|f| f.abs() >= 7.0);
+                        if let Some(outlier) = first_outlier {
+                            eprintln!(
+                                "WEIRD OUTLIER. POS: {outlier}, OLD_VAL: {}, NEW_VAL:{}",
+                                audio.get(outlier).unwrap(),
+                                out.get(outlier).unwrap()
+                            );
+                        }
+                    }
+
+                    out.iter_mut().for_each(|f| *f /= peak);
+                    out
+                } else {
+                    dc_block.process_signal_map(audio.iter()).collect()
+                };
+
                 WhisperAudioSample::F32(Arc::from(filtered))
             }
             WhisperAudioSample::I16(_) => {
@@ -565,6 +631,7 @@ impl TranscriberEngineState {
 
         let offline_transcriber = offline_transcriber_builder.build().inspect_err(|_e| {
             self.cleanup_remove_progress_job(setup_id);
+            self.offline_running.store(false, Ordering::Release);
         })?;
 
         let run_transcription = Arc::clone(&self.offline_running);
@@ -628,45 +695,20 @@ impl TranscriberEngineState {
             let transcription_callback =
                 Some(StaticRibbleWhisperCallback::new(transcription_closure));
 
-            let segment_closure = move |snapshot| {
-                // Take the snapshot into an Arc (for swapping in the print loop).
-                let a_snap = Arc::new(snapshot);
-                if let Err(e) = sender.try_send(WhisperOutput::TranscriptionSnapshot(a_snap)) {
-                    log::warn!("Cannot send segment transcription snapshot.\n\
+            let segment_closure = move |segment_string| {
+                if let Err(e) = sender.try_send(segment_string) {
+                    log::warn!("Cannot send segment string.\n\
                         Error: {}\n\
                         Error source: {:#?}", &e, e.source());
                 }
             };
 
-            // Since the callbacks require static lifetime, copy the inner atomics and pass to the
-            // closure instead of self.
-            let callback_offline_feedback = Arc::clone(&self.offline_transcriber_feedback);
-            let feedback_callback_rate = Arc::clone(&self.feedback_callback_rate);
+            let offline_feedback = self.offline_transcriber_feedback.load(Ordering::Acquire);
 
-            let mut last = Instant::now();
-
-            let segment_short_circuit_closure = move || {
-                let offline_feedback = callback_offline_feedback.load(Ordering::Acquire);
-                if matches!(offline_feedback, OfflineTranscriberFeedback::Minimal) {
-                    return false;
-                }
-
-                let now = Instant::now();
-                let diff = now.duration_since(last);
-                let limit = feedback_callback_rate.load(Ordering::Acquire) as u128;
-
-                if diff.as_millis() >= limit {
-                    last = now;
-                    true
-                } else {
-                    false
-                }
+            let segment_callback = match offline_feedback {
+                OfflineTranscriberFeedback::Minimal => None,
+                OfflineTranscriberFeedback::Progressive => Some(RibbleWhisperCallback::new(segment_closure))
             };
-
-            let segment_callback = Some(ShortCircuitRibbleWhisperCallback::new(
-                segment_short_circuit_closure,
-                segment_closure,
-            ));
 
             // With how the new_segment callback works, it's not possible atm to have an
             // early escape mechanism to avoid the heavy computation
@@ -683,40 +725,41 @@ impl TranscriberEngineState {
                 res
             });
 
-            // NOTE: It's easier to just duplicate the code, rather than try to factor this into a
-            // method.
-            // Lifetime issues are a major pain point and I just don't want to have to deal with
-            // them.
-            let _print_thread = s.spawn(move |_| {
-                while p_thread_running.load(Ordering::Acquire) {
-                    match receiver.recv() {
-                        Ok(output) => match output {
-                            WhisperOutput::TranscriptionSnapshot(snapshot) => {
-                                self.current_snapshot.store(Arc::clone(&snapshot));
-                            }
-                            WhisperOutput::ControlPhrase(control) => {
-                                #[cfg(debug_assertions)]{
-                                    self.current_control_phrase.store(Arc::new(control));
-                                }
 
-                                // Filter out all "Debug" control phrases in release mode.
-                                #[cfg(not(debug_assertions))]
-                                {
-                                    match &control {
-                                        WhisperControlPhrase::Debug(..) => {}
-                                        _ => {
-                                            self.current_control_phrase.store(Arc::new(control));
-                                        }
-                                    }
-                                }
+            if matches!(offline_feedback, OfflineTranscriberFeedback::Progressive) {
+                let _print_thread = s.spawn(move |_| {
+
+                    // NOTE: this is going to cause allocation churn-there's not a lot I can do at
+                    // the moment without losing ArcSwap which works very well for the application
+                    // thus far.
+                    //
+                    // The alternative would be to grow a mutable string (yes, more efficient), and
+                    // set a locking mechanism (possibly not so efficient).
+                    //
+                    // For small strings, this will not be so bad; for large strings, it will
+                    // definitely be a pain.
+                    //
+                    // TODO: test this out on long audio to see what the allocation churn is like.
+                    let current_transcription: Arc<str> = Default::default();
+                    while p_thread_running.load(Ordering::Acquire) {
+                        match receiver.recv() {
+                            Ok(new_segment) => {
+                                let current_transcription = if current_transcription.is_empty() {
+                                    Arc::from(new_segment)
+                                } else {
+                                    Arc::from(format!("{current_transcription} {new_segment}").trim())
+                                };
+                                let new_snapshot = Arc::new(
+                                    TranscriptionSnapshot::new(
+                                        Arc::clone(&current_transcription),
+                                        Arc::default()));
+                                self.current_snapshot.store(new_snapshot)
                             }
-                        },
-                        Err(_) => {
-                            p_thread_running.store(false, Ordering::Release);
+                            Err(_) => p_thread_running.store(false, Ordering::Release)
                         }
                     }
-                }
-            });
+                });
+            }
 
             // If the transcription thread panicked, it's because of an uncaught whisper error
             // -- and thus the progress job most likely needs to be removed.
@@ -743,18 +786,21 @@ impl TranscriberEngineState {
             // NOTE: the type of this is opaque due to the scope return.
             // It is most likely to be a ThreadPanic (ThreadPanic), due to locally scoped threads.
             // If this is particularly obtrusive, look at trying to deduplicate.
-            .map_err(|e| RibbleError::ThreadPanic(format!("{e:?}")))??;
+            .map_err(|e| RibbleError::ThreadPanic(format!("Possible cause: {e:#?}"))).inspect_err(|_e| {
+            self.offline_running.store(false, Ordering::Release);
+        })??;
 
         self.finalize_transcription(result);
 
         // Finalize by preparing a status message for the console.
         let message = format!("Finished transcribing: {}!", audio_file_path.display());
         let console_message = ConsoleMessage::Status(message);
+        self.offline_running.store(false, Ordering::Release);
         Ok(RibbleMessage::Console(console_message))
     }
 
     fn finalize_transcription(&self, final_transcription: String) {
-        let confirmed_transcription = Arc::new(final_transcription);
+        let confirmed_transcription = Arc::from(final_transcription);
         let snapshot = TranscriptionSnapshot::new(confirmed_transcription, Default::default());
         self.current_snapshot.store(Arc::new(snapshot));
         self.current_control_phrase
@@ -799,15 +845,17 @@ pub(super) struct TranscriberEngine {
 impl TranscriberEngine {
     // These get passed in upon construction; they should be serialized separately.
     pub(super) fn new(
-        transcription_configs: WhisperRealtimeConfigs,
-        vad_configs: VadConfigs,
-        feedback_type: OfflineTranscriberFeedback,
+        start_transcription_configs: Option<WhisperRealtimeConfigs>,
+        start_vad_configs: Option<VadConfigs>,
+        start_feedback_type: Option<OfflineTranscriberFeedback>,
+        start_audio_gain_settings: Option<AudioGainConfigs>,
         bus: &Bus,
     ) -> Self {
         let inner = Arc::new(TranscriberEngineState::new(
-            transcription_configs,
-            vad_configs,
-            feedback_type,
+            start_transcription_configs,
+            start_vad_configs,
+            start_feedback_type,
+            start_audio_gain_settings,
             bus,
         ));
         Self {
@@ -851,6 +899,14 @@ impl TranscriberEngine {
         self.inner
             .offline_transcriber_feedback
             .store(new_feedback, Ordering::Release);
+    }
+
+    pub(super) fn read_audio_gain_configs(&self) -> Arc<AudioGainConfigs> {
+        self.inner.audio_gain_settings.load_full()
+    }
+
+    pub(super) fn write_audio_gain_configs(&self, new_settings: AudioGainConfigs) {
+        self.inner.audio_gain_settings.store(Arc::new(new_settings));
     }
 
     pub(super) fn write_transcription_configs(&self, configs: WhisperRealtimeConfigs) {

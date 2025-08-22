@@ -23,8 +23,10 @@ use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
 )]
 #[atomic_enum]
 pub(crate) enum RibbleExportFormat {
-    #[default]
     F32,
+    // Because the volume is very, very low when recording in normalized floating point, export to I16
+    // It's also much smaller and people don't really need floating point.
+    #[default]
     I16,
 }
 
@@ -101,7 +103,7 @@ impl From<Option<u8>> for RibbleChannels {
         match value {
             Some(1) => RibbleChannels::Mono,
             Some(2) => RibbleChannels::Stereo,
-            None | _ => RibbleChannels::Auto,
+            _ => RibbleChannels::Auto,
         }
     }
 }
@@ -154,7 +156,7 @@ impl From<Option<usize>> for RibbleSampleRate {
             Some(16000) => RibbleSampleRate::Medium,
             Some(22050) => RibbleSampleRate::High,
             Some(44100) => RibbleSampleRate::Highest,
-            None | _ => RibbleSampleRate::Auto,
+            _ => RibbleSampleRate::Auto,
         }
     }
 }

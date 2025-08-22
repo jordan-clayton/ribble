@@ -1,6 +1,8 @@
+use std::borrow::Borrow;
 use std::f32::consts::PI;
 
 // Basic DC Block filter (discrete-time IIR filter).
+#[derive(Copy, Clone)]
 pub(crate) struct DCBlock {
     prev_input: f32,
     prev_output: f32,
@@ -48,7 +50,7 @@ impl DCBlock {
 
         // In case there's a 0div or a nan that infects the calculation, just set back to the
         // default R constant.
-        if self.r.is_nan() || self.r.is_infinite() {
+        if !self.r.is_finite() {
             self.r = Self::DEFAULT_R_CONSTANT;
         }
 
@@ -57,16 +59,56 @@ impl DCBlock {
 
     // DC Block filter recursion
     // y(n) = x(n) - x(n - 1) + R * y(n - 1)
-    pub(crate) fn process(&mut self, input: f32) -> f32 {
+    fn process(&mut self, input: f32) -> f32 {
         let y = input - self.prev_input + self.r * self.prev_output;
         self.prev_input = input;
         self.prev_output = y;
         y
+    }
+
+    pub(crate) fn process_signal<'a, I>(&mut self, signal: I)
+    where
+        I: Iterator<Item = &'a mut f32>,
+    {
+        // TODO: this might be better/more clearly served by a "reset" function
+        let old_state = *self;
+        signal.for_each(|f| *f = self.process(*f));
+        *self = old_state;
+    }
+
+    // Consumes & takes an iterator and returns an iterator that applies the block.
+    pub(crate) fn process_signal_map<I>(self, signal: I) -> DCBlockMap<I>
+    where
+        I: Iterator,
+    {
+        DCBlockMap {
+            dc_block: self,
+            map_iter: signal,
+        }
     }
 }
 
 impl Default for DCBlock {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+pub(crate) struct DCBlockMap<I> {
+    dc_block: DCBlock,
+    map_iter: I,
+}
+
+impl<I> Iterator for DCBlockMap<I>
+where
+    I: Iterator,
+    I::Item: Borrow<f32>,
+{
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.map_iter
+            .next()
+            .and_then(|f| Some(self.dc_block.process(*(f.borrow()))))
     }
 }

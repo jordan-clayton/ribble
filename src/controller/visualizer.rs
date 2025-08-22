@@ -60,19 +60,11 @@ impl VisualizerEngineState {
         }
     }
 
-    fn fit_frames(window: &mut Vec<f32>, frame_size: usize) {
-        let floor_ratio = (window.len() / frame_size) as f32;
-        let float_ratio = window.len() as f32 / frame_size as f32;
+    fn fit_frames(window: &mut Vec<f32>, frame_size: usize, welch_target: f32, overlap_ratio: f32) {
+        let padded_size = inverse_welch_frames(frame_size as f32, welch_target, overlap_ratio);
 
-        // If the number of windows isn't precisely an integer, duplicate the last n samples
-        // of the signal.
-        if float_ratio > floor_ratio {
-            let to_add = (1.0 - float_ratio.fract() * frame_size as f32).ceil() as usize;
-            let new_size = window.len() + to_add;
-            let start_idx = window.len() - to_add;
-            window.extend_from_within(start_idx..);
-            debug_assert_eq!(window.len(), new_size);
-        }
+        let diff = (padded_size as f32 - window.len() as f32).abs() as usize;
+        window.extend_from_within(window.len().saturating_sub(diff).saturating_sub(1)..);
     }
 
     // This is Power Spectrum Density estimate.
@@ -114,7 +106,7 @@ impl VisualizerEngineState {
 
     fn waveform_oscillation(&self, samples: &[f32]) -> Result<(), RibbleError> {
         // This is in time domain, so it doesn't require high resolution
-        let (frame_size, step_size) = compute_welch_frames(samples.len() as f32, NUM_VISUALIZER_BUCKETS as f32, 0f32);
+        let (frame_size, step_size) = compute_welch_frames(samples.len() as f32, NUM_VISUALIZER_BUCKETS as f32, 0.0);
 
         if frame_size == 0 {
             return Err(RibbleError::Core("Empty samples sent for waveform analysis".to_string()));
@@ -124,7 +116,7 @@ impl VisualizerEngineState {
 
         // Do any padding to make sure things fit properly
         // This duplicates the last bit of the signal instead of zero-padding.
-        Self::fit_frames(&mut window, frame_size);
+        Self::fit_frames(&mut window, frame_size, NUM_VISUALIZER_BUCKETS as f32, 0.0);
 
         let waveform = window
             .windows(frame_size)
@@ -166,7 +158,7 @@ impl VisualizerEngineState {
 
         // Do any padding to make sure things fit properly
         // This duplicates the last bit of the signal instead of zero-padding.
-        Self::fit_frames(&mut window, frame_size);
+        Self::fit_frames(&mut window, frame_size, NUM_VISUALIZER_BUCKETS as f32, Self::AMPLITUDE_OVERLAP);
 
         let amp_envelope = window
             .windows(frame_size)
@@ -196,11 +188,6 @@ impl VisualizerEngineState {
         let mut window = hann_window(samples);
         let frame_size = Self::FFT_RESOLUTION as usize;
         let step_size = compute_welch_step(frame_size as f32, Self::FFT_OVERLAP);
-
-
-        // Do any padding to make sure things fit properly
-        // This duplicates the last bit of the signal instead of zero-padding.
-        Self::fit_frames(&mut window, frame_size);
 
         let frames = window.windows(frame_size).step_by(step_size);
         *n_frames = frames.len();
@@ -304,12 +291,18 @@ fn hann_window(samples: &[f32]) -> Vec<f32> {
 }
 
 // This is only good for the time-domain functions.
-// TODO: rename this or refactor.
+// I'm really not sure what to call this, but that can be determined later.
+// TODO: figure out a better name.
 fn compute_welch_frames(sample_len: f32, output_len: f32, overlap_ratio: f32) -> (usize, usize) {
     let frame_size =
-        sample_len / (1f32 + (output_len - 1f32) * (1f32 - overlap_ratio));
-    let step_size = frame_size * (1f32 - overlap_ratio);
+        sample_len / (1.0 + (output_len - 1.0) * (1.0 - overlap_ratio));
+    let step_size = frame_size * (1.0 - overlap_ratio);
     (frame_size.round() as usize, step_size.round() as usize)
+}
+
+#[inline]
+fn inverse_welch_frames(frame_size: f32, output_len: f32, overlap_ratio: f32) -> usize {
+    (frame_size * (1.0 + (output_len - 1.0) * (1.0 - overlap_ratio))).round() as usize
 }
 #[inline]
 fn compute_welch_step(frame_size: f32, overlap_ratio: f32) -> usize {

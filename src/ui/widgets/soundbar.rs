@@ -38,11 +38,12 @@ fn interpolate_buckets(
     num_bars: usize,
     buckets: &[f32; NUM_VISUALIZER_BUCKETS],
 ) -> f32 {
-    let t = idx as f32 / (num_bars - 1) as f32;
+    let t = idx as f32 / (num_bars - 1).max(1) as f32;
     let last_index = buckets.len() - 1;
     let frac_idx = last_index as f32 * t;
 
     let bucket_t = frac_idx.fract();
+    debug_assert!(bucket_t >= 0.0 && bucket_t <= 1.0);
     let floor = (frac_idx.floor() as usize).min(last_index);
     let ceil = (frac_idx.ceil() as usize).min(last_index);
 
@@ -138,6 +139,7 @@ fn draw_soundbar_rect(
     mouse_position: Pos2,
     show_pointer: &mut bool,
 ) -> Response {
+    let height_t = height_t.clamp(0.0, 1.0);
     let bar_height = lerp(
         BAR_MIN_HEIGHT..=bar_max_height.max(BAR_MIN_HEIGHT),
         height_t,

@@ -12,6 +12,9 @@ const COPY_ICON: &str = "📋";
 // Floppy Disk: https://unicodeplus.com/U+1F4BE
 const SAVE_ICON: &str = "💾";
 
+// TODO: ADD SOME MORE PADDING TO THE HEADER BAR ->
+// THE TEXT CENTERING IS CAUSING THE TEXT TO LAYOUT WEIRDLY DURING THE TRANSCRIPTION LOOP.
+
 impl PaneView for TranscriptionPane {
     fn pane_id(&self) -> RibblePaneId {
         RibblePaneId::Transcription
@@ -96,6 +99,7 @@ impl PaneView for TranscriptionPane {
                                             let copy_text = "Copy to clipboard.";
                                             if ui
                                                 .button(copy_button)
+                                                .on_hover_cursor(egui::CursorIcon::Default)
                                                 .on_hover_text(copy_text)
                                                 .on_disabled_hover_text(copy_text)
                                                 .clicked()
@@ -115,6 +119,7 @@ impl PaneView for TranscriptionPane {
                                             let save_text = "Save transcription.";
                                             if ui
                                                 .button(save_button)
+                                                .on_hover_cursor(egui::CursorIcon::Default)
                                                 .on_hover_text(save_text)
                                                 .on_disabled_hover_text(save_text)
                                                 .clicked()
@@ -152,6 +157,9 @@ impl PaneView for TranscriptionPane {
                                 .auto_shrink([false; 2])
                                 .stick_to_bottom(true)
                                 .show(ui, |ui| {
+                                    // TODO: TEST THIS OUT -> I believe Ribble-Whisper does most of
+                                    // the trimming.
+                                    //
                                     // Show the full transcription state first.
                                     let confirmed = transcription_snapshot.confirmed();
                                     if !confirmed.is_empty() {
@@ -166,7 +174,7 @@ impl PaneView for TranscriptionPane {
                                             if segment.len() > 1 {
                                                 ui.monospace(segment.trim_start());
                                             } else {
-                                                ui.monospace(segment);
+                                                ui.monospace(segment.as_ref());
                                             }
                                         }
                                     }

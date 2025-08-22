@@ -14,6 +14,7 @@ use crate::controller::{
     UTILITY_QUEUE_SIZE,
 };
 use crate::controller::{AnalysisType, FileDownload};
+use crate::utils::audio_gain::AudioGainConfigs;
 use crate::utils::errors::RibbleError;
 use crate::utils::preferences::UserPreferences;
 use crate::utils::recorder_configs::{RibbleExportFormat, RibbleRecordingConfigs};
@@ -69,6 +70,7 @@ impl Kernel {
         let KernelState {
             transcriber_configs,
             offline_transcriber_feedback,
+            transcriber_gain_settings,
             vad_configs,
             recording_configs,
             visualizer_analysis_type,
@@ -92,7 +94,9 @@ impl Kernel {
             download_sender,
         );
 
-        let recorder_engine = RecorderEngine::new(recording_configs, export_format, &bus);
+        // TODO: take the configs objects/export formats as options
+        let recorder_engine =
+            RecorderEngine::new(Some(recording_configs), Some(export_format), &bus);
         let console_engine = ConsoleEngine::new(
             console_receiver,
             user_preferences.console_message_size(),
@@ -136,9 +140,10 @@ impl Kernel {
         // NOTE: to avoid already modifying the transcriber engine, just construct it last after
         // the ID check has been run.
         let transcriber_engine = TranscriberEngine::new(
-            transcriber_configs,
-            vad_configs,
-            offline_transcriber_feedback,
+            Some(transcriber_configs),
+            Some(vad_configs),
+            Some(offline_transcriber_feedback),
+            Some(transcriber_gain_settings),
             &bus,
         );
 
@@ -245,6 +250,13 @@ impl Kernel {
     ) {
         self.transcriber_engine
             .write_offline_transcriber_feedback(new_feedback);
+    }
+
+    pub(super) fn read_audio_gain_configs(&self) -> Arc<AudioGainConfigs> {
+        self.transcriber_engine.read_audio_gain_configs()
+    }
+    pub(super) fn write_audio_gain_configs(&self, new_settings: AudioGainConfigs) {
+        self.transcriber_engine.write_audio_gain_configs(new_settings);
     }
     pub(super) fn realtime_running(&self) -> bool {
         self.transcriber_engine.realtime_running()
@@ -402,7 +414,10 @@ impl Kernel {
     pub(super) fn read_latest_error(&self) -> Arc<Option<LatestError>> {
         self.console_engine.read_latest_error()
     }
-    pub(super) fn try_read_console_message_buffer(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
+    pub(super) fn try_read_console_message_buffer(
+        &self,
+        copy_buffer: &mut Vec<Arc<ConsoleMessage>>,
+    ) {
         self.console_engine.try_read_message_buffer(copy_buffer);
     }
     pub(super) fn resize_console_message_buffer(&self, new_size: usize) {
@@ -474,6 +489,7 @@ impl Kernel {
         let transcriber_configs = *self.transcriber_engine.read_transcription_configs();
         let offline_transcriber_feedback =
             self.transcriber_engine.read_offline_transcriber_feedback();
+        let transcriber_gain_settings = *self.transcriber_engine.read_audio_gain_configs();
         let vad_configs = *self.transcriber_engine.read_vad_configs();
         let recording_configs = *self.recorder_engine.read_recorder_configs();
         let export_format = self.recorder_engine.read_export_format();
@@ -483,6 +499,7 @@ impl Kernel {
         let state = KernelState {
             transcriber_configs,
             offline_transcriber_feedback,
+            transcriber_gain_settings,
             vad_configs,
             recording_configs,
             export_format,
@@ -554,6 +571,8 @@ struct KernelState {
     transcriber_configs: WhisperRealtimeConfigs,
     #[serde(default)]
     offline_transcriber_feedback: OfflineTranscriberFeedback,
+    #[serde(default)]
+    transcriber_gain_settings: AudioGainConfigs,
     #[serde(default)]
     vad_configs: VadConfigs,
     #[serde(default)]
