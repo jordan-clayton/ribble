@@ -39,6 +39,9 @@ Build with cargo with the following:
 It is recommended to build with one of the following features to enable GPU acceleration.
 ```cargo build --release --features <gpu backend>```
 
+Ignore the buildscripts for distribution/packaging. Things need to be re-addressed and your experience will be smoother
+with cargo.
+
 ## Features (GPU Acceleration)
 
 - ```cuda``` for cuda support (Linux/Windows). Requires a Cuda Toolkit >= 11.8.
