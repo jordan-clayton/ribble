@@ -217,7 +217,7 @@ fn smoothing(target: &[f32], current: &mut [f32], dt: f32) -> bool {
     assert_eq!(target.len(), current.len());
     let mut repaint = false;
     for i in 0..target.len() {
-        if current[i] != target[i] {
+        if (current[i] - target[i]).abs() > f32::EPSILON {
             repaint = true;
         }
         current[i] = current[i] + (target[i] - current[i]) * SMOOTHING_CONSTANT * dt;

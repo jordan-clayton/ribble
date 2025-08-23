@@ -2,7 +2,7 @@ use crate::controller::VisualizerPacket;
 use crate::controller::WriteRequest;
 use crate::controller::{
     AtomicOfflineTranscriberFeedback, Bus, ConsoleMessage, OfflineTranscriberFeedback, Progress,
-    ProgressMessage, RibbleMessage, WorkRequest, UTILITY_QUEUE_SIZE,
+    ProgressMessage, RibbleMessage, UTILITY_QUEUE_SIZE, WorkRequest,
 };
 use crate::utils::audio_gain::AudioGainConfigs;
 use crate::utils::dc_block::DCBlock;
@@ -24,20 +24,20 @@ use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
 use ribble_whisper::transcriber::vad::VAD;
 use ribble_whisper::transcriber::{
-    redirect_whisper_logging_to_hooks, CallbackTranscriber, Transcriber, TranscriptionSnapshot, WhisperCallbacks,
-    WhisperControlPhrase, WhisperOutput, WHISPER_SAMPLE_RATE,
+    CallbackTranscriber, Transcriber, TranscriptionSnapshot, WHISPER_SAMPLE_RATE, WhisperCallbacks,
+    WhisperControlPhrase, WhisperOutput, redirect_whisper_logging_to_hooks,
 };
 use ribble_whisper::utils::callback::{RibbleWhisperCallback, StaticRibbleWhisperCallback};
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{get_channel, Sender};
+use ribble_whisper::utils::{Sender, get_channel};
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model::ModelRetriever;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 struct TranscriberEngineState {
     transcription_configs: ArcSwap<WhisperRealtimeConfigs>,
@@ -118,11 +118,15 @@ impl TranscriberEngineState {
         let configs = *self.vad_configs.load_full();
         match configs.vad_type() {
             VadType::Silero => {
-                let vad = configs.build_silero()?;
+                let vad = configs.build_silero().inspect_err(|_| {
+                    self.realtime_running.store(false, Ordering::Release);
+                })?;
                 self.run_realtime_transcription(audio_backend, shared_model_retriever, vad)
             }
             VadType::WebRtc => {
-                let vad = configs.build_webrtc()?;
+                let vad = configs.build_webrtc().inspect_err(|_| {
+                    self.realtime_running.store(false, Ordering::Release);
+                })?;
                 self.run_realtime_transcription(audio_backend, shared_model_retriever, vad)
             }
             // VadType::Earshot => {
@@ -130,7 +134,9 @@ impl TranscriberEngineState {
             //     self.run_realtime_transcription(audio_backend, shared_model_retriever, vad)
             // }
             VadType::Auto => {
-                let vad = configs.build_auto()?;
+                let vad = configs.build_auto().inspect_err(|_| {
+                    self.realtime_running.store(false, Ordering::Release);
+                })?;
                 self.run_realtime_transcription(audio_backend, shared_model_retriever, vad)
             }
         }
@@ -324,7 +330,11 @@ impl TranscriberEngineState {
             });
 
             let transcription_thread =
-                s.spawn(move |_| transcriber.process_audio(t_thread_run_transcription));
+                s.spawn(move |_| transcriber.process_audio(t_thread_run_transcription).inspect_err(|_|{
+                    // If this has early-returned an error, the other threads may not get the
+                    // message.
+                    self.realtime_running.store(false, Ordering::Release);
+                }));
             // For updating the inner transcription
             // It's easiest to just duplicate the logic across transcription impls; otherwise it
             // becomes a huge lifetime headache.
@@ -364,6 +374,7 @@ impl TranscriberEngineState {
             transcription_thread
                 .join()
                 .unwrap_or_else(|e| {
+                    self.realtime_running.store(false, Ordering::Release);
                     // Wrap the error in a RibbleWhisper "Unknown" to satisfy the type constraints
                     // of the join.
                     let err = RibbleWhisperError::Unknown(format!("{e:?}"));
@@ -397,6 +408,10 @@ impl TranscriberEngineState {
 
         self.finalize_transcription(result);
 
+        // In case something weird has happened, just set the flag to false.
+        // (This should -always- be false because realtime has to be stopped via UI)
+        self.realtime_running.store(false, Ordering::Release);
+
         // Send a message to the console before returning the result.
         // If the writer thread somehow crashed, then there is unlikely to be a recording
         // available.
@@ -425,20 +440,25 @@ impl TranscriberEngineState {
         if configs.use_vad_offline() {
             match configs.vad_type() {
                 VadType::Silero => {
-                    let vad = configs.build_silero()?;
+                    let vad = configs.build_silero().inspect_err(|_| {
+                        self.offline_running.store(false, Ordering::Release);
+                    })?;
                     self.run_offline_transcription(shared_model_retriever, Some(vad))
                 }
                 VadType::WebRtc => {
-                    let vad = configs.build_webrtc()?;
+                    let vad = configs.build_webrtc().inspect_err(|_| {
+                        self.offline_running.store(false, Ordering::Release);
+                    })?;
                     self.run_offline_transcription(shared_model_retriever, Some(vad))
                 }
                 // VadType::Earshot => {
                 //     let vad = configs.build_earshot()?;
                 //     self.run_offline_transcription(shared_model_retriever, Some(vad))
                 // }
-
                 VadType::Auto => {
-                    let vad = configs.build_auto()?;
+                    let vad = configs.build_auto().inspect_err(|_| {
+                        self.offline_running.store(false, Ordering::Release);
+                    })?;
                     self.run_offline_transcription(shared_model_retriever, Some(vad))
                 }
             }
@@ -467,9 +487,9 @@ impl TranscriberEngineState {
         } else {
             Err(RibbleError::Core("Audio file path not loaded.".to_string()))
         }
-            .inspect_err(|_e| {
-                self.realtime_running.store(false, Ordering::Release);
-            })?;
+        .inspect_err(|_e| {
+            self.realtime_running.store(false, Ordering::Release);
+        })?;
 
         // Send a progress job so the UI can be updated.
         let setup_progress = Progress::new_indeterminate("Setting up offline transcription.");
@@ -589,19 +609,6 @@ impl TranscriberEngineState {
                         .copied()
                         .fold(1.0, |acc, f| f32::max(acc, f.abs()))
                         .max(1.0);
-                    // Uh, so the peak is really high and I'm not sure wtf is up.
-                    #[cfg(debug_assertions)]
-                    {
-                        let first_outlier = out.iter().position(|f| f.abs() >= 7.0);
-                        if let Some(outlier) = first_outlier {
-                            eprintln!(
-                                "WEIRD OUTLIER. POS: {outlier}, OLD_VAL: {}, NEW_VAL:{}",
-                                audio.get(outlier).unwrap(),
-                                out.get(outlier).unwrap()
-                            );
-                        }
-                    }
-
                     out.iter_mut().for_each(|f| *f /= peak);
                     out
                 } else {
@@ -720,7 +727,12 @@ impl TranscriberEngineState {
 
             let transcription_thread = s.spawn(move |_| {
                 let res = offline_transcriber
-                    .process_with_callbacks(run_transcription, whisper_callbacks);
+                    .process_with_callbacks(run_transcription, whisper_callbacks).inspect_err(|_|{
+                        // If the transcription has failed for any reason, ensure the runner flag
+                        // is false in-case the print-thread is running--otherwise this thread
+                        // scope will not terminate.
+                        self.offline_running.store(false, Ordering::Release);
+                    });
                 self.cleanup_remove_progress_job(transcription_id);
                 res
             });
@@ -770,6 +782,7 @@ impl TranscriberEngineState {
                 .join()
                 .unwrap_or_else(|e| {
                     self.cleanup_remove_progress_job(transcription_id);
+                    self.offline_running.store(false, Ordering::Release);
                     let error = RibbleWhisperError::Unknown(format!("{e:?}"));
                     Err(error)
                 })
@@ -786,16 +799,14 @@ impl TranscriberEngineState {
             // NOTE: the type of this is opaque due to the scope return.
             // It is most likely to be a ThreadPanic (ThreadPanic), due to locally scoped threads.
             // If this is particularly obtrusive, look at trying to deduplicate.
-            .map_err(|e| RibbleError::ThreadPanic(format!("Possible cause: {e:#?}"))).inspect_err(|_e| {
-            self.offline_running.store(false, Ordering::Release);
-        })??;
+            .map_err(|e| RibbleError::ThreadPanic(format!("Possible cause: {e:#?}")))??;
 
         self.finalize_transcription(result);
+        self.offline_running.store(false, Ordering::Release);
 
         // Finalize by preparing a status message for the console.
         let message = format!("Finished transcribing: {}!", audio_file_path.display());
         let console_message = ConsoleMessage::Status(message);
-        self.offline_running.store(false, Ordering::Release);
         Ok(RibbleMessage::Console(console_message))
     }
 

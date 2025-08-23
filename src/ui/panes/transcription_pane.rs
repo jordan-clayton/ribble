@@ -1,7 +1,7 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::ui::panes::PaneView;
-use crate::ui::{PANE_HEADING_BUTTON_SIZE, PANE_INNER_MARGIN};
+use crate::ui::{DEFAULT_TOAST_DURATION, LONG_TOAST_DURATION, PANE_HEADING_BUTTON_SIZE, PANE_INNER_MARGIN};
 use egui_notify::Toast;
 
 #[derive(Copy, Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
@@ -64,6 +64,13 @@ impl PaneView for TranscriptionPane {
             .show(ui, |ui| {
                 // These could be Panels, but since they're not resizeable, these two frames basically
                 // just do the same thing.
+                // TODO: these might actually be better if they -were- panels with a fixed size
+                // The top panel can cause layouting issues when the debug messages appear.
+                //
+                // Or, allocate-exact-size to a fixed size?
+                // Or possibly set the alignment to MIN.
+                //
+                // It might've just been the layout issue.
                 egui::Frame::default().fill(header_color).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.columns_const(|[col1, col2]| {
@@ -110,7 +117,8 @@ impl PaneView for TranscriptionPane {
                                                     .clone()
                                                     .into_string();
                                                 ui.ctx().copy_text(full_transcription);
-                                                let toast = Toast::info("Copied to Clipboard");
+                                                let mut toast = Toast::info("Copied to Clipboard");
+                                                toast.duration(Some(DEFAULT_TOAST_DURATION));
                                                 controller.send_toast(toast);
                                             }
 
@@ -134,8 +142,24 @@ impl PaneView for TranscriptionPane {
                                                     .set_directory(controller.base_dir());
 
                                                 if let Some(out_path) = file_dialog.save_file() {
-                                                    controller.save_transcription(out_path);
-                                                    let toast = Toast::info("Saving file");
+
+                                                    // (linux) if the file extension hasn't been appended, append
+                                                    // it to the end of the file name
+                                                    #[cfg(target_os = "linux")] {
+                                                        let out_path = if out_path.extension().is_some_and(|ext| ext == "txt") {
+                                                            out_path
+                                                        } else {
+                                                            out_path.with_extension("txt")
+                                                        };
+                                                        controller.save_transcription(out_path);
+                                                    }
+
+                                                    #[cfg(not(target_os = "linux"))] {
+                                                        controller.save_transcription(out_path);
+                                                    }
+
+                                                    let mut toast = Toast::info("Saving file");
+                                                    toast.duration(Some(LONG_TOAST_DURATION));
                                                     controller.send_toast(toast);
                                                 }
                                             }
@@ -150,6 +174,8 @@ impl PaneView for TranscriptionPane {
 
                     // Expect this frame to have the correct cursor when hovering over the text.
                     egui::Frame::default()
+                        // This pane needs a small amount of padding applied, otherwise the full
+                        // transcription can look a little cramped.
                         .fill(transcription_background_color)
                         .show(ui, |ui| {
                             egui::ScrollArea::vertical()
@@ -157,27 +183,38 @@ impl PaneView for TranscriptionPane {
                                 .auto_shrink([false; 2])
                                 .stick_to_bottom(true)
                                 .show(ui, |ui| {
-                                    // TODO: TEST THIS OUT -> I believe Ribble-Whisper does most of
-                                    // the trimming.
-                                    //
-                                    // Show the full transcription state first.
-                                    let confirmed = transcription_snapshot.confirmed();
-                                    if !confirmed.is_empty() {
-                                        ui.monospace(
-                                            transcription_snapshot.confirmed().trim_start(),
-                                        );
-                                    }
-                                    // Then print the segment buffer.
-                                    for segment in transcription_snapshot.string_segments().iter() {
-                                        if !segment.is_empty() {
-                                            // Try to preserve whitespace/newlines.
-                                            if segment.len() > 1 {
-                                                ui.monospace(segment.trim_start());
-                                            } else {
-                                                ui.monospace(segment.as_ref());
-                                            }
-                                        }
-                                    }
+                                    // Stick a second frame in the scroll area to prevent the
+                                    // scrollbar from clobbering the text.
+                                    egui::Frame::default().inner_margin(PANE_INNER_MARGIN)
+                                        .show(ui, |ui| {
+                                            // This should -hopefully- help with the text-wrapping
+                                            ui.with_layout(
+                                                egui::Layout::top_down(egui::Align::LEFT)
+                                                    .with_cross_justify(true),
+                                                |ui| {
+                                                    // Show the full transcription state first.
+                                                    let confirmed = transcription_snapshot.confirmed();
+                                                    if !confirmed.is_empty() {
+                                                        ui.monospace(
+                                                            transcription_snapshot.confirmed().trim_start(),
+                                                        );
+                                                    }
+                                                    // Then print the segment buffer.
+                                                    for segment in
+                                                        transcription_snapshot.string_segments().iter()
+                                                    {
+                                                        if !segment.is_empty() {
+                                                            // Try to preserve whitespace/newlines.
+                                                            if segment.len() > 1 {
+                                                                ui.monospace(segment.trim_start());
+                                                            } else {
+                                                                ui.monospace(segment.as_ref());
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                            );
+                                        });
                                 })
                         });
                 });

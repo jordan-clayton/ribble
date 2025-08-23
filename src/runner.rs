@@ -2,11 +2,11 @@ use crate::ui::app::Ribble;
 use crate::utils::crash_handler::set_up_desktop_crash_handler;
 use crate::utils::errors::RibbleError;
 use crate::utils::migration::{
-    clear_old_ribble_state, migrate_model_filenames, RibbleVersion, Version,
+    RibbleVersion, Version, clear_old_ribble_state, migrate_model_filenames,
 };
 use crash_handler::CrashHandler;
 use directories::ProjectDirs;
-use eframe::{run_native, AppCreator, NativeOptions};
+use eframe::{AppCreator, NativeOptions, run_native};
 use egui::{IconData, ViewportBuilder};
 use flexi_logger::{
     Age, Cleanup, Criterion, Duplicate, FileSpec, Logger, LoggerHandle, Naming, WriteMode,
@@ -62,6 +62,7 @@ impl RibbleRunner<'_> {
         )?;
 
         let data_directory = proj_dirs.data_dir().to_path_buf();
+
         if !data_directory.exists() {
             std::fs::create_dir_all(data_directory.as_path())?;
         }
@@ -116,6 +117,23 @@ impl RibbleRunner<'_> {
         let version = if migration_version.compatible(serialized_version) {
             serialized_version
         } else {
+            // TODO: test this on macos.
+            #[cfg(target_os = "macos")]
+            {
+                // The old macOS release may have an incorrect App folder naming convention
+                // If the old folder exists (and is not properly named), it is also the case that
+                // the new folder will be empty and can be clobbered.
+
+                if let Some(parent) = data_directory.parent()
+                    && parent.is_dir()
+                {
+                    let test_dir = parent.join("Ribble");
+                    if test_dir.is_dir() {
+                        std::fs::rename(test_dir.as_path(), data_directory.as_path());
+                    }
+                }
+            }
+
             if let Err(e) = clear_old_ribble_state(data_directory.as_path()) {
                 log::warn!(
                     "Error with clearing old data file: {e}\nError source:{:#?}",

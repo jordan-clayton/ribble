@@ -140,6 +140,16 @@ pub(crate) enum OfflineTranscriberFeedback {
     Progressive,
 }
 
+// This is just for UI.
+impl OfflineTranscriberFeedback {
+    pub(crate) fn tooltip(&self) -> &str {
+        match self {
+            OfflineTranscriberFeedback::Minimal => "Disables live updates.",
+            OfflineTranscriberFeedback::Progressive => "Enables live updates at the cost of some performance."
+        }
+    }
+}
+
 pub(crate) struct LatestError {
     id: u64,
     category: RibbleErrorCategory,

@@ -4,10 +4,13 @@ use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::ui::panes::PaneView;
 use crate::ui::widgets::recording_modal::build_recording_modal;
 use crate::ui::widgets::toggle_switch::toggle;
-use crate::ui::{GRID_ROW_SPACING_COEFF, MODAL_HEIGHT_PROPORTION, PANE_INNER_MARGIN};
+use crate::ui::{
+    DEFAULT_TOAST_DURATION, GRID_ROW_SPACING_COEFF, MODAL_HEIGHT_PROPORTION, PANE_INNER_MARGIN,
+};
 use crate::utils::audio_gain::MAX_AUDIO_GAIN_DB;
 use crate::utils::realtime_settings::{AudioSampleLen, RealtimeTimeout, VadSampleLen};
 use crate::utils::vad_configs::{VadFrameSize, VadStrictness, VadType};
+use egui::Ui;
 use ribble_whisper::whisper::configs::Language;
 use ribble_whisper::whisper::model::{DefaultModelType, ModelId};
 use std::error::Error;
@@ -81,6 +84,19 @@ impl PaneView for TranscriberPane {
 
         let configs = *controller.read_transcription_configs();
         let vad_configs = *controller.read_vad_configs();
+
+        // The query to get the model list is lazy (happens closer to the UI paint),
+        // but this can cause issues if there is a model set.
+        let model_id = *configs.model_id();
+        // Check for both conditions to try and fill the list once
+
+        // If the model has not yet been set (or doesn't exist anymore),
+        // then the check for current_model will fail as expected,
+        // the user should make a new model selection.
+        if self.model_list.is_empty() && model_id.is_some() {
+            controller.try_read_model_list(&mut self.model_list);
+        }
+
         let current_model = (*configs.model_id())
             .and_then(|id| self.model_list.iter().find(|(k, _)| *k == id))
             .cloned();
@@ -136,7 +152,8 @@ impl PaneView for TranscriberPane {
             });
 
             let button_spacing = ui.spacing().button_padding.y;
-            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+            egui::ScrollArea::both()
+                .auto_shrink([false; 2]).show(ui, |ui| {
                 // FUNCTIONS
                 // REALTIME RUNNER BUTTONS
                 if self.realtime {
@@ -262,23 +279,25 @@ impl PaneView for TranscriberPane {
                         .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
                         .show(ui, |ui| {
                             let mut offline_feedback = controller.read_offline_transcriber_feedback();
-                            ui.label("Feedback mode:").on_hover_text("Set the feedback mode for file transcription.\n\
-                            Progressive: Enables live updates (degrades performance).\n\
-                            Minimal: Disables live updates.");
+                            ui.label("Feedback mode:").on_hover_text("Set the feedback mode for file transcription.");
 
                             // This is a "null" column to try and get the combobox spacing a little
                             // more "nice".
                             let size = ui.spacing().interact_size;
 
                             ui.allocate_space(size);
-                            egui::ComboBox::from_id_salt("feedback_mode_combobox")
-                                .selected_text(offline_feedback.as_ref()).show_ui(ui, |ui| {
-                                for feedback_mode in OfflineTranscriberFeedback::iter() {
-                                    if ui.selectable_value(&mut offline_feedback, feedback_mode, feedback_mode.as_ref()).clicked() {
-                                        controller.write_offline_transcriber_feedback(offline_feedback);
+
+                            ui.add_enabled_ui(!audio_worker_running, |ui| {
+                                egui::ComboBox::from_id_salt("feedback_mode_combobox")
+                                    .selected_text(offline_feedback.as_ref()).show_ui(ui, |ui| {
+                                    for feedback_mode in OfflineTranscriberFeedback::iter() {
+                                        if ui.selectable_value(&mut offline_feedback, feedback_mode, feedback_mode.as_ref())
+                                            .on_hover_text(feedback_mode.tooltip()).clicked() {
+                                            controller.write_offline_transcriber_feedback(offline_feedback);
+                                        }
                                     }
-                                }
-                            }).response.on_hover_cursor(egui::CursorIcon::Default);
+                                }).response.on_hover_cursor(egui::CursorIcon::Default);
+                            });
                             ui.end_row();
                         });
                 }
@@ -298,6 +317,8 @@ impl PaneView for TranscriberPane {
                             .show(ui, |ui| {
                                 // ROW: MODEL
                                 ui.label("Model:");
+                                // NOTE: do not use the horizontal layout hack to get the grid to paint fully here
+                                // Otherwise it will also affect the scrolling.
                                 ui.horizontal_wrapped(|ui| {
                                     controller.try_read_model_list(&mut self.model_list);
                                     // Get a clone of the model_id to modify
@@ -343,40 +364,45 @@ impl PaneView for TranscriberPane {
                                             };
                                         }
                                     });
-
-                                    // START NEXT ROW.
-                                    ui.add_space(ui.available_width());
                                 });
                                 ui.end_row();
 
-                                ui.label("Load Model:").on_hover_text("Load a downloaded model into Ribble.");
-                                if ui.button("Load").clicked() {
-                                    let file_dialog = rfd::FileDialog::new()
-                                        .add_filter("ggml-model", &["bin"])
-                                        .set_directory(controller.base_dir());
+                                ui.label("Load Model:").on_hover_text("Copy a downloaded model into Ribble.");
+                                // NOTE: this does not need to be in a horizontal; this is just a hack to get
+                                // the grid lines to paint to the edge of the pane.
 
-                                    // If there is path, it is a ".bin".
-                                    // At the moment, there's no integrity checking
-                                    // mechanisms
-                                    if let Some(path) = file_dialog.pick_file() {
-                                        // Try and set the Model ID if it's valid - the hash is expected to be stable.
+                                ui.horizontal(|ui| {
+                                    if ui.button("Load").clicked() {
+                                        let file_dialog = rfd::FileDialog::new()
+                                            .add_filter("ggml-model", &["bin"])
+                                            .set_directory(controller.base_dir());
 
-                                        // Since this is happening over a background thread,
-                                        // there isn't yet a great way to "await" this or get the file_name
-                                        // if the result is successful.
+                                        // If there is path, it is a ".bin".
+                                        // At the moment, there's no integrity checking
+                                        // mechanisms
+                                        if let Some(path) = file_dialog.pick_file() {
+                                            // Try and set the Model ID if it's valid - the hash is expected to be stable.
 
-                                        // Instead, expect it -will- be a successful operation,
-                                        // Get an identical hash - if it's valid, the id will align
-                                        // and be confirmed in the next repaint.
+                                            // Since this is happening over a background thread,
+                                            // there isn't yet a great way to "await" this or get the file_name
+                                            // if the result is successful.
 
-                                        // NOTE: implement a broadcast system.
-                                        if let Some(file_name) = path.as_path().file_name() {
-                                            let key = controller.get_model_key(&file_name.to_string_lossy());
-                                            controller.write_transcription_configs(configs.with_model_id(Some(key)))
+                                            // Instead, expect it -will- be a successful operation,
+                                            // Get an identical hash - if it's valid, the id will align
+                                            // and be confirmed in the next repaint.
+
+                                            // NOTE: implement a broadcast system.
+                                            if let Some(file_name) = path.as_path().file_name() {
+                                                let key = controller.get_model_key(&file_name.to_string_lossy());
+                                                controller.write_transcription_configs(configs.with_model_id(Some(key)))
+                                            }
+                                            controller.copy_new_model(path);
                                         }
-                                        controller.copy_new_model(path);
                                     }
-                                }
+
+                                    // GRID HACK.
+                                    ui.add_space(ui.available_width());
+                                });
                                 ui.end_row();
 
                                 ui.label("Download Model:").on_hover_text("Open the the downloads menu.");
@@ -388,7 +414,8 @@ impl PaneView for TranscriberPane {
 
                                 // ROW: OPEN MODEL FOLDER
                                 ui.label("Models Folder");
-                                if ui.button("Open").clicked() {
+                                if ui.button("Open")
+                                    .clicked() {
                                     let model_directory = controller.get_model_directory();
                                     // Try and open it in the default file explorer.
                                     // There's a debouncer in the model-bank that will
@@ -396,7 +423,8 @@ impl PaneView for TranscriberPane {
                                     if let Err(e) = opener::open(model_directory) {
                                         log::warn!("Failed to open model directory. Error: {}\n\
                                         Error source: {:#?}", &e, e.source());
-                                        let toast = egui_notify::Toast::error("Failed to open models directory");
+                                        let mut toast = egui_notify::Toast::error("Failed to open models directory");
+                                        toast.duration(Some(DEFAULT_TOAST_DURATION));
                                         controller.send_toast(toast);
                                     }
                                 }
@@ -409,22 +437,7 @@ impl PaneView for TranscriberPane {
 
                                 let slider = ui.add(egui::Slider::new(&mut n_threads, thread_range).integer());
                                 // TODO: factor this out into a function: it's highly duplicated and error-prone code
-                                let keyboard_input = ui.input(|i| i.keys_down.iter().any(|key| {
-                                    // NOTE: there is no "is_numeric() or similar in egui, afaik.
-                                    // To avoid unnecessary/excess caching (and allow the slider to work as intended),
-                                    // Check for a (numeric) key input on the slider, and write on a
-                                    // change -> enter isn't strictly necessary and writes are atomic anyway.
-                                    matches!(key, egui::Key::Num0 |
-                                        egui::Key::Num1 |
-                                        egui::Key::Num2 |
-                                        egui::Key::Num3 |
-                                        egui::Key::Num4 |
-                                        egui::Key::Num5 |
-                                        egui::Key::Num6 |
-                                        egui::Key::Num7 |
-                                        egui::Key::Num8 |
-                                        egui::Key::Num9)
-                                }));
+                                let keyboard_input = check_keyboard(ui);
 
                                 if slider.drag_stopped() || (slider.changed() && keyboard_input) {
                                     let new_configs = configs.with_n_threads(n_threads);
@@ -716,24 +729,11 @@ impl PaneView for TranscriberPane {
                             .show(ui, |ui| {
                                 let mut db = audio_gain_configs.db();
                                 let db_range = 0.0..=MAX_AUDIO_GAIN_DB;
-                                ui.label("Audio gain:").on_hover_text("TOOLTIP");
+                                ui.label("Audio gain:").on_hover_text("Apply audio gain to boost recording volume.\n\
+                                Recommended: ~6dB all-purpose, 20dB if using Silero VAD.");
                                 ui.horizontal(|ui| {
                                     let slider = ui.add(egui::Slider::new(&mut db, db_range));
-                                    // TODO: factor this out into a function
-                                    let keyboard_input = ui.input(|i| i.keys_down.iter().any(|key| {
-                                        matches!(key, egui::Key::Num0 |
-                                        egui::Key::Num1 |
-                                        egui::Key::Num2 |
-                                        egui::Key::Num3 |
-                                        egui::Key::Num4 |
-                                        egui::Key::Num5 |
-                                        egui::Key::Num6 |
-                                        egui::Key::Num7 |
-                                        egui::Key::Num8 |
-                                        egui::Key::Num9
-                                    )
-                                    }));
-
+                                    let keyboard_input = check_keyboard(ui);
                                     if slider.drag_stopped() || (slider.changed() && keyboard_input) {
                                         let new_configs = audio_gain_configs.with_decibels(db);
                                         controller.write_audio_gain_configs(new_configs);
@@ -744,7 +744,7 @@ impl PaneView for TranscriberPane {
                                 ui.end_row();
 
                                 ui.label("File gain:").on_hover_text("Apply gain to files before transcribing?\n\
-                                Audio will be normalized to the highest peak");
+                                Audio will be normalized to the highest peak.");
 
                                 let mut use_offline = audio_gain_configs.use_offline();
                                 if ui.add(egui::Checkbox::without_text(&mut use_offline)).clicked() {
@@ -764,20 +764,22 @@ impl PaneView for TranscriberPane {
             controller.try_read_recording_metadata(&mut self.recordings_buffer);
             // NOTE: this is a very cheap clone, so it should be fine to just cache and pass into the closure.
             let err_ctx = ui.ctx().clone();
-            let handle_recordings =
-                |file_name| match controller.try_get_recording_path(Arc::clone(&file_name)) {
-                    Some(path) => {
-                        controller.set_audio_file_path(path);
-                        self.realtime = false;
-                        self.recording_modal = false;
-                    }
-                    None => {
-                        log::warn!("Temporary recording file missing: {file_name}");
-                        let toast = egui_notify::Toast::warning("Failed to find saved recording.");
-                        controller.send_toast(toast);
-                        err_ctx.request_repaint();
-                    }
-                };
+            let handle_recordings = |file_name| match controller
+                .try_get_recording_path(Arc::clone(&file_name))
+            {
+                Some(path) => {
+                    controller.set_audio_file_path(path);
+                    self.realtime = false;
+                    self.recording_modal = false;
+                }
+                None => {
+                    log::warn!("Temporary recording file missing: {file_name}");
+                    let mut toast = egui_notify::Toast::warning("Failed to find saved recording.");
+                    toast.duration(Some(DEFAULT_TOAST_DURATION));
+                    controller.send_toast(toast);
+                    err_ctx.request_repaint();
+                }
+            };
 
             let modal = build_recording_modal(
                 ui,
@@ -901,4 +903,23 @@ impl PaneView for TranscriberPane {
     fn is_pane_closable(&self) -> bool {
         self.pane_id().is_closable()
     }
+}
+
+fn check_keyboard(ui: &mut Ui) -> bool {
+    ui.input(|i| i.keys_down.iter().any(|key| {
+        // NOTE: there is no "is_numeric() or similar in egui, afaik.
+        // To avoid unnecessary/excess caching (and allow the slider to work as intended),
+        // Check for a (numeric) key input on the slider, and write on a
+        // change -> enter isn't strictly necessary and writes are atomic anyway.
+        matches!(key, egui::Key::Num0 |
+                                        egui::Key::Num1 |
+                                        egui::Key::Num2 |
+                                        egui::Key::Num3 |
+                                        egui::Key::Num4 |
+                                        egui::Key::Num5 |
+                                        egui::Key::Num6 |
+                                        egui::Key::Num7 |
+                                        egui::Key::Num8 |
+                                        egui::Key::Num9)
+    }))
 }

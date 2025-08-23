@@ -3,7 +3,7 @@ use crate::controller::CompletedRecordingJobs;
 use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::ui::panes::PaneView;
 use crate::ui::widgets::recording_modal::build_recording_modal;
-use crate::ui::{GRID_ROW_SPACING_COEFF, PANE_INNER_MARGIN};
+use crate::ui::{DEFAULT_TOAST_DURATION, GRID_ROW_SPACING_COEFF, PANE_INNER_MARGIN};
 use crate::utils::recorder_configs::{
     RibbleChannels, RibbleExportFormat, RibblePeriod, RibbleSampleRate,
 };
@@ -58,7 +58,7 @@ impl PaneView for RecordingPane {
             .show(ui, |ui| {
                 ui.heading("Recording:");
                 let button_spacing = ui.spacing().button_padding.y;
-                egui::ScrollArea::vertical()
+                egui::ScrollArea::both()
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
                         ui.vertical_centered_justified(|ui| {
@@ -291,7 +291,8 @@ impl PaneView for RecordingPane {
                     .is_none()
                 {
                     log::warn!("Temporary recording file missing: {file_name}");
-                    let toast = egui_notify::Toast::warning("Failed to find saved recording.");
+                    let mut toast = egui_notify::Toast::warning("Failed to find saved recording.");
+                    toast.duration(Some(DEFAULT_TOAST_DURATION));
                     controller.send_toast(toast);
                     err_ctx.request_repaint();
                 }
