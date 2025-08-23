@@ -658,7 +658,7 @@ pub(crate) enum ModelFile {
 }
 
 impl ModelFile {
-    pub(crate) const PACKED_NAMES: [&'static str; 2] = ["ggml-tiny.q0.bin", "ggml-base.q0.bin"];
+    pub(crate) const PACKED_NAMES: [&'static str; 2] = ["ggml-tiny.q5_1.bin", "ggml-base.q5_1.bin"];
 }
 
 impl Display for ModelFile {

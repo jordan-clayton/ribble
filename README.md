@@ -33,6 +33,14 @@ may encounter memory errors.
 
 - Medium (non-quantized) works well in real-time if your hardware can support it.
 
+## Building
+
+If you want to use the packed quantized models, you will require git-lfs (TODO: link for git lfs)
+You will require to clone this repository recursively to pull in all submodules
+```git clone --recursive ...```
+Pulling changes will also require you to pull in changes to submodules and perform a git lfs pull
+(TODO: instruction snippets for how to update)
+
 Build with cargo with the following:
 ```cargo build --release```
 
