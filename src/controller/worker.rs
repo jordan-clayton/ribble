@@ -1,10 +1,15 @@
-use crate::controller::{Bus, ConsoleMessage, RibbleMessage, RibbleWork, WorkRequest};
+use crate::controller::{Bus, ConsoleMessage, RibbleMessage, RibbleWork, WorkRequest, kernel};
 use crate::utils::errors::RibbleError;
 use crossbeam::scope;
 use ribble_whisper::utils::{Receiver, Sender, get_channel};
 use std::error::Error;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::thread::JoinHandle;
+
+// TODO: add an atomic u8/usize to act like a semaphore and track the join handling
+// TODO: add an is_working() -> bool method to return true if the atomic counter is > 0
+// in case the UI needs to make repainting decisions based on the working status.
 
 struct WorkerInner {
     incoming_requests: Receiver<WorkRequest>,
@@ -14,6 +19,10 @@ struct WorkerInner {
     short_outgoing: Sender<RibbleWork>,
     long_incoming: Receiver<RibbleWork>,
     long_outgoing: Sender<RibbleWork>,
+    // These could be AtomicBool (only 1 joined at a time right now), but the strategy may change
+    // to leverage a counter.
+    short_busy: AtomicU8,
+    long_busy: AtomicU8,
 }
 impl WorkerInner {
     const MAX_SHORT_JOBS: usize = 16;
@@ -28,6 +37,8 @@ impl WorkerInner {
             short_outgoing,
             long_incoming,
             long_outgoing,
+            short_busy: Default::default(),
+            long_busy: Default::default(),
         }
     }
     fn handle_result(&self, message: Result<RibbleMessage, RibbleError>) {
@@ -76,7 +87,7 @@ impl WorkerInner {
 }
 
 pub(super) struct WorkerEngine {
-    _inner: Arc<WorkerInner>,
+    inner: Arc<WorkerInner>,
     work_thread: Option<JoinHandle<()>>,
 }
 
@@ -134,6 +145,16 @@ impl WorkerEngine {
                     while let Ok(work) = short_job_inner.short_incoming.recv() {
                         match work {
                             RibbleWork::Work(work) => {
+                                let old = short_job_inner.short_busy.fetch_add(1, Ordering::AcqRel);
+
+                                // This should never-ever happen because the queues are bounded,
+                                // but if it does, then there's an accumulator bug.
+                                if old == u8::MAX
+                                {
+                                    log::warn!("Short queue accumulator overflow.");
+                                    short_job_inner.short_busy.store(old, Ordering::Release);
+                                }
+
                                 match work.join() {
                                     Ok(res) => short_job_inner.handle_result(res),
                                     Err(err) => {
@@ -141,6 +162,14 @@ impl WorkerEngine {
                                         short_job_inner.handle_error(ribble_error);
                                     }
                                 };
+
+                                // Same as above: if this underflows, there's a bug in the
+                                // accumulator logic.
+                                let old = short_job_inner.short_busy.fetch_sub(1, Ordering::AcqRel);
+                                if old == 0 {
+                                    log::warn!("Short queue accumulator underflow.");
+                                    short_job_inner.short_busy.store(0, Ordering::Release);
+                                }
                             }
                             RibbleWork::Sentinel => break,
                         }
@@ -151,6 +180,15 @@ impl WorkerEngine {
                     while let Ok(work) = long_job_inner.long_incoming.recv() {
                         match work {
                             RibbleWork::Work(work) => {
+                                let old = long_job_inner.long_busy.fetch_add(1, Ordering::AcqRel);
+
+                                // This should never-ever happen because the queues are bounded,
+                                // but if it does, then there's an accumulator bug.
+                                if old == u8::MAX
+                                {
+                                    log::warn!("Short queue accumulator overflow.");
+                                    long_job_inner.long_busy.store(old, Ordering::Release);
+                                }
                                 match work.join() {
                                     Ok(res) => long_job_inner.handle_result(res),
                                     Err(err) => {
@@ -160,6 +198,15 @@ impl WorkerEngine {
                                     // not set, unwrapping here will panic the worker thread and information
                                     // should bubble up accordingly.
                                 };
+
+
+                                // Same as above: if this underflows, there's a bug in the
+                                // accumulator logic.
+                                let old = long_job_inner.long_busy.fetch_sub(1, Ordering::AcqRel);
+                                if old == 0 {
+                                    log::warn!("Short queue accumulator underflow.");
+                                    long_job_inner.long_busy.store(0, Ordering::Release);
+                                }
                             }
                             RibbleWork::Sentinel => break,
                         }
@@ -191,10 +238,19 @@ impl WorkerEngine {
             };
         }
 
-        Ok(Self {
-            _inner: inner,
-            work_thread,
-        })
+        Ok(Self { inner, work_thread })
+    }
+
+    pub(super) fn short_working(&self) -> bool {
+        self.inner.short_busy.load(Ordering::Acquire) > 0
+    }
+
+    pub(super) fn long_working(&self) -> bool {
+        self.inner.long_busy.load(Ordering::Acquire) > 0
+    }
+
+    pub(super) fn working(&self) -> bool {
+        self.short_working() || self.long_working()
     }
 }
 

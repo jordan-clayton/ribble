@@ -40,9 +40,7 @@ serde = { version = "1.0.209", features = ["derive"] }
 strum = "0.27.1"
 # TODO: determine whether to include integrity checking utilities; might be out of scope
 # Also This might need to pull whisper-rs from the main branch.
-# TODO TWICE: BRING THIS IN AS A SUBMODULE SO THAT CHANGES CAN BE QUICKER.
-# Need to make some tweaks to the deduping/word boundary resolution.
-ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.2.0", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler", "sdl2-static", "ribble-logging"] }
+ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.2.0", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler", "sdl2-static"] }
 log = "0.4.22"
 ron = "0.10.1"
 irox-egui-extras = { path = "external/irox/libraries/egui_extras" }
@@ -68,6 +66,8 @@ crash-handler = "0.6.3"
 [features]
 default = []
 cuda = ["ribble_whisper/cuda"]
+# It's a little difficult to trace application-level logging with all of the whisper logging included, so this will be opt-in.
+log-whisper = ["ribble_whisper/ribble-logging"]
 vulkan = ["ribble_whisper/vulkan"]
 # This implicitly pulls in metal as per ribble_whisper.
 coreml = ["ribble_whisper/coreml"]

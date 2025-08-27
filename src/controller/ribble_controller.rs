@@ -2,8 +2,8 @@ use crate::controller::audio_backend_proxy::AudioBackendProxy;
 use crate::controller::kernel::Kernel;
 use crate::controller::{
     AmortizedDownloadProgress, AmortizedProgress, AnalysisType, CompletedRecordingJobs,
-    ConsoleMessage, FileDownload, LatestError, ModelFile, OfflineTranscriberFeedback,
-    Progress, RotationDirection, NUM_VISUALIZER_BUCKETS,
+    ConsoleMessage, FileDownload, LatestError, ModelFile, NUM_VISUALIZER_BUCKETS,
+    OfflineTranscriberFeedback, Progress, RotationDirection,
 };
 use crate::utils::audio_gain::AudioGainConfigs;
 use crate::utils::errors::RibbleError;
@@ -57,6 +57,12 @@ impl RibbleController {
             toasts_sender,
             max_whisper_threads,
         })
+    }
+
+    // Treat this like a repaint hint. If any major work is happening in the background that will
+    // induce state changes, this will return true and the UI should be repainted.
+    pub(crate) fn should_repaint(&self) -> bool {
+        self.kernel.background_working()
     }
 
     pub(crate) fn stop_work(&self) {
@@ -305,7 +311,10 @@ impl RibbleController {
     pub(crate) fn add_placeholder_error(&self) {
         self.kernel.add_placeholder_error()
     }
-    pub(crate) fn try_read_console_message_buffer(&self, copy_buffer: &mut Vec<Arc<ConsoleMessage>>) {
+    pub(crate) fn try_read_console_message_buffer(
+        &self,
+        copy_buffer: &mut Vec<Arc<ConsoleMessage>>,
+    ) {
         self.kernel.try_read_console_message_buffer(copy_buffer);
     }
 

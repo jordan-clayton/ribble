@@ -6,8 +6,8 @@ use ribble_whisper::utils::{Receiver, Sender};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
@@ -145,7 +145,9 @@ impl OfflineTranscriberFeedback {
     pub(crate) fn tooltip(&self) -> &str {
         match self {
             OfflineTranscriberFeedback::Minimal => "Disables live updates.",
-            OfflineTranscriberFeedback::Progressive => "Enables live updates at the cost of some performance."
+            OfflineTranscriberFeedback::Progressive => {
+                "Enables live updates at the cost of some performance."
+            }
         }
     }
 }
@@ -396,9 +398,10 @@ impl From<(usize, usize)> for AmortizedDownloadProgress {
     fn from(value: (usize, usize)) -> Self {
         match value {
             (0, 0) => AmortizedDownloadProgress::NoJobs,
-            (current, total_size) if total_size < current => {
-                AmortizedDownloadProgress::Total { current: total_size, total_size }
-            }
+            (current, total_size) if total_size < current => AmortizedDownloadProgress::Total {
+                current: total_size,
+                total_size,
+            },
             (current, total_size) => AmortizedDownloadProgress::Total {
                 current,
                 total_size,
@@ -635,12 +638,18 @@ impl AnalysisType {
             (AnalysisType::AmplitudeEnvelope, RotationDirection::CounterClockwise) => {
                 AnalysisType::LogSpectrum
             }
-            (AnalysisType::Waveform, RotationDirection::Clockwise) => AnalysisType::PowerSpectralDensity,
+            (AnalysisType::Waveform, RotationDirection::Clockwise) => {
+                AnalysisType::PowerSpectralDensity
+            }
             (AnalysisType::Waveform, RotationDirection::CounterClockwise) => {
                 AnalysisType::AmplitudeEnvelope
             }
-            (AnalysisType::PowerSpectralDensity, RotationDirection::Clockwise) => AnalysisType::LogSpectrum,
-            (AnalysisType::PowerSpectralDensity, RotationDirection::CounterClockwise) => AnalysisType::Waveform,
+            (AnalysisType::PowerSpectralDensity, RotationDirection::Clockwise) => {
+                AnalysisType::LogSpectrum
+            }
+            (AnalysisType::PowerSpectralDensity, RotationDirection::CounterClockwise) => {
+                AnalysisType::Waveform
+            }
             (AnalysisType::LogSpectrum, RotationDirection::Clockwise) => {
                 AnalysisType::AmplitudeEnvelope
             }

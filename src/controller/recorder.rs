@@ -133,6 +133,7 @@ impl RecorderEngineState {
                         .visualizer_sample_sender
                         .try_send(next_visualizer_sample)
                     {
+                        // TODO: REMOVE THIS AFTER STRESS-TESTING LOW HARDWARE.
                         log::warn!(
                             "Cannot send new visualizer samples, channel closed or too small.\n\
                             Error: {}\n\

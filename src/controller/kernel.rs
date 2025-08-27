@@ -9,8 +9,8 @@ use crate::controller::worker::WorkerEngine;
 use crate::controller::writer::WriterEngine;
 use crate::controller::{
     AmortizedDownloadProgress, AmortizedProgress, Bus, CompletedRecordingJobs, ConsoleMessage,
-    LatestError, ModelFile, OfflineTranscriberFeedback, Progress,
-    RotationDirection, DEFAULT_PROGRESS_SLAB_CAPACITY, NUM_VISUALIZER_BUCKETS, SMALL_UTILITY_QUEUE_SIZE,
+    DEFAULT_PROGRESS_SLAB_CAPACITY, LatestError, ModelFile, NUM_VISUALIZER_BUCKETS,
+    OfflineTranscriberFeedback, Progress, RotationDirection, SMALL_UTILITY_QUEUE_SIZE,
     UTILITY_QUEUE_SIZE,
 };
 use crate::controller::{AnalysisType, FileDownload};
@@ -41,7 +41,7 @@ pub(super) struct Kernel {
     console_engine: ConsoleEngine,
     progress_engine: ProgressEngine,
     visualizer_engine: VisualizerEngine,
-    _worker_engine: WorkerEngine,
+    worker_engine: WorkerEngine,
     writer_engine: WriterEngine,
     download_engine: DownloadEngine,
     // Since model bank needs to be accessed elsewhere (e.g. TranscriberEngine), this needs to be
@@ -156,12 +156,20 @@ impl Kernel {
             console_engine,
             progress_engine,
             visualizer_engine,
-            _worker_engine: worker_engine,
+            worker_engine,
             writer_engine,
             download_engine,
             model_bank,
             bus,
         })
+    }
+
+    // This is mainly in service to the UI, which needs to know whether major (long) jobs are being
+    // run. This includes recording, transcribing, etc -> anything which would suggest state
+    // changes which merit refreshing UI.
+    pub(super) fn background_working(&self) -> bool {
+        // Ignore short jobs, just consider the long queue.
+        self.worker_engine.long_working()
     }
 
     // If the app is being closed and there are background loops running, the program can deadlock.
@@ -256,7 +264,8 @@ impl Kernel {
         self.transcriber_engine.read_audio_gain_configs()
     }
     pub(super) fn write_audio_gain_configs(&self, new_settings: AudioGainConfigs) {
-        self.transcriber_engine.write_audio_gain_configs(new_settings);
+        self.transcriber_engine
+            .write_audio_gain_configs(new_settings);
     }
     pub(super) fn realtime_running(&self) -> bool {
         self.transcriber_engine.realtime_running()

@@ -163,6 +163,36 @@ impl Ribble {
         Ok(shared_capture)
     }
 
+    fn audio_device_cleanup_pass(&mut self) {
+        // This guard clause is probably unnecessary
+        if self.current_devices.is_empty() {
+            return;
+        }
+
+        // This may get removed, but if a strong count is > 2 for more than 2 devices, this
+        // indicates a threading error that needs to be fixed.
+
+        let mut num_mics_in_use = 0usize;
+        let mut to_remove: Vec<usize> = Vec::with_capacity(2);
+
+        for (id, device) in self.current_devices.iter() {
+            if Arc::strong_count(device) > 1 {
+                num_mics_in_use += 1;
+            } else {
+                to_remove.push(id);
+            }
+        }
+
+        assert!(
+            num_mics_in_use < 2,
+            "More than one audio device remains open. Num threads with mic: {num_mics_in_use}"
+        );
+
+        for id in to_remove {
+            self.try_close_audio_device(id);
+        }
+    }
+
     // Until it's absolutely certain that this implementation works as intended,
     // this function is going to panic to ensure the device is always cleaned up on the main
     // thread.
@@ -188,6 +218,8 @@ impl Ribble {
             device.is_some(),
             "Strong count > 1 when trying to close audio device. Count: {_strong_count}"
         );
+
+        device.unwrap().pause()
         // The device will automatically be dropped by the end of this function.
     }
 
@@ -632,7 +664,6 @@ impl eframe::App for Ribble {
                                 interact_size.y,
                             );
 
-                            // NOTE: THIS IS NOT CORRECT YET.
                             match self.cached_progress {
                                 AmortizedProgress::NoJobs => {
                                     ui.horizontal(|ui| {
@@ -753,7 +784,7 @@ impl eframe::App for Ribble {
         // If there's any sort of "work" being done (transcribing, recording)
         // then request a repaint -> the downloads/progress will already request repaints if they
         // are showing work.
-        if self.controller.recorder_running() || self.controller.transcriber_running() {
+        if self.controller.should_repaint() {
             ctx.request_repaint();
         }
     }
@@ -761,6 +792,15 @@ impl eframe::App for Ribble {
     // This will automatically save egui memory (window position, etc.) upon opening the storage file
     // Instead of one gigantic point of failure, Ribble stores its state across multiple files in the data directory.
     fn save(&mut self, _storage: &mut dyn Storage) {
+        // This is not strictly saving and is just to save on excess background threading
+        // In-case there is some sort of thread-panic and one of the microphone feeds hasn't been
+        // returned, this quick pass is done to drop old devices.
+        //
+        // Since devices -must- be dropped on the main thread, this has to be done here, but the
+        // loop should always be bounded to n<=2. It will panic if there are n > 2 mics because
+        // this indicates a threading bug I haven't solved.
+        self.audio_device_cleanup_pass();
+
         self.serialize_app_state();
     }
 
