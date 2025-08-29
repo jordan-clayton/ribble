@@ -145,7 +145,7 @@ impl PaneView for TranscriberPane {
                         let tooltip = if self.realtime { "Switch to file transcription." } else { "Switch to real-time transcription." };
 
                         ui.allocate_ui_with_layout(desired_size, layout, |ui| {
-                            ui.add_enabled(!audio_worker_running, toggle(&mut self.realtime))
+                            ui.add_enabled(!transcription_running, toggle(&mut self.realtime))
                                 .on_hover_cursor(egui::CursorIcon::Default)
                                 .on_hover_text(tooltip);
                             ui.label("Realtime mode: ");
@@ -333,7 +333,7 @@ impl PaneView for TranscriberPane {
 
                             ui.allocate_space(size);
 
-                            ui.add_enabled_ui(!audio_worker_running, |ui| {
+                            ui.add_enabled_ui(!transcription_running, |ui| {
                                 egui::ComboBox::from_id_salt("feedback_mode_combobox")
                                     .selected_text(offline_feedback.as_ref()).show_ui(ui, |ui| {
                                     for feedback_mode in OfflineTranscriberFeedback::iter() {
@@ -355,7 +355,7 @@ impl PaneView for TranscriberPane {
                 ui.heading("Configs:");
                 // Disable the configs interaction if the main runner is running
                 let transcription_configs_dropdown = ui.collapsing("Transcription Configs", |ui| {
-                    ui.add_enabled_ui(!audio_worker_running, |ui| {
+                    ui.add_enabled_ui(!transcription_running, |ui| {
                         egui::Grid::new("transcription_configs_grid")
                             .num_columns(2)
                             .striped(true)
@@ -721,7 +721,7 @@ impl PaneView for TranscriberPane {
                 ui.separator();
 
                 let vd_configs = ui.collapsing("Voice Activity Detector Configs", |ui| {
-                    ui.add_enabled_ui(!audio_worker_running, |ui| {
+                    ui.add_enabled_ui(!transcription_running, |ui| {
                         egui::Grid::new("vad_configs_grid").striped(true)
                             .num_columns(2)
                             .striped(true)
@@ -817,7 +817,7 @@ impl PaneView for TranscriberPane {
                 let audio_gain_configs = ui.collapsing("Audio gain", |ui| {
                     let audio_gain_configs = *controller.read_audio_gain_configs();
 
-                    ui.add_enabled_ui(!audio_worker_running, |ui| {
+                    ui.add_enabled_ui(!transcription_running, |ui| {
                         egui::Grid::new("audio_gain_configs_grid").striped(true).num_columns(2)
                             .show(ui, |ui| {
                                 let mut db = audio_gain_configs.db();

@@ -1,7 +1,7 @@
-use crate::controller::CompletedRecordingJobs;
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::panes::PaneView;
+use crate::controller::CompletedRecordingJobs;
 use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
 use crate::ui::widgets::recording_modal::build_recording_modal;
 use crate::ui::{DEFAULT_TOAST_DURATION, GRID_ROW_SPACING_COEFF, PANE_INNER_MARGIN};
 use crate::utils::recorder_configs::{
@@ -79,7 +79,6 @@ impl PaneView for RecordingPane {
                     {
                         controller.stop_recording();
                     }
-
                 });
 
                 ui.add_space(button_spacing);
@@ -108,104 +107,106 @@ impl PaneView for RecordingPane {
                         ui.heading("Configs:");
                         ui.vertical_centered_justified(|ui| {
                             let configs_dropdown = ui.collapsing("Recording Configs", |ui| {
-                                egui::Grid::new("recording_configs_grid")
-                                    .num_columns(2)
-                                    .striped(true)
-                                    .min_row_height(
-                                        ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF,
-                                    )
-                                    .show(ui, |ui| {
-                                        ui.label("Sample Rate:");
-                                        let mut sample_rate = configs.sample_rate();
-                                        ui.horizontal(|ui| {
-                                            egui::ComboBox::from_id_salt("sample_rate_combobox")
-                                                .selected_text(sample_rate.as_ref())
+                                ui.add_enabled_ui(!recorder_running, |ui| {
+                                    egui::Grid::new("recording_configs_grid")
+                                        .num_columns(2)
+                                        .striped(true)
+                                        .min_row_height(
+                                            ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF,
+                                        )
+                                        .show(ui, |ui| {
+                                            ui.label("Sample Rate:");
+                                            let mut sample_rate = configs.sample_rate();
+                                            ui.horizontal(|ui| {
+                                                egui::ComboBox::from_id_salt("sample_rate_combobox")
+                                                    .selected_text(sample_rate.as_ref())
+                                                    .show_ui(ui, |ui| {
+                                                        for rate in RibbleSampleRate::iter() {
+                                                            if ui
+                                                                .selectable_value(
+                                                                    &mut sample_rate,
+                                                                    rate,
+                                                                    rate.as_ref(),
+                                                                )
+                                                                .clicked()
+                                                            {
+                                                                let new_configs = configs
+                                                                    .with_sample_rate(sample_rate);
+                                                                controller.write_recorder_configs(
+                                                                    new_configs,
+                                                                );
+                                                            }
+                                                        }
+                                                    })
+                                                    .response
+                                                    .on_hover_cursor(egui::CursorIcon::Default);
+
+                                                ui.add_space(ui.available_width());
+                                            });
+
+                                            ui.end_row();
+
+                                            ui.label("Channels:");
+                                            let mut channels = configs.num_channels();
+                                            egui::ComboBox::from_id_salt("ribble_channels_combobox")
+                                                .selected_text(channels.as_ref())
                                                 .show_ui(ui, |ui| {
-                                                    for rate in RibbleSampleRate::iter() {
+                                                    for ch_conf in RibbleChannels::iter() {
                                                         if ui
                                                             .selectable_value(
-                                                                &mut sample_rate,
-                                                                rate,
-                                                                rate.as_ref(),
+                                                                &mut channels,
+                                                                ch_conf,
+                                                                ch_conf.as_ref(),
                                                             )
                                                             .clicked()
                                                         {
-                                                            let new_configs = configs
-                                                                .with_sample_rate(sample_rate);
-                                                            controller.write_recorder_configs(
-                                                                new_configs,
-                                                            );
+                                                            let new_configs =
+                                                                configs.with_num_channels(channels);
+                                                            controller
+                                                                .write_recorder_configs(new_configs);
+                                                        }
+                                                    }
+                                                })
+                                                .response
+                                                .on_hover_cursor(egui::CursorIcon::Default);
+                                            ui.end_row();
+
+                                            ui.label("Buffer size:");
+                                            let mut period = configs.period();
+                                            egui::ComboBox::from_id_salt("buffer_size_combobox")
+                                                .selected_text(period.as_ref())
+                                                .show_ui(ui, |ui| {
+                                                    for period_conf in RibblePeriod::iter() {
+                                                        if ui
+                                                            .selectable_value(
+                                                                &mut period,
+                                                                period_conf,
+                                                                period_conf.as_ref(),
+                                                            )
+                                                            .clicked()
+                                                        {
+                                                            let new_configs =
+                                                                configs.with_period(period);
+                                                            controller
+                                                                .write_recorder_configs(new_configs);
                                                         }
                                                     }
                                                 })
                                                 .response
                                                 .on_hover_cursor(egui::CursorIcon::Default);
 
-                                            ui.add_space(ui.available_width());
+                                            ui.end_row();
+
+                                            ui.label("Reset settings:");
+                                            if ui
+                                                .button("Reset")
+                                                .on_hover_cursor(egui::CursorIcon::Default)
+                                                .clicked()
+                                            {
+                                                controller.write_recorder_configs(Default::default());
+                                            }
                                         });
-
-                                        ui.end_row();
-
-                                        ui.label("Channels:");
-                                        let mut channels = configs.num_channels();
-                                        egui::ComboBox::from_id_salt("ribble_channels_combobox")
-                                            .selected_text(channels.as_ref())
-                                            .show_ui(ui, |ui| {
-                                                for ch_conf in RibbleChannels::iter() {
-                                                    if ui
-                                                        .selectable_value(
-                                                            &mut channels,
-                                                            ch_conf,
-                                                            ch_conf.as_ref(),
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        let new_configs =
-                                                            configs.with_num_channels(channels);
-                                                        controller
-                                                            .write_recorder_configs(new_configs);
-                                                    }
-                                                }
-                                            })
-                                            .response
-                                            .on_hover_cursor(egui::CursorIcon::Default);
-                                        ui.end_row();
-
-                                        ui.label("Buffer size:");
-                                        let mut period = configs.period();
-                                        egui::ComboBox::from_id_salt("buffer_size_combobox")
-                                            .selected_text(period.as_ref())
-                                            .show_ui(ui, |ui| {
-                                                for period_conf in RibblePeriod::iter() {
-                                                    if ui
-                                                        .selectable_value(
-                                                            &mut period,
-                                                            period_conf,
-                                                            period_conf.as_ref(),
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        let new_configs =
-                                                            configs.with_period(period);
-                                                        controller
-                                                            .write_recorder_configs(new_configs);
-                                                    }
-                                                }
-                                            })
-                                            .response
-                                            .on_hover_cursor(egui::CursorIcon::Default);
-
-                                        ui.end_row();
-
-                                        ui.label("Reset settings:");
-                                        if ui
-                                            .button("Reset")
-                                            .on_hover_cursor(egui::CursorIcon::Default)
-                                            .clicked()
-                                        {
-                                            controller.write_recorder_configs(Default::default());
-                                        }
-                                    });
+                                });
                             });
                             configs_dropdown
                                 .header_response
