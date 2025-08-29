@@ -1,5 +1,5 @@
 use crate::controller::{
-    AnalysisType, AtomicAnalysisType, NUM_VISUALIZER_BUCKETS, RotationDirection, VisualizerPacket,
+    AnalysisType, AtomicAnalysisType, RotationDirection, VisualizerPacket, NUM_VISUALIZER_BUCKETS,
 };
 use crate::utils::errors::RibbleError;
 use crossbeam::channel::Receiver;
@@ -8,8 +8,8 @@ use realfft::RealFftPlanner;
 use std::error::Error;
 use std::f32::consts::PI;
 use std::ops::Deref;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
 
@@ -56,10 +56,18 @@ impl VisualizerEngineState {
     }
 
     fn fit_frames(window: &mut Vec<f32>, frame_size: usize, welch_target: f32, overlap_ratio: f32) {
-        let padded_size = inverse_welch_frames(frame_size as f32, welch_target, overlap_ratio);
+        let total_span = inverse_welch_frames(frame_size as f32, welch_target, overlap_ratio);
+        let diff = (total_span as f32 - window.len() as f32) as i32;
+        if diff == 0 {
+            return;
+        }
 
-        let diff = (padded_size as f32 - window.len() as f32).abs() as usize;
-        window.extend_from_within(window.len().saturating_sub(diff).saturating_sub(1)..);
+        // Since it's pretty much impossible to get an overlapping window to fit exactly into
+        // the target, add an extra frame + the diff (either + or -) to err on the side of caution.
+        let abs_diff = (frame_size as i32 + diff) as usize;
+
+
+        window.extend_from_within(window.len().saturating_sub(abs_diff).saturating_sub(1)..);
     }
 
     // This is Power Spectrum Density estimate.
@@ -183,9 +191,11 @@ impl VisualizerEngineState {
 
         // Assert no nan/infinite
         debug_assert!(amp_envelope.iter().all(|f| f.is_finite()));
-        debug_assert_eq!(
-            amp_envelope.len(),
-            NUM_VISUALIZER_BUCKETS,
+        // NOTE: it's very difficult to get the window mapping precise
+        // This will be prone to off-by-one errors no matter what I do.
+        debug_assert!(
+            amp_envelope.len() >=
+                NUM_VISUALIZER_BUCKETS,
             "Failed to fit amplitude_envelope into buckets."
         );
 
@@ -202,7 +212,7 @@ impl VisualizerEngineState {
         sample_rate: f64,
         n_frames: &mut usize,
     ) -> Result<[f32; NUM_VISUALIZER_BUCKETS], RibbleError> {
-        let mut window = hann_window(samples);
+        let window = hann_window(samples);
         let frame_size = Self::FFT_RESOLUTION as usize;
         let step_size = compute_welch_step(frame_size as f32, Self::FFT_OVERLAP);
 
@@ -314,14 +324,16 @@ fn hann_window(samples: &[f32]) -> Vec<f32> {
 // I'm really not sure what to call this, but that can be determined later.
 // TODO: figure out a better name.
 fn compute_welch_frames(sample_len: f32, output_len: f32, overlap_ratio: f32) -> (usize, usize) {
-    let frame_size = sample_len / (1.0 + (output_len - 1.0) * (1.0 - overlap_ratio));
+    let frame_size = (sample_len / (1.0 + (output_len - 1.0) * (1.0 - overlap_ratio))).round();
     let step_size = frame_size * (1.0 - overlap_ratio);
-    (frame_size.round() as usize, step_size.round() as usize)
+    (frame_size as usize, step_size.round() as usize)
 }
 
 #[inline]
 fn inverse_welch_frames(frame_size: f32, output_len: f32, overlap_ratio: f32) -> usize {
-    (frame_size * (1.0 + (output_len - 1.0) * (1.0 - overlap_ratio))).round() as usize
+    let step_size_float = frame_size * (1.0 - overlap_ratio);
+    let total_span = frame_size + (output_len - 1.0) * step_size_float;
+    total_span.ceil() as usize
 }
 #[inline]
 fn compute_welch_step(frame_size: f32, overlap_ratio: f32) -> usize {

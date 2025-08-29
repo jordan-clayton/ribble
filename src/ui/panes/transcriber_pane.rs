@@ -1,7 +1,7 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{CompletedRecordingJobs, ModelFile, OfflineTranscriberFeedback};
-use crate::ui::panes::PaneView;
 use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::ui::panes::PaneView;
 use crate::ui::widgets::recording_modal::build_recording_modal;
 use crate::ui::widgets::toggle_switch::toggle;
 use crate::ui::{
@@ -154,7 +154,7 @@ impl PaneView for TranscriberPane {
                 });
             });
 
-            
+
             let button_spacing = ui.spacing().button_padding.y;
 
             // Since the top UI works better with the sticky, these can no longer can be scoped to
@@ -164,7 +164,7 @@ impl PaneView for TranscriberPane {
             let current_audio_path = controller.read_current_audio_file_path();
 
             let current_file = current_audio_path.as_deref().and_then(|path| path.file_name());
-            
+
             // RUNNER FUNCTIONS:
             // REALTIME STICKY RUNNER BUTTONS
             // to true.
@@ -173,7 +173,7 @@ impl PaneView for TranscriberPane {
                 ui.vertical_centered_justified(|ui| {
                     if ui
                         .add_enabled(can_run_transcription, egui::Button::new("Start"))
-                            .on_hover_cursor(egui::CursorIcon::Default)
+                        .on_hover_cursor(egui::CursorIcon::Default)
                         .clicked()
                     {
                         controller.start_realtime_transcription();
@@ -182,25 +182,25 @@ impl PaneView for TranscriberPane {
                     let stop_hover_text = "Immediately stop real-time transcription.";
                     if ui
                         .add_enabled(transcription_running, egui::Button::new("Stop"))
-                            .on_hover_cursor(egui::CursorIcon::Default)
-                            .on_hover_text(stop_hover_text)
-                            .on_disabled_hover_text(stop_hover_text)
+                        .on_hover_cursor(egui::CursorIcon::Default)
+                        .on_hover_text(stop_hover_text)
+                        .on_disabled_hover_text(stop_hover_text)
                         .clicked()
                     {
                         controller.stop_transcription();
                     }
 
-                    let slow_stop_hover_text ="Stop streaming audio and transcribe any remaining samples.\n\
+                    let slow_stop_hover_text = "Stop streaming audio and transcribe any remaining samples.\n\
                                 May result in better accuracy on older/lower-end hardware.";
 
                     if ui
                         .add_enabled(transcription_running && !controller.slow_stopping(),
-                            egui::Button::new("Slow Stop"))
-                            .on_hover_cursor(egui::CursorIcon::Default)
-                            .on_hover_text(slow_stop_hover_text)
-                            .on_disabled_hover_text(slow_stop_hover_text)
-                            .clicked(){
-                                controller.slow_stop();
+                                     egui::Button::new("Slow Stop"))
+                        .on_hover_cursor(egui::CursorIcon::Default)
+                        .on_hover_text(slow_stop_hover_text)
+                        .on_disabled_hover_text(slow_stop_hover_text)
+                        .clicked() {
+                        controller.slow_stop();
                     }
                 });
             } else {
@@ -211,18 +211,18 @@ impl PaneView for TranscriberPane {
                     let has_file = current_file.is_some();
 
                     if ui.add_enabled(can_run_transcription && has_file, egui::Button::new("Start"))
-                            .on_hover_cursor(egui::CursorIcon::Default)
+                        .on_hover_cursor(egui::CursorIcon::Default)
                         .clicked() {
                         controller.start_offline_transcription();
                     }
 
-                    let stop_hover_text ="Immediately stop file transcription.";
+                    let stop_hover_text = "Immediately stop file transcription.";
 
                     if ui
                         .add_enabled(transcription_running, egui::Button::new("Stop"))
-                            .on_hover_text(stop_hover_text)
-                            .on_disabled_hover_text(stop_hover_text)
-                            .on_hover_cursor(egui::CursorIcon::Default)
+                        .on_hover_text(stop_hover_text)
+                        .on_disabled_hover_text(stop_hover_text)
+                        .on_hover_cursor(egui::CursorIcon::Default)
                         .clicked()
                     {
                         controller.stop_transcription();
@@ -236,18 +236,17 @@ impl PaneView for TranscriberPane {
             egui::ScrollArea::both()
                 .auto_shrink([false; 2]).show(ui, |ui| {
                 // REALTIME NON STICKY RUNNER BUTTONS
-                if self.realtime{
+                if self.realtime {
                     ui.heading("Cleanup:");
 
-                    ui.vertical_centered_justified(|ui|{
-
+                    ui.vertical_centered_justified(|ui| {
                         if ui
                             .add_enabled(
                                 latest_recording_exists && can_run_transcription,
                                 egui::Button::new("Re-transcribe Last Recording"),
                             )
-                                .on_hover_cursor(egui::CursorIcon::Default)
-                                .on_hover_text("Offline transcribe latest cached recording.\n\
+                            .on_hover_cursor(egui::CursorIcon::Default)
+                            .on_hover_text("Offline transcribe latest cached recording.\n\
                     Generally more accurate due to full audio context.")
                             .clicked()
                         {
@@ -257,96 +256,96 @@ impl PaneView for TranscriberPane {
                         }
                     });
                 } else {
-                // OFFLINE NON_STICKY RUNNER BUTTONS
-                // AUDIO FILE: LOAD FILE, LOAD RECORDING, CLEAR
-                ui.heading("Audio File:");
-                let audio_file_label_text = match current_file {
-                    None => "None".to_string(),
-                    Some(file) => {
-                        file.to_string_lossy().to_string()
-                    }
-                };
-                ui.vertical_centered_justified(|ui| {
-                    // AUDIO FILE
-                    egui::Grid::new("audio_file")
+                    // OFFLINE NON_STICKY RUNNER BUTTONS
+                    // AUDIO FILE: LOAD FILE, LOAD RECORDING, CLEAR
+                    ui.heading("Audio File:");
+                    let audio_file_label_text = match current_file {
+                        None => "None".to_string(),
+                        Some(file) => {
+                            file.to_string_lossy().to_string()
+                        }
+                    };
+                    ui.vertical_centered_justified(|ui| {
+                        // AUDIO FILE
+                        egui::Grid::new("audio_file")
+                            .num_columns(3)
+                            .striped(true)
+                            .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
+                            .show(ui, |ui| {
+                                ui.label("Current audio file:");
+                                // This will wrap--that's probably fine.
+                                ui.label(audio_file_label_text);
+                                // THIS COULD BE AN "X" instead of clear.
+                                let desired_size = egui::Vec2::new(ui.available_width(), ui.spacing().interact_size.y);
+                                let layout = egui::Layout::right_to_left(egui::Align::Center);
+                                ui.allocate_ui_with_layout(desired_size, layout, |ui| {
+                                    if ui.button("Clear")
+                                        .on_hover_cursor(egui::CursorIcon::Default)
+                                        .clicked() {
+                                        controller.clear_audio_file_path();
+                                    }
+                                });
+                            });
+
+                        ui.add_space(button_spacing);
+                        if ui.add_enabled(!transcription_running, egui::Button::new("Open file"))
+                            .on_hover_cursor(egui::CursorIcon::Default)
+                            .clicked() {
+                            let file_dialog = rfd::FileDialog::new()
+                                .add_filter("all supported",
+                                            &["wav", "mpa", "mp2", "mp3", "mp4", "m4v", "ogg", "mkv", "aif", "aiff", "aifc", "caf", "alac", "flac"])
+                                .add_filter("wav", &["wav"])
+                                .add_filter("mpeg", &["mpa", "mp2", "mp3", "mp4", "m4v"])
+                                .add_filter("aiff", &["aif", "aiff", "aifc"])
+                                .add_filter("caf", &["caf"])
+                                .add_filter("mkv", &["mkv"])
+                                .add_filter("alac", &["alac"])
+                                .add_filter("flac", &["flac"])
+                                .set_directory(controller.base_dir());
+
+                            if let Some(path) = file_dialog.pick_file() {
+                                controller.set_audio_file_path(path);
+                            }
+                        }
+                        ui.add_space(button_spacing);
+                        if ui.add_enabled(!transcription_running && latest_recording_exists, egui::Button::new("Load recording"))
+                            .on_hover_cursor(egui::CursorIcon::Default)
+                            .clicked() {
+                            self.recording_modal = true;
+                        }
+                    });
+                    ui.add_space(button_spacing);
+                    ui.separator();
+
+                    ui.heading("Feedback Mode");
+                    // FEEDBACK MODE -> possibly hide this, but it seems important to have accessible.
+                    egui::Grid::new("offline_feedback")
                         .num_columns(3)
                         .striped(true)
                         .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
                         .show(ui, |ui| {
-                            ui.label("Current audio file:");
-                            // This will wrap--that's probably fine.
-                            ui.label(audio_file_label_text);
-                            // THIS COULD BE AN "X" instead of clear.
-                            let desired_size = egui::Vec2::new(ui.available_width(), ui.spacing().interact_size.y);
-                            let layout = egui::Layout::right_to_left(egui::Align::Center);
-                            ui.allocate_ui_with_layout(desired_size, layout, |ui| {
-                                if ui.button("Clear")
-                                    .on_hover_cursor(egui::CursorIcon::Default)
-                                    .clicked() {
-                                    controller.clear_audio_file_path();
-                                }
-                            });
-                        });
+                            let mut offline_feedback = controller.read_offline_transcriber_feedback();
+                            ui.label("Feedback mode:").on_hover_text("Set the feedback mode for file transcription.");
 
-                    ui.add_space(button_spacing);
-                    if ui.add_enabled(!transcription_running, egui::Button::new("Open file"))
-                        .on_hover_cursor(egui::CursorIcon::Default)
-                        .clicked() {
-                        let file_dialog = rfd::FileDialog::new()
-                            .add_filter("all supported",
-                                        &["wav", "mpa", "mp2", "mp3", "mp4", "m4v", "ogg", "mkv", "aif", "aiff", "aifc", "caf", "alac", "flac"])
-                            .add_filter("wav", &["wav"])
-                            .add_filter("mpeg", &["mpa", "mp2", "mp3", "mp4", "m4v"])
-                            .add_filter("aiff", &["aif", "aiff", "aifc"])
-                            .add_filter("caf", &["caf"])
-                            .add_filter("mkv", &["mkv"])
-                            .add_filter("alac", &["alac"])
-                            .add_filter("flac", &["flac"])
-                            .set_directory(controller.base_dir());
+                            // This is a "null" column to try and get the combobox spacing a little
+                            // more "nice".
+                            let size = ui.spacing().interact_size;
 
-                        if let Some(path) = file_dialog.pick_file() {
-                            controller.set_audio_file_path(path);
-                        }
-                    }
-                    ui.add_space(button_spacing);
-                    if ui.add_enabled(!transcription_running && latest_recording_exists, egui::Button::new("Load recording"))
-                        .on_hover_cursor(egui::CursorIcon::Default)
-                        .clicked() {
-                        self.recording_modal = true;
-                    }
-                });
-                ui.add_space(button_spacing);
-                ui.separator();
+                            ui.allocate_space(size);
 
-                ui.heading("Feedback Mode");
-                // FEEDBACK MODE -> possibly hide this, but it seems important to have accessible.
-                egui::Grid::new("offline_feedback")
-                    .num_columns(3)
-                    .striped(true)
-                    .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
-                    .show(ui, |ui| {
-                        let mut offline_feedback = controller.read_offline_transcriber_feedback();
-                        ui.label("Feedback mode:").on_hover_text("Set the feedback mode for file transcription.");
-
-                        // This is a "null" column to try and get the combobox spacing a little
-                        // more "nice".
-                        let size = ui.spacing().interact_size;
-
-                        ui.allocate_space(size);
-
-                        ui.add_enabled_ui(!audio_worker_running, |ui| {
-                            egui::ComboBox::from_id_salt("feedback_mode_combobox")
-                                .selected_text(offline_feedback.as_ref()).show_ui(ui, |ui| {
-                                for feedback_mode in OfflineTranscriberFeedback::iter() {
-                                    if ui.selectable_value(&mut offline_feedback, feedback_mode, feedback_mode.as_ref())
-                                        .on_hover_text(feedback_mode.tooltip()).clicked() {
-                                        controller.write_offline_transcriber_feedback(offline_feedback);
+                            ui.add_enabled_ui(!audio_worker_running, |ui| {
+                                egui::ComboBox::from_id_salt("feedback_mode_combobox")
+                                    .selected_text(offline_feedback.as_ref()).show_ui(ui, |ui| {
+                                    for feedback_mode in OfflineTranscriberFeedback::iter() {
+                                        if ui.selectable_value(&mut offline_feedback, feedback_mode, feedback_mode.as_ref())
+                                            .on_hover_text(feedback_mode.tooltip()).clicked() {
+                                            controller.write_offline_transcriber_feedback(offline_feedback);
+                                        }
                                     }
-                                }
-                            }).response.on_hover_cursor(egui::CursorIcon::Default);
+                                }).response.on_hover_cursor(egui::CursorIcon::Default);
+                            });
+                            ui.end_row();
                         });
-                        ui.end_row();
-                    });
                 }
                 ui.add_space(button_spacing);
                 ui.separator();
@@ -566,12 +565,12 @@ impl PaneView for TranscriberPane {
                                 // ROW: USE CONTEXT - (is no-context in ribble-whisper)
                                 // (no-context = true => use context = false)
                                 ui.label("Use context:").on_hover_text("Retain context between decode passes.\n\
-                                    Tends to improve accuracy but may introduce hallucinations.\n
-                                    This feature is iignored in real-time.");
+                                    Tends to improve accuracy but may introduce hallucinations.\n\
+                                    This feature is ignored in real-time.");
                                 let mut use_context = !configs.using_no_context();
                                 if ui.add(egui::Checkbox::without_text(&mut use_context))
                                     .on_hover_cursor(egui::CursorIcon::Default)
-                                    .clicked(){
+                                    .clicked() {
                                     let new_configs = configs.with_use_no_context(!use_context);
                                     controller.write_transcription_configs(new_configs);
                                 }
@@ -643,17 +642,17 @@ impl PaneView for TranscriberPane {
                                     let mut buffering_strategy: RibbleBufferingStrategy = configs.realtime_buffering_strategy().into();
                                     ui.label("Buffering Strategy:").on_hover_text("Sets the buffering strategy for real-time transcription.\n\
                                                                         May improve accuracy, reduces performance costs, but increases latency.\n\
-                                                                        Buffering is recommended for older/lower-end hardware.\n\
-                                                                        Set to continuous to disable buffering.");
+                                                                        Buffering is recommended for older/lower-end hardware.");
                                     egui::ComboBox::from_id_salt("realtime_buffering_strategy")
                                         .selected_text(buffering_strategy.as_ref())
-                                        .show_ui(ui, |ui|{
+                                        .show_ui(ui, |ui| {
                                             for strategy in RibbleBufferingStrategy::iter() {
                                                 if ui.selectable_value(&mut buffering_strategy, strategy, strategy.as_ref())
-                                                    .clicked(){
-                                                        let new_strategy: RealtimeBufferingStrategy = buffering_strategy.into();
-                                                        let new_configs = configs.with_buffering_strategy(new_strategy);
-                                                        controller.write_transcription_configs(new_configs);
+                                                    .on_hover_text(strategy.tooltip())
+                                                    .clicked() {
+                                                    let new_strategy: RealtimeBufferingStrategy = buffering_strategy.into();
+                                                    let new_configs = configs.with_buffering_strategy(new_strategy);
+                                                    controller.write_transcription_configs(new_configs);
                                                 }
                                             }
                                         }).response.on_hover_cursor(egui::CursorIcon::Default);

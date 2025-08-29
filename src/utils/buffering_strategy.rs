@@ -6,10 +6,20 @@ use strum::{AsRefStr, EnumIter, EnumString, IntoStaticStr};
 pub(crate) enum RibbleBufferingStrategy {
     #[default]
     Continuous,
-    #[strum(serialize = "Buffered: Short")]
+    #[strum(serialize = "Buffered: S")]
     ShortBuffered,
-    #[strum(serialize = "Buffered: Long")]
+    #[strum(serialize = "Buffered: L")]
     LongBuffered,
+}
+
+impl RibbleBufferingStrategy {
+    pub(crate) fn tooltip(&self) -> &str {
+        match self {
+            RibbleBufferingStrategy::Continuous => "No buffering.",
+            RibbleBufferingStrategy::ShortBuffered => "Short buffering: 3s",
+            RibbleBufferingStrategy::LongBuffered => "Long buffering: 6s",
+        }
+    }
 }
 
 const CONTINUOUS_MS: usize = 1000;
@@ -20,10 +30,10 @@ impl From<RealtimeBufferingStrategy> for RibbleBufferingStrategy {
     fn from(value: RealtimeBufferingStrategy) -> Self {
         match value {
             RealtimeBufferingStrategy::Buffered { buffer_ms }
-                if buffer_ms > CONTINUOUS_MS && buffer_ms < LONG_BUFFER_MS =>
-            {
-                RibbleBufferingStrategy::ShortBuffered
-            }
+            if buffer_ms > CONTINUOUS_MS && buffer_ms < LONG_BUFFER_MS =>
+                {
+                    RibbleBufferingStrategy::ShortBuffered
+                }
             RealtimeBufferingStrategy::Buffered { buffer_ms } if buffer_ms >= LONG_BUFFER_MS => {
                 RibbleBufferingStrategy::LongBuffered
             }

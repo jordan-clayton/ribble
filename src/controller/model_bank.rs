@@ -1,12 +1,12 @@
 use crate::controller::{
     Bus, ConsoleMessage, DownloadRequest, ModelFile, Progress, ProgressMessage, RibbleMessage,
-    SMALL_UTILITY_QUEUE_SIZE, WorkRequest,
+    WorkRequest, SMALL_UTILITY_QUEUE_SIZE,
 };
 use crate::utils::errors::RibbleError;
 use indexmap::IndexMap;
 use parking_lot::RwLock;
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{Receiver, Sender, get_channel};
+use ribble_whisper::utils::{get_channel, Receiver, Sender};
 use ribble_whisper::whisper::model::{ModelId, ModelLocation, ModelRetriever};
 use std::error::Error;
 use std::ffi::OsStr;
@@ -19,7 +19,7 @@ use twox_hash::XxHash3_64;
 
 use notify_debouncer_full::notify::{EventKind, RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{
-    DebounceEventResult, DebouncedEvent, Debouncer, RecommendedCache, new_debouncer,
+    new_debouncer, DebounceEventResult, DebouncedEvent, Debouncer, RecommendedCache,
 };
 
 const MODEL_ID_SEED: u64 = 0;
@@ -29,6 +29,8 @@ const MODEL_FILE_EXTENSION: &str = "bin";
 // close to the actual timeout.
 const MAX_DEBOUNCE_TIME: u64 = 2000;
 
+// TODO: These should probably become gated under debug-mode to reduce the bin size.
+// TODO: look into packaging strategies to asset-pack the installer.
 const PACKED_MODELS: [&[u8]; 2] = [
     include_bytes!("../models/ggml-base-q5_1.bin"),
     include_bytes!("../models/ggml-tiny-q5_1.bin"),
@@ -64,7 +66,7 @@ impl RibbleModelBankState {
                 model_map,
                 model_directory_watcher: watcher,
             }
-            .init()
+                .init()
         }
     }
 
