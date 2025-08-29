@@ -40,9 +40,9 @@ serde = { version = "1.0.209", features = ["derive"] }
 strum = "0.27.1"
 # TODO: determine whether to include integrity checking utilities; might be out of scope
 # Also This might need to pull whisper-rs from the main branch.
-ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.2.0", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler", "sdl2-static"] }
+ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.2.1", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler", "sdl2-static"] }
 log = "0.4.22"
-ron = "0.10.1"
+ron = "0.11.0"
 irox-egui-extras = { path = "external/irox/libraries/egui_extras" }
 slab = "0.4.9"
 parking_lot = { version = "0.12.4", features = ["deadlock_detection"] }

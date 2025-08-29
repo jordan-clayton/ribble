@@ -277,12 +277,21 @@ impl Kernel {
         self.transcriber_engine.transcriber_running()
     }
 
+    pub(super) fn slow_stopping(&self) -> bool {
+        self.transcriber_engine.slow_stopping()
+    }
+
     pub(super) fn stop_realtime(&self) {
         self.transcriber_engine.stop_realtime()
     }
     pub(super) fn stop_offline(&self) {
         self.transcriber_engine.stop_offline()
     }
+
+    pub(super) fn set_slow_stop(&self) {
+        self.transcriber_engine.set_slow_stop();
+    }
+
     pub(super) fn read_transcription_snapshot(&self) -> Arc<TranscriptionSnapshot> {
         self.transcriber_engine.read_transcription_snapshot()
     }

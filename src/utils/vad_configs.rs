@@ -2,19 +2,16 @@ use crate::utils::errors::RibbleError;
 use ribble_whisper::audio::pcm::PcmS16Convertible;
 use ribble_whisper::audio::recorder::RecorderSample;
 use ribble_whisper::transcriber::vad::{
-    Earshot, Resettable, Silero,
-    SileroBuilder, SileroSampleRate, WebRtc, WebRtcBuilder, WebRtcFilterAggressiveness,
-    WebRtcFrameLengthMillis, WebRtcSampleRate, DEFAULT_VOICE_PROPORTION_THRESHOLD, OFFLINE_VOICE_PROBABILITY_THRESHOLD, REAL_TIME_VOICE_PROBABILITY_THRESHOLD,
-    VAD,
+    DEFAULT_VOICE_PROPORTION_THRESHOLD, Earshot, OFFLINE_VOICE_PROBABILITY_THRESHOLD,
+    REAL_TIME_VOICE_PROBABILITY_THRESHOLD, Resettable, Silero, SileroBuilder, SileroSampleRate,
+    VAD, WebRtc, WebRtcBuilder, WebRtcFilterAggressiveness, WebRtcFrameLengthMillis,
+    WebRtcSampleRate,
 };
 use strum::{AsRefStr, Display, EnumIter, IntoStaticStr};
 
-// NOTE: SILERO V5 STRUGGLES -heavily- WITH LOW-VOLUME AND NOISY SIGNALS
-// FOR THE INTERIM, USE WEBRTC OR EARSHOT AS DEFAULT AND UPDATE THE TOOLTIP.
-
-// Silero (v5) can be extremely picky with voice when the signal is poor.
-const FLEXIBLE_SILERO_PROBABILITY_THRESHOLD: f32 = 0.15;
-const REAL_TIME_VOICED_PROPORTION_THRESHOLD: f32 = 0.4;
+const FLEXIBLE_SILERO_PROBABILITY_THRESHOLD: f32 = 0.3;
+// TODO: this might need to go back down to 0.4
+const REAL_TIME_VOICED_PROPORTION_THRESHOLD: f32 = 0.5;
 
 // TODO: determine a decent-enough threshold value.
 const WEBRTC_HIGH_PROPORTION_THRESHOLD: f32 = 0.7;
@@ -25,7 +22,7 @@ pub(crate) struct VadConfigs {
     vad_type: VadType,
     frame_size: VadFrameSize,
     strictness: VadStrictness,
-    // TODO: possibly expose an enum for VoicedProportionThreshold
+    // TODO: possibly expose an enum for VoicedProportionThreshold if it's not too ambiguous wrt UX.
     use_vad_offline: bool,
 }
 
@@ -72,7 +69,6 @@ impl VadConfigs {
     pub(crate) fn use_vad_offline(&self) -> bool {
         self.use_vad_offline
     }
-
 
     // Frame size, Aggressiveness, Probability
     fn prep_webrtc(&self) -> (WebRtcFrameLengthMillis, WebRtcFilterAggressiveness, f32) {
@@ -121,9 +117,10 @@ impl VadConfigs {
             )));
         }
 
+        // TODO: pick where "Auto" should be: ~0.3(Flexible)-0.5(Medium)
         let probability = match self.strictness() {
-            VadStrictness::Auto | VadStrictness::Flexible => FLEXIBLE_SILERO_PROBABILITY_THRESHOLD,
-            VadStrictness::Medium => REAL_TIME_VOICE_PROBABILITY_THRESHOLD,
+            VadStrictness::Flexible => FLEXIBLE_SILERO_PROBABILITY_THRESHOLD,
+            VadStrictness::Auto | VadStrictness::Medium => REAL_TIME_VOICE_PROBABILITY_THRESHOLD,
             VadStrictness::Strict => OFFLINE_VOICE_PROBABILITY_THRESHOLD,
         };
 
@@ -135,8 +132,11 @@ impl VadConfigs {
             .build()?)
     }
 
-    pub(crate) fn build_auto(&self) -> Result<WebRtc, RibbleError> {
-        self.build_webrtc()
+    // NOTE: With the change to v6, the issues with Silero are no longer present.
+    // Gain is generally still beneficial if microphone volume is low, but its no longer presenting
+    // detection issues.
+    pub(crate) fn build_auto(&self) -> Result<Silero, RibbleError> {
+        self.build_silero()
     }
 
     pub(crate) fn build_webrtc(&self) -> Result<WebRtc, RibbleError> {
@@ -179,7 +179,6 @@ impl Default for VadConfigs {
         Self::new()
     }
 }
-
 
 // NOTE: Earshot has some integer overflow problems.
 // Until those errors get fixed, do not expose it as a VAD impl.

@@ -177,6 +177,11 @@ impl RibbleController {
     pub(crate) fn offline_running(&self) -> bool {
         self.kernel.offline_running()
     }
+
+    pub(crate) fn slow_stopping(&self) -> bool {
+        self.kernel.slow_stopping()
+    }
+
     pub(crate) fn transcriber_running(&self) -> bool {
         self.kernel.transcriber_running()
     }
@@ -192,6 +197,12 @@ impl RibbleController {
     pub(crate) fn stop_transcription(&self) {
         self.kernel.stop_realtime();
         self.kernel.stop_offline();
+    }
+
+    // This turns "slow-stop" on, then stops transcription so that a final inference pass may run.
+    pub(crate) fn slow_stop(&self) {
+        self.kernel.set_slow_stop();
+        self.kernel.stop_realtime();
     }
 
     pub(crate) fn read_transcription_snapshot(&self) -> Arc<TranscriptionSnapshot> {

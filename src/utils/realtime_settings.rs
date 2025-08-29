@@ -17,11 +17,11 @@ const RT5SEC: usize = 5000;
 const RT10SEC: usize = 10_000;
 const RT20SEC: usize = 20_000;
 
-const RT15MIN: u128 = Duration::from_secs(15 * 60).as_millis();
-const RT30MIN: u128 = Duration::from_secs(30 * 60).as_millis();
-const RT1HR: u128 = Duration::from_secs(60 * 60).as_millis();
-const RT2HR: u128 = Duration::from_secs(2 * 60).as_millis();
-const RTINF: u128 = 0;
+const RT15MIN: usize = Duration::from_secs(15 * 60).as_millis() as usize;
+const RT30MIN: usize = Duration::from_secs(30 * 60).as_millis() as usize;
+const RT1HR: usize = Duration::from_secs(60 * 60).as_millis() as usize;
+const RT2HR: usize = Duration::from_secs(2 * 60).as_millis() as usize;
+const RTINF: usize = 0;
 
 // NOTE: the From<_> implementations may not be the most logically sound.
 // However, to limit the granularity of settings and to reduce the amount of
@@ -57,7 +57,7 @@ pub(crate) enum RealtimeTimeout {
     Infinite,
 }
 
-impl From<RealtimeTimeout> for u128 {
+impl From<RealtimeTimeout> for usize {
     fn from(value: RealtimeTimeout) -> Self {
         match value {
             RealtimeTimeout::Rt15Min => RT15MIN,
@@ -71,8 +71,8 @@ impl From<RealtimeTimeout> for u128 {
 }
 
 // If the mapping somehow isn't 1:1 within the app, this will just fallback to defaults.
-impl From<u128> for RealtimeTimeout {
-    fn from(value: u128) -> Self {
+impl From<usize> for RealtimeTimeout {
+    fn from(value: usize) -> Self {
         match value {
             RT15MIN => RealtimeTimeout::Rt15Min,
             RT30MIN => RealtimeTimeout::Rt30Min,

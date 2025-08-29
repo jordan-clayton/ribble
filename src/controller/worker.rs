@@ -1,4 +1,4 @@
-use crate::controller::{Bus, ConsoleMessage, RibbleMessage, RibbleWork, WorkRequest, kernel};
+use crate::controller::{Bus, ConsoleMessage, RibbleMessage, RibbleWork, WorkRequest};
 use crate::utils::errors::RibbleError;
 use crossbeam::scope;
 use ribble_whisper::utils::{Receiver, Sender, get_channel};

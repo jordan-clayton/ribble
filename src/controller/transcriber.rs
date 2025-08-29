@@ -24,7 +24,7 @@ use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
 use ribble_whisper::transcriber::vad::VAD;
 use ribble_whisper::transcriber::{
-    CallbackTranscriber, Transcriber, TranscriptionSnapshot, WHISPER_SAMPLE_RATE, WhisperCallbacks,
+    TranscriptionSnapshot, WHISPER_SAMPLE_RATE, WhisperCallbacks,
     WhisperControlPhrase, WhisperOutput, redirect_whisper_logging_to_hooks,
 };
 use ribble_whisper::utils::callback::{RibbleWhisperCallback, StaticRibbleWhisperCallback};
@@ -39,11 +39,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+// TODO: double-check the real-time print-update loop: make sure it ends when the queue goes out of scope instead of just the flag.
 struct TranscriberEngineState {
     transcription_configs: ArcSwap<WhisperRealtimeConfigs>,
     vad_configs: ArcSwap<VadConfigs>,
     realtime_running: Arc<AtomicBool>,
     offline_running: Arc<AtomicBool>,
+    slow_stop: Arc<AtomicBool>,
     current_audio_file_path: ArcSwap<Option<PathBuf>>,
     offline_transcriber_feedback: Arc<AtomicOfflineTranscriberFeedback>,
     audio_gain_settings: ArcSwap<AudioGainConfigs>,
@@ -60,15 +62,13 @@ impl TranscriberEngineState {
         start_v_configs: Option<VadConfigs>,
         start_feedback_type: Option<OfflineTranscriberFeedback>,
         start_audio_gain_settings: Option<AudioGainConfigs>,
-
-        // TODO: figure this out once mapped out
-        // audio_gain_settings: Option<AudioGainSettings>
         bus: &Bus,
     ) -> Self {
         let transcription_configs = ArcSwap::new(Arc::new(start_configs.unwrap_or_default()));
         let vad_configs = ArcSwap::new(Arc::new(start_v_configs.unwrap_or_default()));
         let realtime_running = Arc::new(AtomicBool::new(false));
         let offline_running = Arc::new(AtomicBool::new(false));
+        let slow_stop = Arc::new(AtomicBool::new(false));
         let current_audio_file_path = ArcSwap::new(Arc::new(None));
         let transcriber_feedback =
             AtomicOfflineTranscriberFeedback::new(start_feedback_type.unwrap_or_default());
@@ -82,6 +82,7 @@ impl TranscriberEngineState {
             vad_configs,
             realtime_running,
             offline_running,
+            slow_stop,
             current_audio_file_path,
             offline_transcriber_feedback,
             audio_gain_settings,
@@ -221,6 +222,7 @@ impl TranscriberEngineState {
 
         let recording_expected_available = Arc::new(AtomicBool::new(true));
         let a_thread_recording_expected_available = Arc::clone(&recording_expected_available);
+        // TODO: this can probably be removed.
         let p_thread_running = Arc::clone(&self.realtime_running);
 
         let result = scope(|s| {
@@ -228,7 +230,8 @@ impl TranscriberEngineState {
             let a_thread_run_transcription = Arc::clone(&self.realtime_running);
             // Transcriber runner flag
             let t_thread_run_transcription = Arc::clone(&self.realtime_running);
-
+            // Slow stop flag
+            let t_thread_slow_stop = Arc::clone(&self.slow_stop);
             // Redirect whisper logging to the logger.
             redirect_whisper_logging_to_hooks();
             // Close the "Setup" progress job
@@ -330,19 +333,53 @@ impl TranscriberEngineState {
             });
 
             let transcription_thread =
-                s.spawn(move |_| transcriber.process_audio(t_thread_run_transcription).inspect_err(|_|{
+                s.spawn(move |_| transcriber.run_stream(t_thread_run_transcription, t_thread_slow_stop).inspect_err(|_| {
                     // If this has early-returned an error, the other threads may not get the
                     // message.
                     self.realtime_running.store(false, Ordering::Release);
+                    self.slow_stop.store(false, Ordering::Release);
                 }));
             // For updating the inner transcription
             // It's easiest to just duplicate the logic across transcription impls; otherwise it
             // becomes a huge lifetime headache.
             let _print_thread = s.spawn(move |_| {
-                while p_thread_running.load(Ordering::Acquire) {
-                    match text_receiver.recv() {
-                        Ok(output) => match output {
-                            WhisperOutput::TranscriptionSnapshot(snapshot) => {
+                // NOTE: test this for accidental deadlocking -> the atomic boolean here is a
+                // little conservative. This should go out of scope when the transcriber gets
+                // dropped. 
+
+                // while p_thread_running.load(Ordering::Acquire) {
+                //     match text_receiver.recv() {
+                //         Ok(output) => match output {
+                //             WhisperOutput::TranscriptionSnapshot(snapshot) => {
+                //                 self.current_snapshot.store(Arc::clone(&snapshot));
+                //             }
+
+                //             WhisperOutput::ControlPhrase(control) => {
+                //                 #[cfg(debug_assertions)]{
+                //                     self.current_control_phrase.store(Arc::new(control));
+                //                 }
+
+                //                 // Filter out all "Debug" control phrases in release mode.
+                //                 #[cfg(not(debug_assertions))]
+                //                 {
+                //                     match &control {
+                //                         WhisperControlPhrase::Debug(..) => {}
+                //                         _ => {
+                //                             self.current_control_phrase.store(Arc::new(control));
+                //                         }
+                //                     }
+                //                 }
+                //             }
+                //         },
+                //         Err(_) => {
+                //             p_thread_running.store(false, Ordering::Release);
+                //         }
+                //     }
+                // }
+                
+                while let Ok(message) = text_receiver.recv() {
+                    match message {
+                        WhisperOutput::TranscriptionSnapshot(snapshot) => {
                                 self.current_snapshot.store(Arc::clone(&snapshot));
                             }
 
@@ -362,12 +399,9 @@ impl TranscriberEngineState {
                                     }
                                 }
                             }
-                        },
-                        Err(_) => {
-                            p_thread_running.store(false, Ordering::Release);
-                        }
                     }
-                }
+                } 
+            
             });
 
             // This -should- properly coerce into RibbleAppError, but it might need to be explicit.
@@ -375,6 +409,7 @@ impl TranscriberEngineState {
                 .join()
                 .unwrap_or_else(|e| {
                     self.realtime_running.store(false, Ordering::Release);
+                    self.slow_stop.store(false, Ordering::Release);
                     // Wrap the error in a RibbleWhisper "Unknown" to satisfy the type constraints
                     // of the join.
                     let err = RibbleWhisperError::Unknown(format!("{e:?}"));
@@ -411,6 +446,9 @@ impl TranscriberEngineState {
         // In case something weird has happened, just set the flag to false.
         // (This should -always- be false because realtime has to be stopped via UI)
         self.realtime_running.store(false, Ordering::Release);
+        // Since transcription is finished, set slow-stop to false.
+        // NOTE: if this becomes a toggle/parameter, this will need to be removed.
+        self.slow_stop.store(false, Ordering::Release);
 
         // Send a message to the console before returning the result.
         // If the writer thread somehow crashed, then there is unlikely to be a recording
@@ -522,7 +560,7 @@ impl TranscriberEngineState {
 
         // Get the configs -> dereference and consume into WhisperConfigsV2 to discard unused
         // realtime parameters.
-        let configs = (*self.transcription_configs.load_full()).into_whisper_v2_configs();
+        let configs = (*self.transcription_configs.load_full()).into_whisper_configs();
 
         let n_frames = audio_file_num_frames(audio_file_path.as_path()).inspect_err(|_e| {
             self.cleanup_remove_progress_job(setup_id);
@@ -644,7 +682,8 @@ impl TranscriberEngineState {
         let run_transcription = Arc::clone(&self.offline_running);
         // Remove the setup progress job.
         self.cleanup_remove_progress_job(setup_id);
-
+        
+        // TODO: this can probably be removed -> test for accidental deadlocks first.
         let p_thread_running = Arc::clone(&self.offline_running);
 
         let result = scope(|s| {
@@ -727,12 +766,12 @@ impl TranscriberEngineState {
 
             let transcription_thread = s.spawn(move |_| {
                 let res = offline_transcriber
-                    .process_with_callbacks(run_transcription, whisper_callbacks).inspect_err(|_|{
-                        // If the transcription has failed for any reason, ensure the runner flag
-                        // is false in-case the print-thread is running--otherwise this thread
-                        // scope will not terminate.
-                        self.offline_running.store(false, Ordering::Release);
-                    });
+                    .process_with_callbacks(run_transcription, whisper_callbacks).inspect_err(|_| {
+                    // If the transcription has failed for any reason, ensure the runner flag
+                    // is false in-case the print-thread is running--otherwise this thread
+                    // scope will not terminate.
+                    self.offline_running.store(false, Ordering::Release);
+                });
                 self.cleanup_remove_progress_job(transcription_id);
                 res
             });
@@ -753,10 +792,26 @@ impl TranscriberEngineState {
                     //
                     // TODO: test this out on long audio to see what the allocation churn is like.
                     let current_transcription: Arc<str> = Default::default();
-                    while p_thread_running.load(Ordering::Acquire) {
-                        match receiver.recv() {
-                            Ok(new_segment) => {
-                                let current_transcription = if current_transcription.is_empty() {
+                    // while p_thread_running.load(Ordering::Acquire) {
+                    //     match receiver.recv() {
+                    //         Ok(new_segment) => {
+                    //             let current_transcription = if current_transcription.is_empty() {
+                    //                 Arc::from(new_segment)
+                    //             } else {
+                    //                 Arc::from(format!("{current_transcription} {new_segment}").trim())
+                    //             };
+                    //             let new_snapshot = Arc::new(
+                    //                 TranscriptionSnapshot::new(
+                    //                     Arc::clone(&current_transcription),
+                    //                     Arc::default()));
+                    //             self.current_snapshot.store(new_snapshot)
+                    //         }
+                    //         Err(_) => p_thread_running.store(false, Ordering::Release)
+                    //     }
+                    // }
+
+                    while let Ok(new_segment) = receiver.recv(){
+                        let current_transcription = if current_transcription.is_empty() {
                                     Arc::from(new_segment)
                                 } else {
                                     Arc::from(format!("{current_transcription} {new_segment}").trim())
@@ -766,9 +821,6 @@ impl TranscriberEngineState {
                                         Arc::clone(&current_transcription),
                                         Arc::default()));
                                 self.current_snapshot.store(new_snapshot)
-                            }
-                            Err(_) => p_thread_running.store(false, Ordering::Release)
-                        }
                     }
                 });
             }
@@ -876,7 +928,7 @@ impl TranscriberEngine {
     }
 
     pub(super) fn transcriber_running(&self) -> bool {
-        self.realtime_running() || self.offline_running()
+        self.realtime_running() || self.offline_running() || self.slow_stopping()
     }
     pub(super) fn realtime_running(&self) -> bool {
         self.inner.realtime_running.load(Ordering::Acquire)
@@ -885,11 +937,19 @@ impl TranscriberEngine {
         self.inner.offline_running.load(Ordering::Acquire)
     }
 
+    pub(super) fn slow_stopping(&self) -> bool {
+        self.inner.slow_stop.load(Ordering::Acquire)
+    }
+
     pub(super) fn stop_realtime(&self) {
         self.inner.realtime_running.store(false, Ordering::Release);
     }
     pub(super) fn stop_offline(&self) {
         self.inner.offline_running.store(false, Ordering::Release);
+    }
+    
+    pub(super) fn set_slow_stop(&self) {
+        self.inner.slow_stop.store(true, Ordering::Release);
     }
 
     pub(super) fn read_transcription_configs(&self) -> Arc<WhisperRealtimeConfigs> {

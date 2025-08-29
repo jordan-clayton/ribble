@@ -1,7 +1,7 @@
-use crate::controller::ribble_controller::RibbleController;
 use crate::controller::CompletedRecordingJobs;
-use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::controller::ribble_controller::RibbleController;
 use crate::ui::panes::PaneView;
+use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::ui::widgets::recording_modal::build_recording_modal;
 use crate::ui::{DEFAULT_TOAST_DURATION, GRID_ROW_SPACING_COEFF, PANE_INNER_MARGIN};
 use crate::utils::recorder_configs::{
@@ -58,33 +58,36 @@ impl PaneView for RecordingPane {
             .show(ui, |ui| {
                 ui.heading("Recording:");
                 let button_spacing = ui.spacing().button_padding.y;
+
+                ui.vertical_centered_justified(|ui| {
+                    if ui
+                        .add_enabled(
+                            !audio_worker_running,
+                            egui::Button::new("Start recording"),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::Default)
+                        .clicked()
+                    {
+                        controller.start_recording();
+                    }
+                    ui.add_space(button_spacing);
+
+                    if ui
+                        .add_enabled(recorder_running, egui::Button::new("Stop"))
+                        .on_hover_cursor(egui::CursorIcon::Default)
+                        .clicked()
+                    {
+                        controller.stop_recording();
+                    }
+
+                });
+
+                ui.add_space(button_spacing);
+                ui.separator();
+
                 egui::ScrollArea::both()
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
-                        ui.vertical_centered_justified(|ui| {
-                            if ui
-                                .add_enabled(
-                                    !audio_worker_running,
-                                    egui::Button::new("Start recording"),
-                                )
-                                .on_hover_cursor(egui::CursorIcon::Default)
-                                .clicked()
-                            {
-                                controller.start_recording();
-                            }
-                            ui.add_space(button_spacing);
-
-                            if ui
-                                .add_enabled(recorder_running, egui::Button::new("Stop"))
-                                .on_hover_cursor(egui::CursorIcon::Default)
-                                .clicked()
-                            {
-                                controller.stop_recording();
-                            }
-
-                            ui.add_space(button_spacing);
-                            ui.separator();
-                        });
                         ui.heading("Export: ");
                         ui.vertical_centered_justified(|ui| {
                             // This implies there is at least one recording that can be exported.
