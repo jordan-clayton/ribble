@@ -1,7 +1,10 @@
+#[cfg(debug_assertions)]
+use crate::controller::AtomicProgress;
 use crate::controller::{
-    AmortizedDownloadProgress, AtomicProgress, Bus, ConsoleMessage, DownloadRequest, FileDownload,
+    AmortizedDownloadProgress, Bus, ConsoleMessage, DownloadRequest, FileDownload,
     Progress, ProgressMessage, RibbleMessage, WorkRequest,
 };
+
 use crate::utils::errors::RibbleError;
 use parking_lot::RwLock;
 use ribble_whisper::downloader::downloaders::sync_download_request;

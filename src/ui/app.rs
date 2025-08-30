@@ -11,26 +11,28 @@ use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{
     AmortizedDownloadProgress, AmortizedProgress, LatestError, UI_UPDATE_QUEUE_SIZE,
 };
-use crate::ui::panes::RibbleTree;
 use crate::ui::panes::ribble_pane::{ClosableRibbleViewPane, RibblePaneId};
+use crate::ui::panes::RibbleTree;
 use crate::ui::widgets::pie_progress::pie_progress;
 use crate::ui::widgets::recording_icon::recording_icon;
-use crate::utils::errors::{RibbleError, RibbleErrorCategory};
+use crate::utils::errors::RibbleError;
+#[cfg(debug_assertions)]
+use crate::utils::errors::RibbleErrorCategory;
 use crate::utils::migration::{RibbleVersion, Version};
 use crate::utils::preferences::RibbleAppTheme;
-use eframe::Storage;
 use eframe::glow::Context;
+use eframe::Storage;
 use egui_notify::{Toast, Toasts};
 use egui_theme_lerp::ThemeAnimator;
 use irox_egui_extras::progressbar::ProgressBar;
 use ribble_whisper::audio::audio_backend::{
-    AudioBackend, CaptureSpec, Sdl2Backend, default_backend,
+    default_backend, AudioBackend, CaptureSpec, Sdl2Backend,
 };
 use ribble_whisper::audio::microphone::{MicCapture, Sdl2Capture};
 use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::sdl2;
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{Receiver, get_channel};
+use ribble_whisper::utils::{get_channel, Receiver};
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 
@@ -554,10 +556,10 @@ impl eframe::App for Ribble {
                                     resp
                                 }
                             }
-                            .on_hover_ui(|ui| {
-                                ui.style_mut().interaction.selectable_labels = true;
-                                ui.label("Show downloads");
-                            });
+                                .on_hover_ui(|ui| {
+                                    ui.style_mut().interaction.selectable_labels = true;
+                                    ui.label("Show downloads");
+                                });
 
                             if download_button.clicked() {
                                 self.tree.add_new_pane(RibblePaneId::Downloads);
@@ -572,10 +574,10 @@ impl eframe::App for Ribble {
             .min_height(0.0)
             .resizable(false)
             .show(ctx, |ui| {
-                ui.columns_const(|[col1, col2, col3]| {
+                ui.columns_const(|[_col1, col2, col3]| {
                     #[cfg(debug_assertions)]
                     {
-                        col1.vertical_centered_justified(|ui| {
+                        _col1.vertical_centered_justified(|ui| {
                             ui.horizontal(|ui| {
                                 // FPS counter -> NOTE this is not mean frame time and is not smoothed out
                                 // TODO: look at maybe implementing smoothing at some point.
@@ -666,17 +668,17 @@ impl eframe::App for Ribble {
 
                             match self.cached_progress {
                                 AmortizedProgress::NoJobs => {
-                                    ui.horizontal(|ui| {
+                                    ui.horizontal(|_ui| {
                                         #[cfg(debug_assertions)]
                                         {
-                                            let (rect, response) = ui.allocate_exact_size(
+                                            let (rect, response) = _ui.allocate_exact_size(
                                                 desired_size,
                                                 egui::Sense::click(),
                                             );
-                                            if ui.is_rect_visible(rect) {
+                                            if _ui.is_rect_visible(rect) {
                                                 let color = egui::Color32::from_rgb(255, 0, 0);
 
-                                                ui.painter().rect_stroke(
+                                                _ui.painter().rect_stroke(
                                                     rect,
                                                     0.0,
                                                     egui::Stroke::new(1.0, color),
@@ -689,7 +691,7 @@ impl eframe::App for Ribble {
                                             {
                                                 self.tree.add_new_pane(RibblePaneId::Progress);
                                             }
-                                            ui.monospace("Working:");
+                                            _ui.monospace("Working:");
                                         }
                                     });
                                 }

@@ -29,8 +29,7 @@ const MODEL_FILE_EXTENSION: &str = "bin";
 // close to the actual timeout.
 const MAX_DEBOUNCE_TIME: u64 = 2000;
 
-// TODO: These should probably become gated under debug-mode to reduce the bin size.
-// TODO: look into packaging strategies to asset-pack the installer.
+#[cfg(any(debug_assertions, feature = "pack-in-models"))]
 const PACKED_MODELS: [&[u8]; 2] = [
     include_bytes!("../models/ggml-base-q5_1.bin"),
     include_bytes!("../models/ggml-tiny-q5_1.bin"),
@@ -136,11 +135,14 @@ impl RibbleModelBankState {
             })
             .collect::<Vec<(ModelFile, u64)>>();
 
-        // Push entries for the two asset-packed models.
-        for (idx, model) in PACKED_MODELS.iter().enumerate() {
-            let packed = ModelFile::Packed(idx);
-            let size = model.len() as u64;
-            entries.push((packed, size))
+        #[cfg(any(debug_assertions, feature = "pack-in-models"))]
+        {
+            // Push entries for the two asset-packed models.
+            for (idx, model) in PACKED_MODELS.iter().enumerate() {
+                let packed = ModelFile::Packed(idx);
+                let size = model.len() as u64;
+                entries.push((packed, size))
+            }
         }
 
         // Sort by file size.
@@ -152,6 +154,7 @@ impl RibbleModelBankState {
         // Fill the model bank.
         for (model_file, _) in entries {
             let model_key = match &model_file {
+                #[cfg(any(debug_assertions, feature = "pack-in-models"))]
                 ModelFile::Packed(idx) => XxHash3_64::oneshot_with_seed(
                     MODEL_ID_SEED,
                     ModelFile::PACKED_NAMES[*idx].as_bytes(),
@@ -175,7 +178,10 @@ impl RibbleModelBankState {
             .read()
             .get(&model_id)
             .map(|model| match model {
-                ModelFile::Packed(idx) => ModelLocation::StaticBuffer(PACKED_MODELS[*idx]),
+                #[cfg(any(debug_assertions, feature = "pack-in-models"))]
+                ModelFile::Packed(idx) => {
+                    ModelLocation::StaticBuffer(PACKED_MODELS[*idx])
+                }
                 ModelFile::File(name) => {
                     ModelLocation::DynamicFilePath(self.model_directory().join(name.as_ref()))
                 }
@@ -187,6 +193,7 @@ impl RibbleModelBankState {
     fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError> {
         if let Some(model) = self.model_map.read().get(&model_id) {
             match model {
+                #[cfg(any(debug_assertions, feature = "pack-in-models"))]
                 ModelFile::Packed(_) => Ok(true),
                 ModelFile::File(path) => {
                     let full_path = self.model_directory.join(path.as_ref());
@@ -232,6 +239,7 @@ impl RibbleModelBankState {
         let mut write_guard = self.model_map.write();
         if let Some(model) = write_guard.get(&model_id) {
             match model {
+                #[cfg(any(debug_assertions, feature = "pack-in-models"))]
                 ModelFile::Packed(_) => {
                     return Ok(None);
                 }

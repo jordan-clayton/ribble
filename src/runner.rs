@@ -2,15 +2,18 @@ use crate::ui::app::Ribble;
 use crate::utils::crash_handler::set_up_desktop_crash_handler;
 use crate::utils::errors::RibbleError;
 use crate::utils::migration::{
-    RibbleVersion, Version, clear_old_ribble_state, migrate_model_filenames,
+    clear_old_ribble_state, migrate_model_filenames, RibbleVersion, Version,
 };
 use crash_handler::CrashHandler;
 use directories::ProjectDirs;
-use eframe::{AppCreator, NativeOptions, run_native};
+use eframe::{run_native, AppCreator, NativeOptions};
 use egui::{IconData, ViewportBuilder};
+#[cfg(debug_assertions)]
+use flexi_logger::Duplicate;
 use flexi_logger::{
-    Age, Cleanup, Criterion, Duplicate, FileSpec, Logger, LoggerHandle, Naming, WriteMode,
+    Age, Cleanup, Criterion, FileSpec, Logger, LoggerHandle, Naming, WriteMode,
 };
+
 use image::GenericImageView;
 use ron::ser::PrettyConfig;
 use std::error::Error;
@@ -79,8 +82,23 @@ impl RibbleRunner<'_> {
             std::fs::create_dir_all(logs_directory.as_path())?;
         }
 
-        // Set up the logger - duplicate to stderr in debug mode only to reduce IO.
-        let mut logger = Logger::try_with_str("info")?
+        #[cfg(debug_assertions)]
+        let logger = Logger::try_with_str("info")?
+            .log_to_file(
+                FileSpec::default()
+                    .directory(logs_directory.as_path())
+                    .basename(Self::LOG_FILE_NAME),
+            )
+            .write_mode(WriteMode::BufferAndFlush)
+            .duplicate_to_stderr(Duplicate::All)
+            .rotate(
+                Criterion::Age(Age::Day),
+                Naming::Timestamps,
+                Cleanup::KeepLogFiles(Self::MAX_LOG_FILES),
+            );
+
+        #[cfg(not(debug_assertions))]
+        let logger = Logger::try_with_str("warn")?
             .log_to_file(
                 FileSpec::default()
                     .directory(logs_directory.as_path())
@@ -92,11 +110,8 @@ impl RibbleRunner<'_> {
                 Naming::Timestamps,
                 Cleanup::KeepLogFiles(Self::MAX_LOG_FILES),
             );
-        logger = if cfg!(debug_assertions) {
-            logger.duplicate_to_stderr(Duplicate::All)
-        } else {
-            logger
-        };
+
+
         // This needs to be kept alive until the app goes out of scope (consume on run).
         let logger_handle = logger.start()?;
 

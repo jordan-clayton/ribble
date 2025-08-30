@@ -6,8 +6,8 @@ use ribble_whisper::utils::{Receiver, Sender};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
@@ -662,17 +662,20 @@ impl AnalysisType {
 
 #[derive(Debug, Clone)]
 pub(crate) enum ModelFile {
+    #[cfg(any(debug_assertions, feature = "pack-in-models"))]
     Packed(usize),
     File(Arc<str>),
 }
 
 impl ModelFile {
+    #[cfg(any(debug_assertions, feature = "pack-in-models"))]
     pub(crate) const PACKED_NAMES: [&'static str; 2] = ["ggml-tiny.q5_1.bin", "ggml-base.q5_1.bin"];
 }
 
 impl Display for ModelFile {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            #[cfg(any(debug_assertions, feature = "pack-in-models"))]
             ModelFile::Packed(id) => {
                 write!(f, "ModelFile::Packed: {}", Self::PACKED_NAMES[*id])
             }

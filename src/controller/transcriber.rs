@@ -2,7 +2,7 @@ use crate::controller::VisualizerPacket;
 use crate::controller::WriteRequest;
 use crate::controller::{
     AtomicOfflineTranscriberFeedback, Bus, ConsoleMessage, OfflineTranscriberFeedback, Progress,
-    ProgressMessage, RibbleMessage, UTILITY_QUEUE_SIZE, WorkRequest,
+    ProgressMessage, RibbleMessage, WorkRequest, UTILITY_QUEUE_SIZE,
 };
 use crate::utils::audio_gain::AudioGainConfigs;
 use crate::utils::dc_block::DCBlock;
@@ -24,20 +24,20 @@ use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
 use ribble_whisper::transcriber::vad::VAD;
 use ribble_whisper::transcriber::{
-    TranscriptionSnapshot, WHISPER_SAMPLE_RATE, WhisperCallbacks,
-    WhisperControlPhrase, WhisperOutput, redirect_whisper_logging_to_hooks,
+    redirect_whisper_logging_to_hooks, TranscriptionSnapshot, WhisperCallbacks,
+    WhisperControlPhrase, WhisperOutput, WHISPER_SAMPLE_RATE,
 };
 use ribble_whisper::utils::callback::{RibbleWhisperCallback, StaticRibbleWhisperCallback};
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{Sender, get_channel};
+use ribble_whisper::utils::{get_channel, Sender};
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model::ModelRetriever;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 // TODO: double-check the real-time print-update loop: make sure it ends when the queue goes out of scope instead of just the flag.
 struct TranscriberEngineState {
@@ -222,8 +222,6 @@ impl TranscriberEngineState {
 
         let recording_expected_available = Arc::new(AtomicBool::new(true));
         let a_thread_recording_expected_available = Arc::clone(&recording_expected_available);
-        // TODO: this can probably be removed.
-        let p_thread_running = Arc::clone(&self.realtime_running);
 
         let result = scope(|s| {
             // Audio Fanout
@@ -376,32 +374,31 @@ impl TranscriberEngineState {
                 //         }
                 //     }
                 // }
-                
+
                 while let Ok(message) = text_receiver.recv() {
                     match message {
                         WhisperOutput::TranscriptionSnapshot(snapshot) => {
-                                self.current_snapshot.store(Arc::clone(&snapshot));
+                            self.current_snapshot.store(Arc::clone(&snapshot));
+                        }
+
+                        WhisperOutput::ControlPhrase(control) => {
+                            #[cfg(debug_assertions)]{
+                                self.current_control_phrase.store(Arc::new(control));
                             }
 
-                            WhisperOutput::ControlPhrase(control) => {
-                                #[cfg(debug_assertions)]{
-                                    self.current_control_phrase.store(Arc::new(control));
-                                }
-
-                                // Filter out all "Debug" control phrases in release mode.
-                                #[cfg(not(debug_assertions))]
-                                {
-                                    match &control {
-                                        WhisperControlPhrase::Debug(..) => {}
-                                        _ => {
-                                            self.current_control_phrase.store(Arc::new(control));
-                                        }
+                            // Filter out all "Debug" control phrases in release mode.
+                            #[cfg(not(debug_assertions))]
+                            {
+                                match &control {
+                                    WhisperControlPhrase::Debug(..) => {}
+                                    _ => {
+                                        self.current_control_phrase.store(Arc::new(control));
                                     }
                                 }
                             }
+                        }
                     }
-                } 
-            
+                }
             });
 
             // This -should- properly coerce into RibbleAppError, but it might need to be explicit.
@@ -525,9 +522,9 @@ impl TranscriberEngineState {
         } else {
             Err(RibbleError::Core("Audio file path not loaded.".to_string()))
         }
-        .inspect_err(|_e| {
-            self.realtime_running.store(false, Ordering::Release);
-        })?;
+            .inspect_err(|_e| {
+                self.realtime_running.store(false, Ordering::Release);
+            })?;
 
         // Send a progress job so the UI can be updated.
         let setup_progress = Progress::new_indeterminate("Setting up offline transcription.");
@@ -682,9 +679,6 @@ impl TranscriberEngineState {
         let run_transcription = Arc::clone(&self.offline_running);
         // Remove the setup progress job.
         self.cleanup_remove_progress_job(setup_id);
-        
-        // TODO: this can probably be removed -> test for accidental deadlocks first.
-        let p_thread_running = Arc::clone(&self.offline_running);
 
         let result = scope(|s| {
             // Set up a progress callback for transcription
@@ -810,17 +804,17 @@ impl TranscriberEngineState {
                     //     }
                     // }
 
-                    while let Ok(new_segment) = receiver.recv(){
+                    while let Ok(new_segment) = receiver.recv() {
                         let current_transcription = if current_transcription.is_empty() {
-                                    Arc::from(new_segment)
-                                } else {
-                                    Arc::from(format!("{current_transcription} {new_segment}").trim())
-                                };
-                                let new_snapshot = Arc::new(
-                                    TranscriptionSnapshot::new(
-                                        Arc::clone(&current_transcription),
-                                        Arc::default()));
-                                self.current_snapshot.store(new_snapshot)
+                            Arc::from(new_segment)
+                        } else {
+                            Arc::from(format!("{current_transcription} {new_segment}").trim())
+                        };
+                        let new_snapshot = Arc::new(
+                            TranscriptionSnapshot::new(
+                                Arc::clone(&current_transcription),
+                                Arc::default()));
+                        self.current_snapshot.store(new_snapshot)
                     }
                 });
             }
@@ -947,7 +941,7 @@ impl TranscriberEngine {
     pub(super) fn stop_offline(&self) {
         self.inner.offline_running.store(false, Ordering::Release);
     }
-    
+
     pub(super) fn set_slow_stop(&self) {
         self.inner.slow_stop.store(true, Ordering::Release);
     }

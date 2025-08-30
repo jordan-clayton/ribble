@@ -374,6 +374,10 @@ impl PaneView for TranscriberPane {
                                         Some((_, file)) => {
                                             let salt = "model_id_combobox";
                                             match file {
+                                                #[cfg(any(
+                                                    debug_assertions,
+                                                    feature = "pack-in-models"
+                                                ))]
                                                 ModelFile::Packed(idx) => {
                                                     egui::ComboBox::from_id_salt(salt)
                                                         .selected_text(ModelFile::PACKED_NAMES[idx])
@@ -393,6 +397,10 @@ impl PaneView for TranscriberPane {
                                     model_id_combobox.show_ui(ui, |ui| {
                                         for (m_id, model_file) in self.model_list.iter() {
                                             match model_file {
+                                                #[cfg(any(
+                                                    debug_assertions,
+                                                    feature = "pack-in-models"
+                                                ))]
                                                 ModelFile::Packed(idx) => {
                                                     if ui.selectable_value(&mut model_id, Some(*m_id), ModelFile::PACKED_NAMES[*idx])
                                                         .clicked() {
