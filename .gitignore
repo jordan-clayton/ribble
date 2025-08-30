@@ -10,3 +10,6 @@
 /generate_licenses.sh
 /.DS_Store
 /icon.iconset
+/icon.icns
+/*.sh
+/staging
