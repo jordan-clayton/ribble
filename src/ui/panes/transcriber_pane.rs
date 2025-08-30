@@ -932,10 +932,9 @@ impl PaneView for TranscriberPane {
                                                 .add_enabled(!empty, egui::Button::new("Download"))
                                                 .clicked()
                                             {
-                                                // TODO: possibly validate (try-parse) the url.
                                                 self.download_modal = false;
-                                                self.model_url.clear();
                                                 controller.download_model(&self.model_url);
+                                                self.model_url.clear();
                                             }
 
                                             // The "link" icon is a little small ->
@@ -946,11 +945,6 @@ impl PaneView for TranscriberPane {
                                                 .on_hover_text("Launch the browser to open a model repository.")
                                                 .clicked()
                                             {
-                                                self.download_modal = false;
-                                                self.model_url.clear();
-                                                // TODO: Change this to open a MODELS.md or similar containing
-                                                // explanations + links for stuff.
-                                                // TODO-TWICE: once changed, make sure to log this interaction on failure.
                                                 let _ = opener::open_browser(
                                                     "https://huggingface.co/ggerganov/whisper.cpp/tree/main",
                                                 );

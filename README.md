@@ -53,6 +53,14 @@ There are buttons in the transcriber control pane for:
 
 It should be a fairly straightforward process to install models in the app. Full documentation/instructions are planned
 TBD.
+To use Ribble's URL downloader:
+
+- Go to the model file page, (e.g. [here](https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-medium-q8_0.bin))
+- Click on "Copy download link"
+- Paste it in the url field in Ribble
+- Click download
+- When the model is fully (and successfully) downloaded, it should appear in the model selection drop-down menu in the
+  configurations.
 
 ### Recommendations
 
