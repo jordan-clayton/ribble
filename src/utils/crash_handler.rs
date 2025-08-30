@@ -63,7 +63,7 @@ fn crash_popup(crash_context: &CrashContext) -> CrashEventResult {
         let pid = crash_context.task;
 
         // For EXC_BAD_ACCESS, the subcode is the address.
-        let mut exception_subcode = exception_info.subcode;
+        let exception_subcode = exception_info.subcode;
 
         let error_string = match kind {
             BAD_ACCESS => "BAD_ACCESS",

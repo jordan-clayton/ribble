@@ -61,7 +61,7 @@ impl RibbleRunner<'_> {
     pub(crate) fn new() -> Result<Self, RibbleError> {
         // Set up the project directory
         let proj_dirs = ProjectDirs::from(QUALIFIER, ORGANIZATION, APP_ID).ok_or(
-            RibbleError::Core("Failed to open project directory.".to_string()),
+            RibbleError::Core("Failed to form project directory.".to_string()),
         )?;
 
         let data_directory = proj_dirs.data_dir().to_path_buf();
@@ -75,6 +75,67 @@ impl RibbleRunner<'_> {
             "Data dir path not canonicalized."
         );
         debug_assert!(data_directory.is_dir(), "Data dir not a directory.");
+
+
+        // Load the version & handle updates
+        // The path gets canonicalized (and allocated) in the method, so only send the data directory here.
+        let serialized_version = Self::deserialize_version(data_directory.as_path());
+
+        // NOTE: at the moment there is no implementation for checking version updates.
+        // It is undecided as of the present as to how this app will be distributed.
+        let migration_version = MIGRATION_VERSION.get_or_init(|| {
+            let min_ribble_version = RibbleVersion::new().set_major(0).set_minor(1).set_minor(2);
+            RibbleVersion::default().set_min_compatible(min_ribble_version)
+        });
+
+        // This check needs to run before the logger is set up.
+        // If the new application folder is not empty, the MacOS migration will not succeed
+        // std::fs::rename fails if the -to- destination is not empty.
+        let version = if migration_version.compatible(serialized_version) {
+            serialized_version
+        } else {
+            // TODO: test this on macos.
+            #[cfg(target_os = "macos")]
+            {
+                // The old macOS release may have an incorrect App folder naming convention
+                // If the old folder exists (and is not properly named), it is also the case that
+                // the new folder will be empty and can be clobbered.
+
+                if let Some(parent) = data_directory.parent()
+                    && parent.is_dir()
+                {
+                    log::info!("Located data directory parent: {}", parent.display());
+                    let test_dir = parent.join("Ribble");
+                    if test_dir.is_dir() {
+                        log::info!("Located old Ribble folder. Attempting migration.");
+                        if let Err(e) = std::fs::rename(test_dir.as_path(), data_directory.as_path()) {
+                            log::warn!("Failed to migrate old data directory.\n\
+                            Error: {}\n\
+                            Error source: {:#?}", &e, e.source());
+                        }
+                    } else {
+                        log::info!("Failed to find test dir {}. May not exist on host system.", test_dir.display());
+                    }
+                }
+            }
+
+            if let Err(e) = clear_old_ribble_state(data_directory.as_path()) {
+                log::warn!(
+                    "Error with clearing old data file: {e}\nError source:{:#?}",
+                    e.source()
+                );
+            }
+
+            let old_model_path = data_directory.join(OLD_MODEL_STUB);
+            if let Err(e) = migrate_model_filenames(old_model_path.as_path()) {
+                log::warn!(
+                    "Error with renaming old model files: {e}\nError source: {:#?}",
+                    e.source()
+                );
+            }
+            *migration_version
+        };
+
 
         // Create a folder for the logs if it doesn't already exist.
         let logs_directory = data_directory.join(Self::LOGS_SLUG);
@@ -117,54 +178,6 @@ impl RibbleRunner<'_> {
 
         // Set up the crash handler
         let crash_handler = set_up_desktop_crash_handler()?;
-
-        // Load the version & handle updates
-        // The path gets canonicalized (and allocated) in the method, so only send the data directory here.
-        let serialized_version = Self::deserialize_version(data_directory.as_path());
-
-        // NOTE: at the moment there is no implementation for checking version updates.
-        // It is undecided as of the present as to how this app will be distributed.
-        let migration_version = MIGRATION_VERSION.get_or_init(|| {
-            let min_ribble_version = RibbleVersion::new().set_major(0).set_minor(1).set_minor(2);
-            RibbleVersion::default().set_min_compatible(min_ribble_version)
-        });
-
-        let version = if migration_version.compatible(serialized_version) {
-            serialized_version
-        } else {
-            // TODO: test this on macos.
-            #[cfg(target_os = "macos")]
-            {
-                // The old macOS release may have an incorrect App folder naming convention
-                // If the old folder exists (and is not properly named), it is also the case that
-                // the new folder will be empty and can be clobbered.
-
-                if let Some(parent) = data_directory.parent()
-                    && parent.is_dir()
-                {
-                    let test_dir = parent.join("Ribble");
-                    if test_dir.is_dir() {
-                        std::fs::rename(test_dir.as_path(), data_directory.as_path());
-                    }
-                }
-            }
-
-            if let Err(e) = clear_old_ribble_state(data_directory.as_path()) {
-                log::warn!(
-                    "Error with clearing old data file: {e}\nError source:{:#?}",
-                    e.source()
-                );
-            }
-
-            let old_model_path = data_directory.join(OLD_MODEL_STUB);
-            if let Err(e) = migrate_model_filenames(old_model_path.as_path()) {
-                log::warn!(
-                    "Error with renaming old model files: {e}\nError source: {:#?}",
-                    e.source()
-                );
-            }
-            *migration_version
-        };
 
         // Construct the app
         // Give a copy of the data dir to the eframe window (for other persistence)
