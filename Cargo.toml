@@ -30,16 +30,12 @@ crossbeam = "0.8.4"
 directories = "6.0.0"
 eframe = { version = "0.32.1", features = ["persistence", "wgpu", "x11", "wayland", "default_fonts"] }
 egui = { version = "0.32.1", features = ["persistence", "serde"] }
-# This needs to be added to gain access to the default Vulkan/Gles backends in egui.
-# TODO: look at wgpu - might need to strip unused backends if they're being pulled in
-# The binary is gigantic atm.
 hound = "3.5.1"
 realfft = "3.5.0"
 rfd = "0.15.4"
 serde = { version = "1.0.209", features = ["derive"] }
 strum = "0.27.1"
 # TODO: determine whether to include integrity checking utilities; might be out of scope
-# Also This might need to pull whisper-rs from the main branch.
 ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.2.1", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler", "sdl2-static"] }
 log = "0.4.22"
 ron = "0.11.0"
