@@ -2,6 +2,8 @@
 name = "ribble"
 version = "0.1.2"
 edition = "2024"
+license = "MIT"
+# TODO: LICENSE.md
 
 # TODO: this might be able to be renamed if/when Cargo Packager has been removed from the project
 # Opt-level 3 by default
@@ -64,9 +66,10 @@ image = "0.25.6"
 crash-handler = "0.6.3"
 
 [features]
+# TODO: add a feature flag for build.rs (todo) to pre-create the data directory and copy the models over.
 default = []
 cuda = ["ribble_whisper/cuda"]
-# It's a little difficult to trace application-level logging with all of the whisper logging included, so this will be opt-in.
+# It's a little difficult to trace application-level logging with all the whisper logging included, so this will be opt-in.
 log-whisper = ["ribble_whisper/ribble-logging"]
 vulkan = ["ribble_whisper/vulkan"]
 # This implicitly pulls in metal as per ribble_whisper.

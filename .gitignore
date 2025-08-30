@@ -5,3 +5,7 @@
 /release_builds
 Cargo.lock
 /testing_script.rs
+/about.hbs
+/about.toml
+/THIRD_PARTY_LICENSES.html
+/generate_licenses.sh
