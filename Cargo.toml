@@ -3,7 +3,6 @@ name = "ribble"
 version = "0.1.2"
 edition = "2024"
 license = "MIT"
-# TODO: LICENSE.md
 
 # TODO: this might be able to be renamed if/when Cargo Packager has been removed from the project
 # Opt-level 3 by default
