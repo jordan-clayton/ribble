@@ -68,7 +68,7 @@ impl DCBlock {
 
     pub(crate) fn process_signal<'a, I>(&mut self, signal: I)
     where
-        I: Iterator<Item = &'a mut f32>,
+        I: Iterator<Item=&'a mut f32>,
     {
         // TODO: this might be better/more clearly served by a "reset" function
         let old_state = *self;
@@ -108,7 +108,6 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         self.map_iter
-            .next()
-            .and_then(|f| Some(self.dc_block.process(*(f.borrow()))))
+            .next().map(|f| self.dc_block.process(*(f.borrow())))
     }
 }

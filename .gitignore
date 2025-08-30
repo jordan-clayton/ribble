@@ -3,7 +3,6 @@
 /signing.txt
 /dist
 /release_builds
-Cargo.lock
 /testing_script.rs
 /about.hbs
 /about.toml

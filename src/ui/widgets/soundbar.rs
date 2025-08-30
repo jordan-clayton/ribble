@@ -43,7 +43,7 @@ fn interpolate_buckets(
     let frac_idx = last_index as f32 * t;
 
     let bucket_t = frac_idx.fract();
-    debug_assert!(bucket_t >= 0.0 && bucket_t <= 1.0);
+    debug_assert!((0.0..=1.0).contains(&bucket_t));
     let floor = (frac_idx.floor() as usize).min(last_index);
     let ceil = (frac_idx.ceil() as usize).min(last_index);
 
