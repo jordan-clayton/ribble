@@ -1,16 +1,18 @@
 [package]
 name = "ribble"
+authors = ["Jordan Clayton"]
 version = "0.1.2"
 edition = "2024"
 license = "MIT"
+description = "Real-time and offline Whisper transcription."
+readme = "README.md"
+repository = "https://github.com/jordan-clayton/ribble"
 
-# TODO: this might be able to be renamed if/when Cargo Packager has been removed from the project
 # Opt-level 3 by default
 [profile.packaging]
 inherits = "release"
 lto = true
 codegen-units = 1
-# NOTE: Stripping might be better to do after the build.
 strip = true
 
 # Opt-level 3 by default
