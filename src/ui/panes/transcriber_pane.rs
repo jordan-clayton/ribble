@@ -1,7 +1,7 @@
 use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{CompletedRecordingJobs, ModelFile, OfflineTranscriberFeedback};
-use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::ui::panes::PaneView;
+use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::ui::widgets::recording_modal::build_recording_modal;
 use crate::ui::widgets::toggle_switch::toggle;
 use crate::ui::{
@@ -761,10 +761,14 @@ impl PaneView for TranscriberPane {
 
                                 // FRAME SIZE
                                 // Silero v5 requires fixed buffer size based on sample rate, so this has to conditionally render.
-                                // NOTE: this will need to be maintained if swapping the
-                                // VadType::Auto to WebRtc
-                                // --this is not a great solution right now wrt maintainability, but it will do.
-                                if !matches!(vad_configs.vad_type(), VadType::Silero | VadType::Auto) {
+                                // NOTE: If Silero becomes the Auto, then this will need to be
+                                    // swapped to reflect that.
+                                    // ** Bad idea to do it this way, but the VAD apis are slightly
+                                    //    divergent in how they work and the abstraction over them
+                                    //    is bad.
+                                    // ** I haven't thought of a good way to abstract it away and I
+                                    //    really don't care enough right now to bother with it.
+                                if !matches!(vad_configs.vad_type(), VadType::Silero) {
                                     ui.label("Frame size:").on_hover_text("Sets the length of the audio frame used to detect voice.\n\
                                     Larger sizes may introduce latency but provide better results.\n\
                                     Set to Auto for system defaults.");
@@ -848,7 +852,7 @@ impl PaneView for TranscriberPane {
                                 Audio will be normalized to the highest peak.");
 
                                 let mut use_offline = audio_gain_configs.use_offline();
-                                if ui.add(egui::Checkbox::without_text(&mut use_offline)).clicked() {
+                                if ui.add(egui::Checkbox::without_text(&mut use_offline)).on_hover_cursor(egui::CursorIcon::Default).clicked() {
                                     let new_configs = audio_gain_configs.with_use_offline(use_offline);
                                     controller.write_audio_gain_configs(new_configs);
                                 }
@@ -900,7 +904,7 @@ impl PaneView for TranscriberPane {
         if self.download_modal {
             let modal = egui::Modal::new(egui::Id::new("download_models_modal"))
                 .show(ui.ctx(), |ui| {
-                    let height = ui.ctx().screen_rect().height() * MODAL_HEIGHT_PROPORTION;
+                    let height = ui.ctx().content_rect().height() * MODAL_HEIGHT_PROPORTION;
                     ui.set_max_height(height);
                     egui::Frame::default().inner_margin(PANE_INNER_MARGIN).show(ui, |ui| {
                         ui.heading("Download Models:");

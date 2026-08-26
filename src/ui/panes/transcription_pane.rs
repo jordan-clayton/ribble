@@ -1,7 +1,9 @@
 use crate::controller::ribble_controller::RibbleController;
-use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::ui::panes::PaneView;
-use crate::ui::{DEFAULT_TOAST_DURATION, LONG_TOAST_DURATION, PANE_HEADING_BUTTON_SIZE, PANE_INNER_MARGIN};
+use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::ui::{
+    DEFAULT_TOAST_DURATION, LONG_TOAST_DURATION, PANE_HEADING_BUTTON_SIZE, PANE_INNER_MARGIN,
+};
 use egui_notify::Toast;
 
 #[derive(Copy, Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
@@ -142,11 +144,14 @@ impl PaneView for TranscriptionPane {
                                                     .set_directory(controller.base_dir());
 
                                                 if let Some(out_path) = file_dialog.save_file() {
-
                                                     // (linux) if the file extension hasn't been appended, append
                                                     // it to the end of the file name
-                                                    #[cfg(target_os = "linux")] {
-                                                        let out_path = if out_path.extension().is_some_and(|ext| ext == "txt") {
+                                                    #[cfg(target_os = "linux")]
+                                                    {
+                                                        let out_path = if out_path
+                                                            .extension()
+                                                            .is_some_and(|ext| ext == "txt")
+                                                        {
                                                             out_path
                                                         } else {
                                                             out_path.with_extension("txt")
@@ -154,7 +159,8 @@ impl PaneView for TranscriptionPane {
                                                         controller.save_transcription(out_path);
                                                     }
 
-                                                    #[cfg(not(target_os = "linux"))] {
+                                                    #[cfg(not(target_os = "linux"))]
+                                                    {
                                                         controller.save_transcription(out_path);
                                                     }
 
@@ -166,8 +172,8 @@ impl PaneView for TranscriptionPane {
                                         },
                                     );
                                 })
-                                    .response
-                                    .on_hover_cursor(egui::CursorIcon::Default);
+                                .response
+                                .on_hover_cursor(egui::CursorIcon::Default);
                             })
                         });
                     });
@@ -185,23 +191,28 @@ impl PaneView for TranscriptionPane {
                                 .show(ui, |ui| {
                                     // Stick a second frame in the scroll area to prevent the
                                     // scrollbar from clobbering the text.
-                                    egui::Frame::default().inner_margin(PANE_INNER_MARGIN)
-                                        .show(ui, |ui| {
+                                    egui::Frame::default().inner_margin(PANE_INNER_MARGIN).show(
+                                        ui,
+                                        |ui| {
                                             // This should -hopefully- help with the text-wrapping
                                             ui.with_layout(
                                                 egui::Layout::top_down(egui::Align::LEFT)
                                                     .with_cross_justify(true),
                                                 |ui| {
                                                     // Show the full transcription state first.
-                                                    let confirmed = transcription_snapshot.confirmed();
+                                                    let confirmed =
+                                                        transcription_snapshot.confirmed();
                                                     if !confirmed.is_empty() {
                                                         ui.monospace(
-                                                            transcription_snapshot.confirmed().trim_start(),
+                                                            transcription_snapshot
+                                                                .confirmed()
+                                                                .trim_start(),
                                                         );
                                                     }
                                                     // Then print the segment buffer.
-                                                    for segment in
-                                                        transcription_snapshot.string_segments().iter()
+                                                    for segment in transcription_snapshot
+                                                        .string_segments()
+                                                        .iter()
                                                     {
                                                         if !segment.is_empty() {
                                                             // Try to preserve whitespace/newlines.
@@ -214,7 +225,8 @@ impl PaneView for TranscriptionPane {
                                                     }
                                                 },
                                             );
-                                        });
+                                        },
+                                    );
                                 })
                         });
                 });

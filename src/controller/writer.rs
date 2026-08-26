@@ -10,8 +10,8 @@ use ribble_whisper::audio::pcm::IntoPcmS16;
 use ribble_whisper::utils::{Receiver, Sender};
 use std::error::Error;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 

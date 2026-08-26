@@ -1,7 +1,5 @@
-#![cfg_attr(
-    not(debug_assertions),
-    allow(dead_code, unused_imports)
-)] // Turn off warnings in release mode
+#![cfg_attr(not(debug_assertions), allow(dead_code, unused_imports))]
+// Turn off warnings in release mode
 // There is a lot of unused application code--mostly constructions/artifacts of the design process
 // They may end up useful in the future/somewhere else, so for now they'll remain in the project.
 #![windows_subsystem = "windows"] // Hide console window in release mode on windows.
@@ -23,4 +21,3 @@ fn main() -> Result<(), RibbleError> {
     let ribble = RibbleRunner::new()?;
     ribble.run()
 }
-

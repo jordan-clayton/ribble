@@ -1,3 +1,9 @@
 [submodule "external/irox"]
 	path = external/irox
 	url = https://github.com/jordan-clayton/irox.git
+[submodule "external/catpuccin_egui"]
+	path = external/catpuccin_egui
+	url = https://github.com/jordan-clayton/catpuccin_egui.git
+[submodule "external/egui_notify"]
+	path = external/egui_notify
+	url = https://github.com/jordan-clayton/egui-notify.git

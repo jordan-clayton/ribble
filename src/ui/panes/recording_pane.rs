@@ -1,7 +1,7 @@
-use crate::controller::ribble_controller::RibbleController;
 use crate::controller::CompletedRecordingJobs;
-use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::controller::ribble_controller::RibbleController;
 use crate::ui::panes::PaneView;
+use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::ui::widgets::recording_modal::build_recording_modal;
 use crate::ui::{DEFAULT_TOAST_DURATION, GRID_ROW_SPACING_COEFF, PANE_INNER_MARGIN};
 use crate::utils::recorder_configs::{

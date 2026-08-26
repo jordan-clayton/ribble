@@ -11,8 +11,8 @@ use crate::controller::ribble_controller::RibbleController;
 use crate::controller::{
     AmortizedDownloadProgress, AmortizedProgress, LatestError, UI_UPDATE_QUEUE_SIZE,
 };
-use crate::ui::panes::ribble_pane::{ClosableRibbleViewPane, RibblePaneId};
 use crate::ui::panes::RibbleTree;
+use crate::ui::panes::ribble_pane::{ClosableRibbleViewPane, RibblePaneId};
 use crate::ui::widgets::pie_progress::pie_progress;
 use crate::ui::widgets::recording_icon::recording_icon;
 use crate::utils::errors::RibbleError;
@@ -20,19 +20,18 @@ use crate::utils::errors::RibbleError;
 use crate::utils::errors::RibbleErrorCategory;
 use crate::utils::migration::{RibbleVersion, Version};
 use crate::utils::preferences::RibbleAppTheme;
-use eframe::glow::Context;
 use eframe::Storage;
 use egui_notify::{Toast, Toasts};
 use egui_theme_lerp::ThemeAnimator;
 use irox_egui_extras::progressbar::ProgressBar;
 use ribble_whisper::audio::audio_backend::{
-    default_backend, AudioBackend, CaptureSpec, Sdl2Backend,
+    AudioBackend, CaptureSpec, Sdl2Backend, default_backend,
 };
 use ribble_whisper::audio::microphone::{MicCapture, Sdl2Capture};
 use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::sdl2;
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{get_channel, Receiver};
+use ribble_whisper::utils::{Receiver, get_channel};
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 
@@ -272,7 +271,15 @@ impl Drop for Ribble {
 }
 
 impl eframe::App for Ribble {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    // The update loop is now split into logic() and ui() for better separation of concerns.
+
+    // Logic must not show any UI, but logic gets called even if the window gets hidden
+    // so that messages aren't lost.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // There's a bit of an issue with stale GUI/fail to repaint
+        // To ensure the GUI is up to date/logic isn't missed,
+        // prompt a repaint after 1 second.
+        ctx.request_repaint_after_secs(1.0);
         // Check requests for an audio handle and produce an AudioDevice for capture.
         while let Ok(request) = self.capture_requests.try_recv() {
             match request {
@@ -301,38 +308,27 @@ impl eframe::App for Ribble {
             self.toasts_handle.add(toast);
         }
 
-        // Set the system theme.
-        let system_theme = match self.controller.read_system_visuals() {
-            None => Self::get_system_visuals(ctx),
-            Some(visuals) => visuals,
-        };
-
-        // Check to see if the system theme has been changed (via user preferences).
-        // If this should start the transition animation, swap the themes.
-        let start_transition = if system_theme != self.theme_animator.theme_2 {
-            // If the transition is already going on (or has completed), swap theme 2 into theme
-            // 1 and set theme 2 to the new theme.
-            if self.theme_animator.progress <= 1.0 {
-                self.theme_animator.theme_1 = self.theme_animator.theme_2.clone();
-            }
-            self.theme_animator.theme_2 = system_theme;
-            self.theme_animator.theme_1_to_2 = true;
-            true
-        } else {
-            false
-        };
+        let theme = ctx.system_theme().unwrap_or(egui::Theme::Dark);
 
         // Set the GUI constants.
-        ctx.style_mut(|style| {
+        ctx.style_mut_of(theme, |style| {
             style.interaction.show_tooltips_only_when_still = true;
             style.interaction.tooltip_grace_time = TOOLTIP_GRACE_TIME;
             style.interaction.tooltip_delay = TOOLTIP_DELAY;
         });
 
-        egui::TopBottomPanel::top("top_panel")
+        // If there's any sort of "work" being done (transcribing, recording)
+        // then request a repaint -> the downloads/progress will already request repaints if they
+        // are showing work.
+        if self.controller.should_repaint() {
+            ctx.request_repaint();
+        }
+    }
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        egui::Panel::top("top_panel")
             .resizable(false)
-            .min_height(0.0)
-            .show(ctx, |ui| {
+            .min_size(0.0)
+            .show(ui, |ui| {
                 ui.columns_const(|[col1, col2]| {
                     // Recording icon + status message
                     col1.vertical_centered_justified(|ui| {
@@ -556,12 +552,21 @@ impl eframe::App for Ribble {
                                     resp
                                 }
                             }
-                                .on_hover_ui(|ui| {
-                                    ui.style_mut().interaction.selectable_labels = true;
-                                    ui.label("Show downloads");
-                                });
+                            .on_hover_ui(|ui| {
+                                ui.style_mut().interaction.selectable_labels = true;
+                                ui.label("Show downloads");
+                            });
 
                             if download_button.clicked() {
+                                // This is a quick and dirty debug test to sus out what might
+                                // be happening with Wayland/Tiling WM on app launch.
+                                //
+                                // The application seems to fail hit tests until a window resize
+                                // event happens and I'm still not sure why.
+                                #[cfg(debug_assertions)]
+                                {
+                                    eprintln!("Download button clicked!");
+                                }
                                 self.tree.add_new_pane(RibblePaneId::Downloads);
                                 ui.ctx().request_repaint();
                             }
@@ -570,10 +575,10 @@ impl eframe::App for Ribble {
                 });
             });
 
-        egui::TopBottomPanel::bottom("bottom_panel")
-            .min_height(0.0)
+        egui::Panel::bottom("bottom_panel")
+            .min_size(0.0)
             .resizable(false)
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 ui.columns_const(|[_col1, col2, col3]| {
                     #[cfg(debug_assertions)]
                     {
@@ -681,7 +686,7 @@ impl eframe::App for Ribble {
                                                 _ui.painter().rect_stroke(
                                                     rect,
                                                     0.0,
-                                                    egui::Stroke::new(1.0, color),
+                                                    egui::Stroke::new(1.0f32, color),
                                                     egui::StrokeKind::Middle,
                                                 );
                                             }
@@ -763,15 +768,43 @@ impl eframe::App for Ribble {
                 });
             });
 
-        let mut frame = egui::Frame::central_panel(ctx.style().as_ref());
+        let mut frame = egui::Frame::central_panel(ui.style());
         frame.inner_margin = egui::Margin::ZERO;
 
-        egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+        // TODO: Technically this should be performed in logic
+        // --but that would require me to also cache this and I don't want to
+        //   bother with the state right now.
+        // --When I have time to dedicate to this application, this should be addressed.
+
+        // Set the system theme.
+        let system_theme = match self.controller.read_system_visuals() {
+            // This -technically- shouldn't be grabbed from the UI, but for now it's fine.
+            // Again, this is something that should be handled in logic.
+            None => Self::get_system_visuals(ui.ctx()),
+            Some(visuals) => visuals,
+        };
+        // Check to see if the system theme has been changed (via user preferences).
+        // If this should start the transition animation, swap the themes.
+        //
+        let start_transition = if system_theme != self.theme_animator.theme_2 {
+            // If the transition is already going on (or has completed), swap theme 2 into theme
+            // 1 and set theme 2 to the new theme.
+            if self.theme_animator.progress <= 1.0 {
+                self.theme_animator.theme_1 = self.theme_animator.theme_2.clone();
+            }
+            self.theme_animator.theme_2 = system_theme;
+            self.theme_animator.theme_1_to_2 = true;
+            true
+        } else {
+            false
+        };
+
+        egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             if self.theme_animator.anim_id.is_none() {
                 self.theme_animator.create_id(ui);
             } else {
                 // This implicitly set s the visuals
-                self.theme_animator.animate(ctx);
+                self.theme_animator.animate(ui);
             }
 
             if start_transition {
@@ -781,14 +814,8 @@ impl eframe::App for Ribble {
         });
 
         // Show any toasts that might be in the buffer.
-        self.toasts_handle.show(ctx);
-
-        // If there's any sort of "work" being done (transcribing, recording)
-        // then request a repaint -> the downloads/progress will already request repaints if they
-        // are showing work.
-        if self.controller.should_repaint() {
-            ctx.request_repaint();
-        }
+        // ** I -think- this is how to do it now.
+        self.toasts_handle.show(ui.ctx());
     }
 
     // This will automatically save egui memory (window position, etc.) upon opening the storage file
@@ -809,7 +836,7 @@ impl eframe::App for Ribble {
     // Called after the last "save" (will save internally again on drop)
     // If the user closes the window while background threads are still running,
     // the program will deadlock.
-    fn on_exit(&mut self, _gl: Option<&Context>) {
+    fn on_exit(&mut self) {
         log::info!("Starting runtime cleanup.");
         self.controller.stop_work();
         // WAIT until the last SDL device gets dropped on the main thread before dropping everything.

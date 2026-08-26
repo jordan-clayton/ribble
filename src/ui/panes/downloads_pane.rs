@@ -1,8 +1,8 @@
-use crate::controller::ribble_controller::RibbleController;
 use crate::controller::FileDownload;
-use crate::ui::panes::ribble_pane::{PaneView, RibblePaneId};
+use crate::controller::ribble_controller::RibbleController;
 use crate::ui::GRID_ROW_SPACING_COEFF;
 use crate::ui::PANE_INNER_MARGIN;
+use crate::ui::panes::ribble_pane::{PaneView, RibblePaneId};
 use irox_egui_extras::progressbar::ProgressBar;
 use unit_prefix::NumberPrefix;
 
@@ -95,7 +95,6 @@ impl PaneView for DownloadsPane {
                         });
                 });
         });
-
 
         // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
         // will just nop.

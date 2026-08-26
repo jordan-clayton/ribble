@@ -2,17 +2,15 @@ use crate::ui::app::Ribble;
 use crate::utils::crash_handler::set_up_desktop_crash_handler;
 use crate::utils::errors::RibbleError;
 use crate::utils::migration::{
-    clear_old_ribble_state, migrate_model_filenames, RibbleVersion, Version,
+    RibbleVersion, Version, clear_old_ribble_state, migrate_model_filenames,
 };
 use crash_handler::CrashHandler;
 use directories::ProjectDirs;
-use eframe::{run_native, AppCreator, NativeOptions};
+use eframe::{AppCreator, NativeOptions, run_native};
 use egui::{IconData, ViewportBuilder};
 #[cfg(debug_assertions)]
 use flexi_logger::Duplicate;
-use flexi_logger::{
-    Age, Cleanup, Criterion, FileSpec, Logger, LoggerHandle, Naming, WriteMode,
-};
+use flexi_logger::{Age, Cleanup, Criterion, FileSpec, Logger, LoggerHandle, Naming, WriteMode};
 
 use image::GenericImageView;
 use ron::ser::PrettyConfig;
@@ -76,7 +74,6 @@ impl RibbleRunner<'_> {
         );
         debug_assert!(data_directory.is_dir(), "Data dir not a directory.");
 
-
         // Load the version & handle updates
         // The path gets canonicalized (and allocated) in the method, so only send the data directory here.
         let serialized_version = Self::deserialize_version(data_directory.as_path());
@@ -108,13 +105,22 @@ impl RibbleRunner<'_> {
                     let test_dir = parent.join("Ribble");
                     if test_dir.is_dir() {
                         log::info!("Located old Ribble folder. Attempting migration.");
-                        if let Err(e) = std::fs::rename(test_dir.as_path(), data_directory.as_path()) {
-                            log::warn!("Failed to migrate old data directory.\n\
+                        if let Err(e) =
+                            std::fs::rename(test_dir.as_path(), data_directory.as_path())
+                        {
+                            log::warn!(
+                                "Failed to migrate old data directory.\n\
                             Error: {}\n\
-                            Error source: {:#?}", &e, e.source());
+                            Error source: {:#?}",
+                                &e,
+                                e.source()
+                            );
                         }
                     } else {
-                        log::info!("Failed to find test dir {}. May not exist on host system.", test_dir.display());
+                        log::info!(
+                            "Failed to find test dir {}. May not exist on host system.",
+                            test_dir.display()
+                        );
                     }
                 }
             }
@@ -135,7 +141,6 @@ impl RibbleRunner<'_> {
             }
             *migration_version
         };
-
 
         // Create a folder for the logs if it doesn't already exist.
         let logs_directory = data_directory.join(Self::LOGS_SLUG);
@@ -171,7 +176,6 @@ impl RibbleRunner<'_> {
                 Naming::Timestamps,
                 Cleanup::KeepLogFiles(Self::MAX_LOG_FILES),
             );
-
 
         // This needs to be kept alive until the app goes out of scope (consume on run).
         let logger_handle = logger.start()?;

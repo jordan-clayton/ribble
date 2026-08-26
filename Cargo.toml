@@ -1,7 +1,7 @@
 [package]
 name = "ribble"
 authors = ["Jordan Clayton"]
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 license = "MIT"
 description = "Real-time and offline Whisper transcription."
@@ -24,21 +24,26 @@ codegen-units = 1
 incremental = false
 strip = false
 
-
 [dependencies]
 atomic_enum = "0.3.0"
-catppuccin-egui = { version = "5.6.0", default-features = false, features = ["egui32"] }
+catppuccin-egui = { path = "external/catpuccin_egui/", default-features = false, features = ["egui36"] }
 crossbeam = "0.8.4"
 directories = "6.0.0"
-eframe = { version = "0.32.1", features = ["persistence", "wgpu", "x11", "wayland", "default_fonts"] }
-egui = { version = "0.32.1", features = ["persistence", "serde"] }
+eframe = { version = "0.36.1", features = ["persistence", "wgpu", "x11", "wayland", "default_fonts"] }
+egui = { version = "0.36.1", features = ["persistence", "serde"] }
 hound = "3.5.1"
 realfft = "3.5.0"
 rfd = "0.15.4"
 serde = { version = "1.0.209", features = ["derive"] }
-strum = "0.27.1"
+# The strum macros have been pulled out of strum -> derive will pull them back in;
+# I use them heavily in this project, so strum-macros need to be part of the project.
+strum = {version = "0.28.0", features = ["derive"]}
 # TODO: determine whether to include integrity checking utilities; might be out of scope
-ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.2.2", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler", "sdl2-static"] }
+# *** NOTE: return this back to static-linking if/when the project gets updated
+# *** Cmake 4.0 will not touch anything below 3.5 and the old sdl cmake is likely -very- outdated
+# *** ribble-whisper needs to be updated in full ->
+# **  There are major bugs in whisper-rs-sys and whisper-rs has a memory leak that needs fixing.
+ribble_whisper = { git = "https://github.com/jordan-clayton/ribble-whisper.git", version = "0.2.3", features = ["serde", "crossbeam", "downloader", "symphonia-all", "resampler", "sdl2"] }
 log = "0.4.22"
 ron = "0.11.0"
 irox-egui-extras = { path = "external/irox/libraries/egui_extras" }
@@ -50,13 +55,13 @@ indexmap = { version = "2.10.0", features = ["serde", "rayon"] }
 twox-hash = { version = "2.1.1", features = ["xxhash3_64"] }
 enum_dispatch = "0.3.13"
 mimalloc = "0.1.47"
-egui_tiles = { version = "0.13.0", features = ["serde"] }
+egui_tiles = { version = "0.17.1", features = ["serde"] }
 opener = { version = "0.8.2", features = ["reveal"] }
-egui-theme-lerp = "0.3.0"
+egui-theme-lerp = "0.7.0"
 notify-debouncer-full = { version = "0.6.0", features = ["crossbeam-channel"] }
 unit-prefix = "0.5.1"
-egui-colorgradient = "0.2.0"
-egui-notify = "0.20.0"
+egui-colorgradient = "0.2.3"
+egui-notify = { path = "external/egui_notify/" }
 flexi_logger = "0.31.2"
 image = "0.25.6"
 crash-handler = "0.6.3"
@@ -64,6 +69,7 @@ crash-handler = "0.6.3"
 [features]
 default = ["log-whisper"]
 pack-in-models = []
+sdl2-static = ["ribble_whisper/sdl2-static"]
 cuda = ["ribble_whisper/cuda"]
 # It's a little difficult to trace application-level logging with all the whisper logging included, so this will be opt-in.
 log-whisper = ["ribble_whisper/ribble-logging"]

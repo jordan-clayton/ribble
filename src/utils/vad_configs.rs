@@ -2,10 +2,10 @@ use crate::utils::errors::RibbleError;
 use ribble_whisper::audio::pcm::PcmS16Convertible;
 use ribble_whisper::audio::recorder::RecorderSample;
 use ribble_whisper::transcriber::vad::{
-    DEFAULT_VOICE_PROPORTION_THRESHOLD, Earshot, OFFLINE_VOICE_PROBABILITY_THRESHOLD,
-    REAL_TIME_VOICE_PROBABILITY_THRESHOLD, Resettable, Silero, SileroBuilder, SileroSampleRate,
-    VAD, WebRtc, WebRtcBuilder, WebRtcFilterAggressiveness, WebRtcFrameLengthMillis,
-    WebRtcSampleRate,
+    DEFAULT_VOICE_PROPORTION_THRESHOLD, Earshot, EarshotBuilder,
+    OFFLINE_VOICE_PROBABILITY_THRESHOLD, REAL_TIME_VOICE_PROBABILITY_THRESHOLD, Resettable, Silero,
+    SileroBuilder, SileroSampleRate, VAD, WebRtc, WebRtcBuilder, WebRtcFilterAggressiveness,
+    WebRtcFrameLengthMillis, WebRtcSampleRate,
 };
 use strum::{AsRefStr, Display, EnumIter, IntoStaticStr};
 
@@ -103,7 +103,7 @@ impl VadConfigs {
         match self.vad_type() {
             VadType::Silero => Ok(RibbleVAD::Silero(self.build_silero()?)),
             VadType::Auto | VadType::WebRtc => Ok(RibbleVAD::WebRtc(self.build_webrtc()?)),
-            // VadType::Earshot => Ok(RibbleVAD::Earshot(Box::from(self.build_earshot()?))),
+            VadType::Earshot => Ok(RibbleVAD::Earshot(Box::from(self.build_earshot()?))),
         }
     }
 
@@ -132,11 +132,13 @@ impl VadConfigs {
             .build()?)
     }
 
-    // NOTE: With the change to v6, the issues with Silero are no longer present.
-    // Gain is generally still beneficial if microphone volume is low, but its no longer presenting
-    // detection issues.
-    pub(crate) fn build_auto(&self) -> Result<Silero, RibbleError> {
-        self.build_silero()
+    // NOTE: The default implementation has been changed to Earshot;
+    // It's extremely performant and slightly less memory intensive
+    // even if it takes up about 8KB on the stack.
+    // Silero still tends to struggle with low audio without significant gain,
+    // whereas earshot doesn't, and that is not ideal for a default constructible.
+    pub(crate) fn build_auto(&self) -> Result<Earshot, RibbleError> {
+        self.build_earshot()
     }
 
     pub(crate) fn build_webrtc(&self) -> Result<WebRtc, RibbleError> {
@@ -156,22 +158,30 @@ impl VadConfigs {
             .build_webrtc()?)
     }
 
-    // pub(crate) fn build_earshot(&self) -> Result<Earshot, RibbleError> {
-    //     if !matches!(self.vad_type, VadType::Earshot | VadType::Auto) {
-    //         return Err(RibbleError::Core(format!(
-    //             "Vad type mismatch, cannot build Earshot using: {}",
-    //             self.vad_type.as_ref()
-    //         )));
-    //     }
-    //
-    //     let (frame_size, aggressiveness, probability) = self.prep_webrtc();
-    //     Ok(WebRtcBuilder::new()
-    //         .with_sample_rate(WebRtcSampleRate::R16kHz)
-    //         .with_frame_length_millis(frame_size)
-    //         .with_filter_aggressiveness(aggressiveness)
-    //         .with_voiced_proportion_threshold(probability)
-    //         .build_earshot()?)
-    // }
+    pub(crate) fn build_earshot(&self) -> Result<Earshot, RibbleError> {
+        if !matches!(self.vad_type, VadType::Earshot | VadType::Auto) {
+            return Err(RibbleError::Core(format!(
+                "Vad type mismatch, cannot build Earshot using: {}",
+                self.vad_type.as_ref()
+            )));
+        }
+
+        // TODO: pick where "Auto" should be: ~0.3(Flexible)-0.5(Medium)
+        let probability = match self.strictness() {
+            VadStrictness::Flexible => FLEXIBLE_SILERO_PROBABILITY_THRESHOLD,
+            VadStrictness::Auto | VadStrictness::Medium => REAL_TIME_VOICE_PROBABILITY_THRESHOLD,
+            VadStrictness::Strict => OFFLINE_VOICE_PROBABILITY_THRESHOLD,
+        };
+
+        // NOTE: this will always build properly;
+        // I don't know if that's because it internally panics,
+        // but the API does not use Result, and so this should expect building to always be correct.
+        Ok(EarshotBuilder::new()
+            .with_detection_probability_threshold(probability)
+            // This might need to be tweaked around, or bump the gain settings.
+            .with_voiced_proportion_threshold(REAL_TIME_VOICED_PROPORTION_THRESHOLD)
+            .build())
+    }
 }
 
 impl Default for VadConfigs {
@@ -180,8 +190,6 @@ impl Default for VadConfigs {
     }
 }
 
-// NOTE: Earshot has some integer overflow problems.
-// Until those errors get fixed, do not expose it as a VAD impl.
 #[derive(
     Clone,
     Copy,
@@ -196,20 +204,22 @@ impl Default for VadConfigs {
 )]
 pub(crate) enum VadType {
     Auto,
+    Earshot,
     Silero,
     WebRtc,
-    // Earshot,
 }
 
 impl VadType {
     pub(crate) fn tooltip(&self) -> &'static str {
         match self {
             VadType::Auto => "Use the default algorithm.",
+            VadType::Earshot => {
+                "Highest accuracy, extremely low overhead.\n Recommended for all purposes."
+            }
             VadType::Silero => {
                 "High accuracy, high overhead.\nLeast susceptible to noise but struggles with quiet audio."
             }
-            VadType::WebRtc => "Great accuracy, low overhead.\n Recommended for all purposes.",
-            // VadType::Earshot => "Lower accuracy, lowest overhead.\n Good for all purposes.",
+            VadType::WebRtc => "Great accuracy, low overhead.\n Good for all purposes.",
         }
     }
 }
@@ -253,11 +263,12 @@ pub(crate) enum VadStrictness {
 }
 
 // NOTE: this enum doesn't really provide the benefit it purports to be, but it does save on mental
-// load
-//
+// load.
 // This may eventually be preferred, but the going implementation performs the dispatch earlier for
 // speed and to reduce the memory footprint.
 // This enum, even with boxing, is a bit too large for my liking.
+// TODO: come back to this later; I don't quite remember if this was being used anywhere
+// If it is, it probably shouldn't be
 pub(crate) enum RibbleVAD {
     Silero(Silero),
     WebRtc(WebRtc),
@@ -293,6 +304,13 @@ impl Resettable for RibbleVAD {
 
 // This ZST is just to reduce the size of the option used for "No offline VAD" branch in the
 // transcriber engine.
+// The type inference cannot determine how to make the function call concrete without an explicit
+// VAD -> since RibbleVAD isn't being used right now.
+// This is more of an "appease the compiler."
+// NOTE: it is technically a little unnecessary
+// -ANY- VAD implementer will do, but the solver
+// still needs to know the "size" of the VAD implementor.
+// A ZST should therefore hopefully minimize the amount of stack space.
 pub(crate) struct NopVAD;
 impl<T: PcmS16Convertible + RecorderSample> VAD<T> for NopVAD {
     fn voice_detected(&mut self, _samples: &[T]) -> bool {

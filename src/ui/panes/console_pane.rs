@@ -1,8 +1,8 @@
-use crate::controller::ribble_controller::RibbleController;
 use crate::controller::ConsoleMessage;
-use crate::ui::panes::ribble_pane::RibblePaneId;
-use crate::ui::panes::PaneView;
+use crate::controller::ribble_controller::RibbleController;
 use crate::ui::PANE_INNER_MARGIN;
+use crate::ui::panes::PaneView;
+use crate::ui::panes::ribble_pane::RibblePaneId;
 use std::sync::Arc;
 
 const SPACING_COEFF: f32 = 1.5;
@@ -46,26 +46,31 @@ impl PaneView for ConsolePane {
 
         let console_bg_color: egui::Color32 = egui::lerp(panel_rgb..=text_edit_rgb, 0.85).into();
 
-        egui::Frame::default().fill(panel_col).inner_margin(PANE_INNER_MARGIN).show(ui, |ui| {
-            ui.heading("Console:");
-            egui::Frame::default().fill(console_bg_color).show(ui, |ui| {
-                // NOTE: if swapping to a ScrollArea::both(), set the TextModeWrap in the label to Extend.
-                egui::ScrollArea::vertical()
-                    .stick_to_bottom(true)
-                    // Fill space -inside- the scroll area.
-                    .auto_shrink([false; 2])
+        egui::Frame::default()
+            .fill(panel_col)
+            .inner_margin(PANE_INNER_MARGIN)
+            .show(ui, |ui| {
+                ui.heading("Console:");
+                egui::Frame::default()
+                    .fill(console_bg_color)
                     .show(ui, |ui| {
-                        // Set the spacing between messages to be a little bit larger.
-                        let mut item_spacing = ui.spacing().item_spacing;
-                        item_spacing.y *= SPACING_COEFF;
-                        ui.style_mut().spacing.item_spacing = item_spacing;
-                        // This should just... print things?
-                        for msg in self.message_buffer.iter() {
-                            ui.label(msg.to_console_text(ui.visuals()));
-                        }
+                        // NOTE: if swapping to a ScrollArea::both(), set the TextModeWrap in the label to Extend.
+                        egui::ScrollArea::vertical()
+                            .stick_to_bottom(true)
+                            // Fill space -inside- the scroll area.
+                            .auto_shrink([false; 2])
+                            .show(ui, |ui| {
+                                // Set the spacing between messages to be a little bit larger.
+                                let mut item_spacing = ui.spacing().item_spacing;
+                                item_spacing.y *= SPACING_COEFF;
+                                ui.style_mut().spacing.item_spacing = item_spacing;
+                                // This should just... print things?
+                                for msg in self.message_buffer.iter() {
+                                    ui.label(msg.to_console_text(ui.visuals()));
+                                }
+                            });
                     });
             });
-        });
 
         // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
         // will just nop.

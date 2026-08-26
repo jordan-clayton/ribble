@@ -1,24 +1,22 @@
 use crate::utils::errors::RibbleError;
-use crash_handler::{make_crash_event, CrashContext, CrashEventResult, CrashHandler};
+use crash_handler::{CrashContext, CrashEventResult, CrashHandler, make_crash_event};
 
 // TODO: test other platforms.
 
 // NOTE: this could be a completely generic function -> if that's required, return a Result<CrashHandler> instead
 // and coerce it at the call site.
 pub(crate) fn set_up_desktop_crash_handler() -> Result<CrashHandler, RibbleError> {
-    let handler = unsafe {
-        CrashHandler::attach(make_crash_event(crash_popup))?
-    };
+    let handler = unsafe { CrashHandler::attach(make_crash_event(crash_popup))? };
     Ok(handler)
 }
-
 
 // This is a "handled"-only sort of deal, by which I mean
 // an OS pop-up will pop up if the program isn't already terminated
 // The goal here is to provide a best-effort last notification to the user
 // to give them more information in case there's a weird (likely GPU) exception.
 fn crash_popup(crash_context: &CrashContext) -> CrashEventResult {
-    #[cfg(any(target_os = "linux", target_os = "android"))] {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
         use exception_constants::*;
         let sig_info = crash_context.siginfo;
 
@@ -31,14 +29,18 @@ fn crash_popup(crash_context: &CrashContext) -> CrashEventResult {
 
         // "Human-Readable" Signal
         let error_description = match sig_no {
-            SIGABRT => format!("Signal: SIGABRT. Abnormal process termination (from address: {addr:#04X})"),
+            SIGABRT => {
+                format!("Signal: SIGABRT. Abnormal process termination (from address: {addr:#04X})")
+            }
             SIGBUS => format!("Signal: SIGBUS. Bus error (bad memory access at: {addr:#04X})"),
             SIGFPE => format!("Signal: SIGFPE. Arithmetic error. (fault address: {addr:#04X})"),
             SIGILL => format!("Signal: SIGILL. Illegal instruction. (fault address: {addr:#04X}"),
             // Ignore SIGTRAP -> breakpoints will set this off, and it should just return
             // There's nothing to alert.
             SIGTRAP => return CrashEventResult::Handled(true),
-            SIGSEGV => format!("Signal: SIGSEGV. Address not mapped to object (fault address: {addr:#04X})"),
+            SIGSEGV => format!(
+                "Signal: SIGSEGV. Address not mapped to object (fault address: {addr:#04X})"
+            ),
 
             // Consider all other signals "handled."
             // The main concern here is (GPU) segfaults.
@@ -54,9 +56,12 @@ fn crash_popup(crash_context: &CrashContext) -> CrashEventResult {
             .show();
     }
 
-    #[cfg(target_os = "macos")]{
+    #[cfg(target_os = "macos")]
+    {
         use exception_constants::*;
-        let exception_info = crash_context.exception.expect("There should be an exception if this handler is being called.");
+        let exception_info = crash_context
+            .exception
+            .expect("There should be an exception if this handler is being called.");
 
         let kind = exception_info.kind;
         let exception_code = exception_info.code;
@@ -85,12 +90,16 @@ fn crash_popup(crash_context: &CrashContext) -> CrashEventResult {
         // The next best thing would be to use the process ID, I suppose.
         let error_description = match exception_subcode {
             Some(subcode) => {
-                format!("{error_string} in process: {pid}\n\
-            Code: {exception_code:#04X}\n Subcode: {subcode:#04X}")
+                format!(
+                    "{error_string} in process: {pid}\n\
+            Code: {exception_code:#04X}\n Subcode: {subcode:#04X}"
+                )
             }
             None => {
-                format!("{error_string} in process:{pid}\n\
-            Code: {exception_code:#04X}")
+                format!(
+                    "{error_string} in process:{pid}\n\
+            Code: {exception_code:#04X}"
+                )
             }
         };
 
@@ -118,7 +127,7 @@ fn crash_popup(crash_context: &CrashContext) -> CrashEventResult {
             // Consider traps/breakpoints handled
             TRAP => return CrashEventResult::Handled(true),
             HEAP_CORRUPTION => "HEAP_CORRUPTION",
-            _ => return CrashEventResult::Handled(true)
+            _ => return CrashEventResult::Handled(true),
         };
 
         let exception_ptr = crash_context.exception_pointers;

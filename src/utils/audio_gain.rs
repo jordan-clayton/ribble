@@ -105,7 +105,7 @@ impl AudioGain {
 
     pub(crate) fn apply_gain<'a, I>(&self, iter: I)
     where
-        I: Iterator<Item=&'a mut f32>,
+        I: Iterator<Item = &'a mut f32>,
     {
         iter.for_each(|f| *f = (*f * self.multiplier).clamp(-DECIBEL, DECIBEL))
     }
@@ -154,6 +154,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         self.map_iter
-            .next().map(|f| (*f.borrow() * self.gain.mul()).clamp(-DECIBEL, DECIBEL))
+            .next()
+            .map(|f| (*f.borrow() * self.gain.mul()).clamp(-DECIBEL, DECIBEL))
     }
 }

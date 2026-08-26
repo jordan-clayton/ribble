@@ -1,7 +1,7 @@
-use crate::controller::ribble_controller::RibbleController;
 use crate::controller::Progress;
-use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::controller::ribble_controller::RibbleController;
 use crate::ui::panes::PaneView;
+use crate::ui::panes::ribble_pane::RibblePaneId;
 use crate::ui::{GRID_ROW_SPACING_COEFF, PANE_INNER_MARGIN};
 use irox_egui_extras::progressbar::ProgressBar;
 
@@ -44,38 +44,42 @@ impl PaneView for ProgressPane {
             .interact(ui.max_rect(), pane_id, egui::Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::Grab);
 
-        egui::Frame::default().fill(panel_color).inner_margin(PANE_INNER_MARGIN).show(ui, |ui| {
-            ui.heading("Progress:");
-            egui::ScrollArea::vertical()
-                .auto_shrink([false; 2])
-                .stick_to_bottom(true)
-                .show(ui, |ui| {
-                    let grid_width = ui.available_width();
-                    egui::Grid::new("progress_grid")
-                        .num_columns(1)
-                        .min_col_width(grid_width)
-                        .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
-                        .striped(true)
-                        .show(ui, |ui| {
-                            for prog_job in self.current_jobs.iter() {
-                                let mut pb = match prog_job.progress() {
-                                    Some(progress) => ProgressBar::new(progress)
-                                        .desired_width(grid_width)
-                                        .text_left(prog_job.job_name().to_string())
-                                        .text_right(format!("{:.2}%", progress * 100f32)),
-                                    None => ProgressBar::indeterminate()
-                                        .desired_width(grid_width)
-                                        .text_left(prog_job.job_name().to_string()),
-                                };
+        egui::Frame::default()
+            .fill(panel_color)
+            .inner_margin(PANE_INNER_MARGIN)
+            .show(ui, |ui| {
+                ui.heading("Progress:");
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        let grid_width = ui.available_width();
+                        egui::Grid::new("progress_grid")
+                            .num_columns(1)
+                            .min_col_width(grid_width)
+                            .min_row_height(ui.spacing().interact_size.y * GRID_ROW_SPACING_COEFF)
+                            .striped(true)
+                            .show(ui, |ui| {
+                                for prog_job in self.current_jobs.iter() {
+                                    let mut pb = match prog_job.progress() {
+                                        Some(progress) => ProgressBar::new(progress)
+                                            .desired_width(grid_width)
+                                            .text_left(prog_job.job_name().to_string())
+                                            .text_right(format!("{:.2}%", progress * 100f32)),
+                                        None => ProgressBar::indeterminate()
+                                            .desired_width(grid_width)
+                                            .text_left(prog_job.job_name().to_string()),
+                                    };
 
-                                pb.animate = true;
-                                ui.add(pb);
-                                ui.end_row();
-                            }
-                        }).response.on_hover_cursor(egui::CursorIcon::Default);
-                });
-        });
-
+                                    pb.animate = true;
+                                    ui.add(pb);
+                                    ui.end_row();
+                                }
+                            })
+                            .response
+                            .on_hover_cursor(egui::CursorIcon::Default);
+                    });
+            });
 
         // Add a context menu to make this closable -> NOTE: if the pane should not be closed, this
         // will just nop.

@@ -2,7 +2,7 @@ use crate::controller::VisualizerPacket;
 use crate::controller::WriteRequest;
 use crate::controller::{
     AtomicOfflineTranscriberFeedback, Bus, ConsoleMessage, OfflineTranscriberFeedback, Progress,
-    ProgressMessage, RibbleMessage, WorkRequest, UTILITY_QUEUE_SIZE,
+    ProgressMessage, RibbleMessage, UTILITY_QUEUE_SIZE, WorkRequest,
 };
 use crate::utils::audio_gain::AudioGainConfigs;
 use crate::utils::dc_block::DCBlock;
@@ -24,20 +24,20 @@ use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
 use ribble_whisper::transcriber::vad::VAD;
 use ribble_whisper::transcriber::{
-    redirect_whisper_logging_to_hooks, TranscriptionSnapshot, WhisperCallbacks,
-    WhisperControlPhrase, WhisperOutput, WHISPER_SAMPLE_RATE,
+    TranscriptionSnapshot, WHISPER_SAMPLE_RATE, WhisperCallbacks, WhisperControlPhrase,
+    WhisperOutput, redirect_whisper_logging_to_hooks,
 };
 use ribble_whisper::utils::callback::{RibbleWhisperCallback, StaticRibbleWhisperCallback};
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{get_channel, Sender};
+use ribble_whisper::utils::{Sender, get_channel};
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model::ModelRetriever;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // TODO: double-check the real-time print-update loop: make sure it ends when the queue goes out of scope instead of just the flag.
 struct TranscriberEngineState {
@@ -130,10 +130,16 @@ impl TranscriberEngineState {
                 })?;
                 self.run_realtime_transcription(audio_backend, shared_model_retriever, vad)
             }
-            // VadType::Earshot => {
-            //     let vad = configs.build_earshot()?;
-            //     self.run_realtime_transcription(audio_backend, shared_model_retriever, vad)
-            // }
+
+            VadType::Earshot => {
+                // NOTE: this will always be OK, but in-case the API ever changes,
+                // this will perform the same inspection to hopefully reduce
+                // any chances of a state inconsistency.
+                let vad = configs.build_earshot().inspect_err(|_| {
+                    self.realtime_running.store(false, Ordering::Release);
+                })?;
+                self.run_realtime_transcription(audio_backend, shared_model_retriever, vad)
+            }
             VadType::Auto => {
                 let vad = configs.build_auto().inspect_err(|_| {
                     self.realtime_running.store(false, Ordering::Release);
@@ -486,10 +492,10 @@ impl TranscriberEngineState {
                     })?;
                     self.run_offline_transcription(shared_model_retriever, Some(vad))
                 }
-                // VadType::Earshot => {
-                //     let vad = configs.build_earshot()?;
-                //     self.run_offline_transcription(shared_model_retriever, Some(vad))
-                // }
+                VadType::Earshot => {
+                    let vad = configs.build_earshot()?;
+                    self.run_offline_transcription(shared_model_retriever, Some(vad))
+                }
                 VadType::Auto => {
                     let vad = configs.build_auto().inspect_err(|_| {
                         self.offline_running.store(false, Ordering::Release);
@@ -522,9 +528,9 @@ impl TranscriberEngineState {
         } else {
             Err(RibbleError::Core("Audio file path not loaded.".to_string()))
         }
-            .inspect_err(|_e| {
-                self.realtime_running.store(false, Ordering::Release);
-            })?;
+        .inspect_err(|_e| {
+            self.realtime_running.store(false, Ordering::Release);
+        })?;
 
         // Send a progress job so the UI can be updated.
         let setup_progress = Progress::new_indeterminate("Setting up offline transcription.");

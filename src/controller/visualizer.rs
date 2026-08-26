@@ -1,5 +1,5 @@
 use crate::controller::{
-    AnalysisType, AtomicAnalysisType, RotationDirection, VisualizerPacket, NUM_VISUALIZER_BUCKETS,
+    AnalysisType, AtomicAnalysisType, NUM_VISUALIZER_BUCKETS, RotationDirection, VisualizerPacket,
 };
 use crate::utils::errors::RibbleError;
 use crossbeam::channel::Receiver;
@@ -8,8 +8,8 @@ use realfft::RealFftPlanner;
 use std::error::Error;
 use std::f32::consts::PI;
 use std::ops::Deref;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::thread::JoinHandle;
 
@@ -65,7 +65,6 @@ impl VisualizerEngineState {
         // Since it's pretty much impossible to get an overlapping window to fit exactly into
         // the target, add an extra frame + the diff (either + or -) to err on the side of caution.
         let abs_diff = (frame_size as i32 + diff) as usize;
-
 
         window.extend_from_within(window.len().saturating_sub(abs_diff).saturating_sub(1)..);
     }
@@ -194,8 +193,7 @@ impl VisualizerEngineState {
         // NOTE: it's very difficult to get the window mapping precise
         // This will be prone to off-by-one errors no matter what I do.
         debug_assert!(
-            amp_envelope.len() >=
-                NUM_VISUALIZER_BUCKETS,
+            amp_envelope.len() >= NUM_VISUALIZER_BUCKETS,
             "Failed to fit amplitude_envelope into buckets."
         );
 

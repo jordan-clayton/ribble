@@ -1,12 +1,12 @@
 use crate::controller::{
     Bus, ConsoleMessage, DownloadRequest, ModelFile, Progress, ProgressMessage, RibbleMessage,
-    WorkRequest, SMALL_UTILITY_QUEUE_SIZE,
+    SMALL_UTILITY_QUEUE_SIZE, WorkRequest,
 };
 use crate::utils::errors::RibbleError;
 use indexmap::IndexMap;
 use parking_lot::RwLock;
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{get_channel, Receiver, Sender};
+use ribble_whisper::utils::{Receiver, Sender, get_channel};
 use ribble_whisper::whisper::model::{ModelId, ModelLocation, ModelRetriever};
 use std::error::Error;
 use std::ffi::OsStr;
@@ -19,7 +19,7 @@ use twox_hash::XxHash3_64;
 
 use notify_debouncer_full::notify::{EventKind, RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{
-    new_debouncer, DebounceEventResult, DebouncedEvent, Debouncer, RecommendedCache,
+    DebounceEventResult, DebouncedEvent, Debouncer, RecommendedCache, new_debouncer,
 };
 
 const MODEL_ID_SEED: u64 = 0;
@@ -65,7 +65,7 @@ impl RibbleModelBankState {
                 model_map,
                 model_directory_watcher: watcher,
             }
-                .init()
+            .init()
         }
     }
 
@@ -179,9 +179,7 @@ impl RibbleModelBankState {
             .get(&model_id)
             .map(|model| match model {
                 #[cfg(any(debug_assertions, feature = "pack-in-models"))]
-                ModelFile::Packed(idx) => {
-                    ModelLocation::StaticBuffer(PACKED_MODELS[*idx])
-                }
+                ModelFile::Packed(idx) => ModelLocation::StaticBuffer(PACKED_MODELS[*idx]),
                 ModelFile::File(name) => {
                     ModelLocation::DynamicFilePath(self.model_directory().join(name.as_ref()))
                 }

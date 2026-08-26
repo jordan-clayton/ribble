@@ -1,17 +1,23 @@
-use crate::controller::ribble_controller::RibbleController;
 use crate::controller::CompletedRecordingJobs;
+use crate::controller::ribble_controller::RibbleController;
 use crate::ui::{GRID_ROW_SPACING_COEFF, MODAL_HEIGHT_PROPORTION, PANE_INNER_MARGIN};
 use egui::{Align, Frame, Grid, Id, Layout, Modal, ScrollArea, Sense, Ui, UiBuilder, Vec2};
 use std::sync::Arc;
 
-pub(in crate::ui) fn build_recording_modal<F>(ui: &mut Ui, modal_id_salt: &str, modal_grid_salt: &str, controller: &RibbleController,
-                                              recordings: &[(Arc<str>, CompletedRecordingJobs)], mut on_tap: F) -> egui::ModalResponse<()>
+pub(in crate::ui) fn build_recording_modal<F>(
+    ui: &mut Ui,
+    modal_id_salt: &str,
+    modal_grid_salt: &str,
+    controller: &RibbleController,
+    recordings: &[(Arc<str>, CompletedRecordingJobs)],
+    mut on_tap: F,
+) -> egui::ModalResponse<()>
 where
     F: FnMut(Arc<str>),
 {
     let modal_id = Id::new(modal_id_salt);
     Modal::new(modal_id).show(ui.ctx(), |ui| {
-        let height = ui.ctx().screen_rect().height() * MODAL_HEIGHT_PROPORTION;
+        let height = ui.ctx().content_rect().height() * MODAL_HEIGHT_PROPORTION;
         ui.set_max_height(height);
         Frame::default().inner_margin(PANE_INNER_MARGIN).show(ui, |ui| {
             ui.columns_const(|[col1, col2]| {

@@ -14,7 +14,7 @@ use crate::controller::ribble_controller::RibbleController;
 use crate::ui::panes::ribble_pane::{PaneView, RibblePane, RibblePaneId};
 use crate::utils::errors::RibbleError;
 use eframe::epaint::Hsva;
-use egui::{lerp, Painter, Rect, Stroke, StrokeKind, Style};
+use egui::{Painter, Rect, Stroke, StrokeKind, Style, lerp};
 use egui_tiles::{
     Behavior, Container, ResizeState, SimplificationOptions, Tile, TileId, Tiles, Tree, UiResponse,
 };
@@ -175,8 +175,9 @@ impl RibbleTree {
                         "The ribble tile should never be a container type."
                     );
                     // If there's a parent and the parent is a tab container, set it to be the active tab
-                    if let Some(parent_id) = self.tree.tiles.parent_of(*pane_id) && let Some(Tile::Container(Container::Tabs(container))) =
-                        self.tree.tiles.get_mut(parent_id)
+                    if let Some(parent_id) = self.tree.tiles.parent_of(*pane_id)
+                        && let Some(Tile::Container(Container::Tabs(container))) =
+                            self.tree.tiles.get_mut(parent_id)
                     {
                         container.set_active(*pane_id);
                     }
@@ -682,7 +683,9 @@ impl Behavior<RibblePane> for RibbleTreeBehavior {
         let mut color: Hsva = style.visuals.selection.stroke.color.into();
         color.s = lerp(color.s..=(color.s + 0.5).max(1.0), self.focus_time);
         color.v = lerp(color.v..=(color.v + 0.5).max(0.8), self.focus_time);
-        if let Some(focused_pane) = self.focus_non_tab_pane && focused_pane == tile_id {
+        if let Some(focused_pane) = self.focus_non_tab_pane
+            && focused_pane == tile_id
+        {
             painter.rect_stroke(
                 rect,
                 style.visuals.window_corner_radius,

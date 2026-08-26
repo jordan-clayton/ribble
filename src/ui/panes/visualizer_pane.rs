@@ -1,9 +1,9 @@
 use crate::controller::ribble_controller::RibbleController;
-use crate::controller::{AnalysisType, RotationDirection, NUM_VISUALIZER_BUCKETS};
-use crate::ui::panes::ribble_pane::RibblePaneId;
-use crate::ui::panes::PaneView;
-use crate::ui::widgets::soundbar::soundbar;
+use crate::controller::{AnalysisType, NUM_VISUALIZER_BUCKETS, RotationDirection};
 use crate::ui::PANE_INNER_MARGIN;
+use crate::ui::panes::PaneView;
+use crate::ui::panes::ribble_pane::RibblePaneId;
+use crate::ui::widgets::soundbar::soundbar;
 use crate::utils::preferences::RibbleAppTheme;
 use egui_colorgradient::ColorInterpolator;
 use std::fmt::Debug;

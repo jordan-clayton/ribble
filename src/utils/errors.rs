@@ -2,7 +2,6 @@ use ribble_whisper::utils::errors::RibbleWhisperError;
 use strum::{AsRefStr, Display, EnumDiscriminants, EnumIter, EnumString, IntoStaticStr};
 use thiserror::Error;
 
-
 // NOTE: THIS NEEDS TO BE TESTED, but it should be perfectly fine to just call .into() to convert
 // to a discriminant without consuming the error.
 #[derive(Debug, Error, EnumDiscriminants)]

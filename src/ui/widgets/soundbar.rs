@@ -3,7 +3,7 @@ use std::f32::consts::PI;
 use crate::controller::NUM_VISUALIZER_BUCKETS;
 use egui::emath::easing::{circular_in, circular_out, cubic_out, exponential_out};
 use egui::epaint::{Hsva, Rgba};
-use egui::{lerp, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2, Widget};
+use egui::{Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2, Widget, lerp};
 use egui_colorgradient::ColorInterpolator;
 
 const BAR_WIDTH_PERCENT: f32 = 0.1;
@@ -115,7 +115,7 @@ fn draw_soundbar(
                     }
                 });
             })
-                .response
+            .response
         });
     }
 
@@ -235,7 +235,7 @@ fn draw_soundbar_rect(
             let vert_pre_smooth = (lerp(circular_in(sculpt_t)..=quartic_in(sculpt_t), sculpt_t)
                 * DAMPING
                 + boost.powi(2))
-                .clamp(0.0, 1.0);
+            .clamp(0.0, 1.0);
 
             // NOTE: there are discontinuities that happen when p <= 0 and p >= 1.0 when composing
             // two easing functions at arbitrary p.

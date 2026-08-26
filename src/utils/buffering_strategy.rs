@@ -30,10 +30,10 @@ impl From<RealtimeBufferingStrategy> for RibbleBufferingStrategy {
     fn from(value: RealtimeBufferingStrategy) -> Self {
         match value {
             RealtimeBufferingStrategy::Buffered { buffer_ms }
-            if buffer_ms > CONTINUOUS_MS && buffer_ms < LONG_BUFFER_MS =>
-                {
-                    RibbleBufferingStrategy::ShortBuffered
-                }
+                if buffer_ms > CONTINUOUS_MS && buffer_ms < LONG_BUFFER_MS =>
+            {
+                RibbleBufferingStrategy::ShortBuffered
+            }
             RealtimeBufferingStrategy::Buffered { buffer_ms } if buffer_ms >= LONG_BUFFER_MS => {
                 RibbleBufferingStrategy::LongBuffered
             }

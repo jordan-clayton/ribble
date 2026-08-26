@@ -1,22 +1,22 @@
 #[cfg(debug_assertions)]
 use crate::controller::AtomicProgress;
 use crate::controller::{
-    AmortizedDownloadProgress, Bus, ConsoleMessage, DownloadRequest, FileDownload,
-    Progress, ProgressMessage, RibbleMessage, WorkRequest,
+    AmortizedDownloadProgress, Bus, ConsoleMessage, DownloadRequest, FileDownload, Progress,
+    ProgressMessage, RibbleMessage, WorkRequest,
 };
 
 use crate::utils::errors::RibbleError;
 use parking_lot::RwLock;
-use ribble_whisper::downloader::downloaders::sync_download_request;
 use ribble_whisper::downloader::SyncDownload;
+use ribble_whisper::downloader::downloaders::sync_download_request;
 use ribble_whisper::utils::callback::{RibbleAbortCallback, RibbleWhisperCallback};
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{get_channel, Receiver, Sender};
+use ribble_whisper::utils::{Receiver, Sender, get_channel};
 use slab::Slab;
 use std::error::Error;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 
 const FALLBACK_NAME: &str = "invalid_download";
@@ -51,7 +51,7 @@ impl DownloadEngineState {
             return Err(RibbleWhisperError::ParameterError(format!(
                 "File not found, likely invalid url.\nURL:{url}"
             ))
-                .into());
+            .into());
         }
 
         // If the content-length is missing, sync_downloader defaults to "1" as an "indeterminate"

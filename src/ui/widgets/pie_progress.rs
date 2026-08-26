@@ -56,7 +56,11 @@ fn draw_progress_pie(ui: &mut Ui, current: f32, total_size: f32) -> Response {
 
         // If the last vertex is the final vertex, omit the centre vertex to avoid
         // bugging out the SDF calculation.
-        let start_vertex = if last_vertex == vertices.len() - 1 { 1 } else { 0 };
+        let start_vertex = if last_vertex == vertices.len() - 1 {
+            1
+        } else {
+            0
+        };
 
         // ONLY paint if there are at least 3 vertices to form a triangle.
         // Since the winding order is known, there's no need to compare the distance between indices.
@@ -66,7 +70,6 @@ fn draw_progress_pie(ui: &mut Ui, current: f32, total_size: f32) -> Response {
                 .copied()
                 .map(|point| center + (inner_radius * Vec2::new(point.x, point.y)))
                 .collect();
-
 
             painter.add(PathShape::convex_polygon(
                 points,
