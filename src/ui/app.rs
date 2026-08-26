@@ -324,7 +324,7 @@ impl eframe::App for Ribble {
             ctx.request_repaint();
         }
     }
-    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::Panel::top("top_panel")
             .resizable(false)
             .min_size(0.0)

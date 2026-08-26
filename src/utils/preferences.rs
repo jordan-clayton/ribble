@@ -1,6 +1,11 @@
 use crate::controller::{DEFAULT_NUM_CONSOLE_MESSAGES, MIN_NUM_CONSOLE_MESSAGES};
 use egui::Visuals;
+// NOTE: this has yet to be updated to 0.36, and so its colors 
+// are going to conflict with the egui ones.
+// To avoid having to fork every egui-adjacent crate used to speed up UI stuff
+// This is just going to coerce the colours manually at the call sites.
 use egui_colorgradient::{ColorInterpolator, Gradient};
+use egui_colorgradient::{}
 use strum::{AsRefStr, Display, EnumIter, EnumString};
 
 #[derive(
@@ -99,6 +104,8 @@ impl RibbleAppTheme {
 
             let iter = color_stops.iter().enumerate().map(|(idx, &color)| {
                 let stop = idx as f32 / max_idx as f32;
+                // TODO: figure out a way to get a color conversion
+                // from Color32 (is just 4 8 bit numbers...)
                 (stop, color)
             });
 

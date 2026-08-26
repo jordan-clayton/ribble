@@ -4,6 +4,13 @@ use crate::controller::NUM_VISUALIZER_BUCKETS;
 use egui::emath::easing::{circular_in, circular_out, cubic_out, exponential_out};
 use egui::epaint::{Hsva, Rgba};
 use egui::{Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2, Widget, lerp};
+// NOTE: see crate::utils::preferences
+// This is going to conflict with the egui color structs because the crate hasn't been
+// updated for over a year (is on 0.32)
+// To avoid having to fork absolutely everything, the easiest thing is to just coerce the color
+// into the latest egui one.
+// ** This may actually have to change. I don't think I can screw enough with the type system
+//    to get that to work
 use egui_colorgradient::ColorInterpolator;
 
 const BAR_WIDTH_PERCENT: f32 = 0.1;
@@ -99,6 +106,14 @@ fn draw_soundbar(
                         let color = color_interpolator
                             .sample_at(gradient_interp)
                             .expect("The gradient should never be empty.");
+
+                        // Coerce it to egui's rgba.
+                        let color = Rgba::from_rgba_premultiplied(
+                            color[0],
+                            color[1],
+                            color[2],
+                            color[3]
+                        );
 
                         let height_t = interpolate_buckets(idx, num_bars, buckets);
                         col.horizontal_centered(|ui| {
