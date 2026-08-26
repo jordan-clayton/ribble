@@ -107,14 +107,6 @@ fn draw_soundbar(
                             .sample_at(gradient_interp)
                             .expect("The gradient should never be empty.");
 
-                        // Coerce it to egui's rgba.
-                        let color = Rgba::from_rgba_premultiplied(
-                            color[0],
-                            color[1],
-                            color[2],
-                            color[3]
-                        );
-
                         let height_t = interpolate_buckets(idx, num_bars, buckets);
                         col.horizontal_centered(|ui| {
                             draw_soundbar_rect(

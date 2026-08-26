@@ -5,7 +5,6 @@ use egui::Visuals;
 // To avoid having to fork every egui-adjacent crate used to speed up UI stuff
 // This is just going to coerce the colours manually at the call sites.
 use egui_colorgradient::{ColorInterpolator, Gradient};
-use egui_colorgradient::{}
 use strum::{AsRefStr, Display, EnumIter, EnumString};
 
 #[derive(

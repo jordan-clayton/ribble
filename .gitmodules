@@ -7,3 +7,6 @@
 [submodule "external/egui_notify"]
 	path = external/egui_notify
 	url = https://github.com/jordan-clayton/egui-notify.git
+[submodule "external/egui_colorgradient"]
+	path = external/egui_colorgradient
+	url = https://gitlab.com/jordan-clayton/egui-colorgradient.git

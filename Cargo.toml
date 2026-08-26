@@ -60,7 +60,7 @@ opener = { version = "0.8.2", features = ["reveal"] }
 egui-theme-lerp = "0.7.0"
 notify-debouncer-full = { version = "0.6.0", features = ["crossbeam-channel"] }
 unit-prefix = "0.5.1"
-egui-colorgradient = "0.2.3"
+egui-colorgradient = { path = "external/egui_colorgradient/egui-colorgradient" }
 egui-notify = { path = "external/egui_notify/" }
 flexi_logger = "0.31.2"
 image = "0.25.6"

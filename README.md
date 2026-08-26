@@ -262,25 +262,6 @@ layout becomes incoherent, but the issue is not expected to persist across sessi
 application to recover the last layout; it will fall back to defaults if it cannot be recovered.
 Otherwise, open the hamburger menu and select "Reset layout" to restore manually.
 
-### UI mouse events aren't registering/are inconsistent:
-Seems to be a Wayland + tiling/scrolling WM thing.
-See issues: [1](https://github.com/rust-windowing/winit/issues/862), [2](https://github.com/emilk/egui/issues/1469), [3](https://github.com/emilk/egui/issues/8134).
-
-As far as I can tell, egui (winit) is respecting floating hints, but it doesn't necessarily
-honor positioning hints; my hunch is that this is causing the problem:
-
-Since this application targets multiple operating systems, most of which use floating window management,
-this behaves fine when position/layout information is persisted. Disabling egui's memory persistence does not
-solve the problem and is unlikely to.
-
-When the application loads, it uses its persisted configurations and this seems to create some small amount of
-inconsistency between the geometry internal to the application window, and the geometry known by the window manager.
-The application does receive click events, but it does not force a repaint for some reason.
-
-As a workaround, I would try sending a resize event to the application from your window manager. I'm experiencing this
-issue currently with Niri and the issue disappears after a single column resize event.
-At this moment I don't have a better suggestion to follow.
-
 ### (Bad Magic) error:
 
 The model is not correct/malformed/corrupted/not up-to-date. If this happens why you try to use an embedded model,
